@@ -32,10 +32,7 @@ fn heading_level_accepts_only_html_compatible_levels() {
 
 #[test]
 fn custom_node_kind_requires_a_stable_non_empty_key() {
-    assert_eq!(
-        NodeKind::custom("   "),
-        Err(Error::InvalidCustomNodeKind)
-    );
+    assert_eq!(NodeKind::custom("   "), Err(Error::InvalidCustomNodeKind));
 
     let kind = NodeKind::custom("example.callout").unwrap();
     assert_eq!(kind, NodeKind::Custom("example.callout".to_owned()));
@@ -79,10 +76,7 @@ fn conflicting_marks_of_the_same_kind_are_rejected() {
     let first = Mark::Link(LinkMark::new("https://example.com/a", None));
     let second = Mark::Link(LinkMark::new("https://example.com/b", None));
 
-    assert_eq!(
-        MarkSet::new([first, second]),
-        Err(Error::InvalidMarkSet)
-    );
+    assert_eq!(MarkSet::new([first, second]), Err(Error::InvalidMarkSet));
 }
 
 #[test]
@@ -98,10 +92,7 @@ fn link_mark_preserves_href_and_optional_title() {
 
 #[test]
 fn text_run_rejects_empty_persistent_text() {
-    assert_eq!(
-        TextRun::new("", MarkSet::empty()),
-        Err(Error::EmptyTextRun)
-    );
+    assert_eq!(TextRun::new("", MarkSet::empty()), Err(Error::EmptyTextRun));
 }
 
 #[test]
@@ -112,7 +103,11 @@ fn text_run_keeps_text_and_normalized_marks_together() {
     assert_eq!(run.text().as_str(), "晓木🙂");
     assert_eq!(run.len_bytes(), "晓木🙂".len());
     assert_eq!(
-        run.marks().as_slice().iter().map(Mark::kind).collect::<Vec<_>>(),
+        run.marks()
+            .as_slice()
+            .iter()
+            .map(Mark::kind)
+            .collect::<Vec<_>>(),
         vec![MarkKind::Bold, MarkKind::Italic]
     );
 }
