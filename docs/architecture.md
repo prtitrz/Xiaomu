@@ -1,10 +1,10 @@
-# Xiaomu Architecture
+# 晓木 Xiaomu 架构
 
-This document records architecture that is currently true in the repository. Future intentions belong in `planning.md`; major design rationale belongs in `adr/`.
+本文档只记录仓库中**已经真实成立**的架构事实。未来规划放在 `planning.md`；重要且长期的设计理由放在 `adr/`。
 
-## Workspace boundary
+## Workspace 边界
 
-The workspace is split into five library crates and one example harness:
+当前 workspace 由五个 library crate 和一个 example harness 组成：
 
 ```text
 xiaomu-core
@@ -15,7 +15,7 @@ xiaomu-testkit
 examples/editor_harness
 ```
 
-The intended production dependency direction is already treated as a repository invariant:
+生产依赖方向已经作为仓库硬约束：
 
 ```text
 xiaomu-core
@@ -27,15 +27,15 @@ xiaomu-gpui
 host application
 ```
 
-`xiaomu-codec-markdown` depends only on the canonical Core model. `xiaomu-testkit` exists for test/support code and must not become a production dependency.
+`xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-`xiaomu-runtime`, `xiaomu-gpui`, the codec, testkit, and example harness are still bootstrap-level crates. `xiaomu-core` has entered P0 and exposes the intended module boundaries for document semantics, text, selection, transactions, mapping, history primitives, and commands. The text boundary and the first document value layer are implemented; node storage, full document snapshots, selections, transactions, mapping, and history remain incremental P0 work.
+当前 `xiaomu-runtime`、`xiaomu-gpui`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已进入 P0，Text Boundary 和 P0.2 Document Model 已实现；Position / Selection、Transaction、Mapping、Inverse / History 仍按 P0 后续切片推进。
 
-## Core boundary
+## Core 边界
 
-`xiaomu-core` is the home of document semantics and must not depend on a UI framework, host application, persistence layer, network layer, or codec.
+`xiaomu-core` 承载文档语义，不依赖 UI framework、宿主应用、持久化层、网络层或 codec。
 
-The current P0 module boundaries are:
+当前 P0 模块边界：
 
 ```text
 document
@@ -47,25 +47,25 @@ history
 commands
 ```
 
-Core also exposes shared semantic `Error` / `Result` types. Canonical concrete model and transaction types are being implemented incrementally according to `docs/phases/p0-core-contract/design.md`.
+Core 同时公开语义级 `Error` / `Result`。P0 的具体契约与完成标准以 `docs/phases/p0-core-contract/design.md` 为准。
 
-The Core contract being implemented from P0 includes:
+Core 从 P0 开始建立：
 
 ```text
 versioned document model
-text boundaries
-positions and selections
-typed transactions
+text boundary
+position / selection
+typed transaction
 position mapping
 history primitives
-commands and structural invariants
+commands / structural invariants
 ```
 
-Core forbids unsafe code.
+Core 保持 `#![forbid(unsafe_code)]`。
 
-### Text boundary
+### Text Boundary
 
-The implemented Core text boundary uses:
+已经实现：
 
 ```text
 TextBuffer
@@ -73,19 +73,21 @@ TextOffset
 TextRange
 ```
 
-`TextBuffer` is currently backed by `String`, but callers interact through its semantic API rather than the storage representation.
+`TextBuffer` 当前内部使用 `String`，调用方只通过语义 API 操作，不依赖底层 storage representation。
 
-`TextOffset` is an opaque UTF-8 byte coordinate. External callers cannot construct arbitrary raw offsets directly; offsets are obtained through `TextBuffer::offset_at`, which validates bounds and UTF-8 scalar boundaries. Existing offsets and ranges are revalidated when used with a buffer because edits can make previously valid coordinates stale.
+`TextOffset` 是 opaque UTF-8 byte coordinate。普通外部调用方不能从任意 raw integer 直接构造；通过 `TextBuffer::offset_at` 获取时会校验 bounds 和 UTF-8 character boundary。已有 offset / range 再次用于某个 buffer 时也会重新校验，因为文本修改后旧坐标可能已经 stale。
 
-`TextRange` is half-open `[start, end)`. Expected invalid offsets and ranges return typed Core errors instead of panicking.
+`TextRange` 使用半开区间 `[start, end)`。预期非法 offset / range 返回 typed Core error，不 panic。
 
-The Core text boundary guarantees Unicode scalar safety, not grapheme-cluster cursor semantics. Combining-mark and grapheme navigation remain higher-level editing concerns. UTF-16 conversion remains outside Core and will belong to platform adapters.
+Core Text Boundary 保证 Unicode scalar safety。Grapheme-cluster caret 行为属于更高编辑层；UTF-16 转换属于未来 platform adapter，不进入 Core coordinate contract。
 
-Text replacement currently returns a new `TextBuffer`, preserving the immutable-snapshot direction required by the document model.
+文本 replacement 返回新的 `TextBuffer`，保持 immutable snapshot 方向。
 
-### Document value layer
+长期坐标决策见 `docs/adr/0001-core-text-coordinate.md`。
 
-The first implemented document-value layer is split into focused modules under `document/` and currently provides:
+### Document Value Layer
+
+`document/` 已按职责拆分，并实现：
 
 ```text
 DocumentVersion
@@ -98,39 +100,91 @@ Mark
 LinkMark
 MarkSet
 TextRun
+AttrValue
+NodeAttrs
+InlineContent
+NodeContent
+Node
+NodeStore
+NodeStoreBuilder
+XiaomuDocument
 ```
 
-`DocumentVersion` identifies canonical schema versions. `DocumentRevision` is local snapshot metadata and is explicitly not a collaboration clock or distributed operation identity.
+`DocumentVersion` 表示 canonical schema version。`DocumentRevision` 是本地 snapshot metadata，不是 collaboration clock 或 distributed operation identity。
 
-`NodeId` is stable and opaque. Its storage representation is not part of the public contract, and normal external APIs do not construct arbitrary raw IDs. Allocation remains owned by the upcoming node/store layer.
+`NodeId` 稳定且 opaque。其内部 storage representation 不属于公开 contract，普通外部 API 不能从 raw integer 任意构造 NodeId。当前确定性 allocator 由 `NodeStoreBuilder` 持有，失败构建不会消耗 ID，因此测试和初始构建保持可预测。
 
-`HeadingLevel` validates the built-in heading range `1..=6`. `NodeKind` covers built-in structural semantics plus extension-defined custom keys without exposing node storage shape.
+`HeadingLevel` 校验 built-in heading 范围 `1..=6`。`NodeKind` 提供 built-in structural semantics，并支持 extension-defined custom key。
 
-`MarkSet` canonicalizes mark order, removes identical duplicates, and rejects conflicting marks of the same semantic kind. `TextRun` couples a non-empty `TextBuffer` with one normalized `MarkSet`. Run segmentation is not a document coordinate and may later be normalized without changing user-visible positions.
+`MarkSet` 使用确定性顺序，完全相同的重复 mark 自动规范化，同一 semantic kind 的冲突值被拒绝。`TextRun` 将非空 `TextBuffer` 与 normalized `MarkSet` 绑定。Run segmentation 不属于 document coordinate。
 
-`NodeAttrs`, `NodeContent`, canonical `Node`, `NodeStore`, tree validation, immutable `XiaomuDocument`, and structural sharing are intentionally deferred to the next P0.2 slice rather than being mixed into this value layer.
+`InlineContent` 在构造时规范化相邻且 `MarkSet` 相同的 `TextRun`，因此持久化状态不会保留无意义的 run 分段。
 
-## Runtime boundary
+`NodeAttrs` 使用确定性 key 顺序并 preservation-first 保存未知属性值，为未来 codec round-trip 和 extension 留出稳定边界。
 
-`xiaomu-runtime` coordinates editing sessions and command execution around Core types. It may depend on `xiaomu-core` but not on GPUI.
+### Canonical Node Tree 与 Snapshot
 
-Runtime is not an application shell. Persistence, file lifecycle, networking, product configuration, and window ownership remain host responsibilities.
+`Node` 字段私有，对外只提供只读 getter。节点类型与 `NodeContent` shape 在构造时校验。
 
-Runtime forbids unsafe code.
+`NodeStoreBuilder` 是当前公开的**初始文档构建入口**。它采用 bottom-up 构造：父节点引用的 child 必须已经存在，因此普通 safe construction 无法产生 dangling child reference。
 
-## GPUI boundary
+`NodeStore` 对外只读，当前内部以：
 
-`xiaomu-gpui` is the first native frontend implementation. GPUI-specific input, focus, layout, paint, hit testing, clipboard integration, and virtualization belong here.
+```text
+Arc<BTreeMap<NodeId, Arc<Node>>>
+```
 
-GPUI platform types must not leak into Core or Runtime public contracts.
+实现 P0 structural-sharing prototype。公开 API 不依赖这个具体 representation，未来可以由 benchmark 驱动替换为更适合的 persistent data structure。
 
-The GPUI dependency itself has not yet been introduced. When it is added, it will be pinned to an explicit revision as described in `planning.md`.
+`XiaomuDocument` 是 externally immutable canonical snapshot，包含：
 
-## Codec boundary
+```text
+DocumentVersion
+DocumentRevision
+root NodeId
+NodeStore
+```
 
-`xiaomu-codec-markdown` is an import/export boundary. Markdown is not the canonical editing state and Markdown source offsets are not document positions.
+当前公开 API 只允许查询和重新校验，不提供直接 canonical mutation 入口。P0.4 会在 Transaction contract 确定后正式建立唯一公开 mutation path。
 
-Future codecs should follow the same direction:
+完整 snapshot validation 已覆盖：
+
+```text
+root 必须存在且为 Document
+child NodeId 必须存在
+同一 parent 不允许重复 child reference
+parent / child kind 必须兼容
+node kind / content shape 必须兼容
+一个 reachable node 不允许多个 parent
+node graph 不允许 cycle
+store 不允许存在 root 不可达节点
+```
+
+Cycle 会明确返回 `CyclicDocument`，不会被次级的 multiple-parent 错误遮蔽。
+
+P0.2 的 revision regression test 已证明：修改一个节点生成新 snapshot 时，未变化节点的 `Arc<Node>` payload 可以被复用。P0.2 只保留测试级 replacement helper 来证明 structural sharing；production mutation helper 不提前为 P0.4 预埋 dead code。
+
+## Runtime 边界
+
+`xiaomu-runtime` 负责围绕 Core 类型协调 editing session 和 command execution。它可以依赖 `xiaomu-core`，不能依赖 GPUI 之外的上层宿主语义。
+
+Runtime 不拥有 App Shell。Persistence、file lifecycle、networking、product configuration 和 window ownership 都属于 host responsibility。
+
+Runtime 保持 `#![forbid(unsafe_code)]`。
+
+## GPUI 边界
+
+`xiaomu-gpui` 是第一个 Native Frontend 实现。GPUI-specific input、focus、layout、paint、hit testing、clipboard integration 和 virtualization 都属于这一层。
+
+GPUI platform type 不能泄漏到 Core 或 Runtime public contract。
+
+GPUI dependency 当前尚未正式引入。进入 P1 时按 `planning.md` 固定 explicit revision。
+
+## Codec 边界
+
+`xiaomu-codec-markdown` 是 import / export boundary。Markdown 不属于 canonical editing state，Markdown source offset 也不是 document position。
+
+未来 codec 统一遵守：
 
 ```text
 external format
@@ -140,22 +194,24 @@ codec crate
 xiaomu-core document model
 ```
 
-Core never depends on a codec.
+Core 永远不反向依赖 codec。
 
-## Host boundary
+## Host 边界
 
-Hosts integrate through public APIs, adapters, capability services, and extension seams. Host-specific business models must remain outside Xiaomu's canonical document semantics unless a concept proves generally useful to editor users.
+宿主通过 public API、adapter、capability service 和 extension seam 集成晓木。
 
-When host convenience conflicts with the long-term correctness or extensibility of Xiaomu, the host adapts at its boundary.
+宿主专用 business model 不进入晓木 canonical document semantics，除非某个概念已经证明对通用编辑器用户具有普遍价值。
 
-## Repository enforcement
+当宿主便利性与晓木长期 correctness / extensibility 冲突时，由宿主在 adapter boundary 完成适配。
 
-Architecture is reinforced by:
+## 仓库级约束
 
-- `tools/check_dependency_boundaries.py` for crate-level dependency direction;
-- `tools/check_source_size.py` for source-file growth guardrails;
-- Rust formatting, Clippy, and tests in CI;
-- `cargo-deny` for dependency source and license policy;
-- documentation synchronization rules in `engineering-rules.md`.
+架构通过以下机制持续执行：
 
-This document must be updated in the same pull request whenever implementation makes any statement above inaccurate.
+- `tools/check_dependency_boundaries.py` 检查 crate dependency direction；
+- `tools/check_source_size.py` 执行 source-file size guardrail；
+- CI 执行 Rust formatting、Clippy 和 tests；
+- `cargo-deny` 检查 dependency source / license policy；
+- `engineering-rules.md` 约束实现与文档同步。
+
+只要实现让本文档中的任何描述失真，就必须在同一 PR 中同步更新本文档。
