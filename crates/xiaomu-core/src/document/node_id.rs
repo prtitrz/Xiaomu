@@ -11,7 +11,8 @@ use core::fmt;
 pub struct NodeId(u64);
 
 impl NodeId {
-    pub(crate) const fn from_allocated(raw: u64) -> Self {
+    #[cfg(test)]
+    const fn from_allocated(raw: u64) -> Self {
         Self(raw)
     }
 }
