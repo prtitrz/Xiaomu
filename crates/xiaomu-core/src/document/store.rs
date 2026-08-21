@@ -68,7 +68,7 @@ impl NodeStore {
     }
 
     #[cfg(test)]
-    fn shares_node_payload(&self, other: &Self, id: NodeId) -> bool {
+    pub(crate) fn shares_node_payload(&self, other: &Self, id: NodeId) -> bool {
         match (self.nodes.get(&id), other.nodes.get(&id)) {
             (Some(left), Some(right)) => Arc::ptr_eq(left, right),
             _ => false,
@@ -107,13 +107,14 @@ impl NodeStoreBuilder {
         self.validate_child_references(&kind, &content)?;
 
         let id = NodeId::from_allocated(self.next_id);
-        self.next_id = self
+        let next_id = self
             .next_id
             .checked_add(1)
             .ok_or(Error::NodeIdExhausted)?;
-
         let node = Node::new(id, kind, attrs, content)?;
+
         self.nodes.insert(id, Arc::new(node));
+        self.next_id = next_id;
         Ok(id)
     }
 
@@ -181,6 +182,30 @@ pub(crate) fn allows_child(parent: &NodeKind, child: &NodeKind) -> bool {
 mod tests {
     use super::*;
     use crate::document::{InlineContent, MarkSet, TextRun};
+
+    #[test]
+    fn failed_insert_does_not_consume_a_node_id() {
+        let mut builder = NodeStoreBuilder::new();
+
+        assert_eq!(
+            builder.insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::children([]),
+            ),
+            Err(Error::InvalidNodeContent)
+        );
+
+        let first_valid = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::empty_inline(),
+            )
+            .unwrap();
+
+        assert_eq!(first_valid, NodeId::from_allocated(1));
+    }
 
     #[test]
     fn replacement_reuses_unchanged_node_payloads() {
