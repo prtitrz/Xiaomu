@@ -57,12 +57,9 @@ impl Node {
         &self.content
     }
 
+    #[cfg(test)]
     pub(crate) fn with_content(&self, content: NodeContent) -> Result<Self> {
         Self::new(self.id, self.kind.clone(), self.attrs.clone(), content)
-    }
-
-    pub(crate) fn with_attrs(&self, attrs: NodeAttrs) -> Result<Self> {
-        Self::new(self.id, self.kind.clone(), attrs, self.content.clone())
     }
 }
 
