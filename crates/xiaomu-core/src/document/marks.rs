@@ -102,13 +102,13 @@ impl MarkSet {
 
         let mut normalized: Vec<Mark> = Vec::with_capacity(marks.len());
         for mark in marks {
-            if let Some(previous) = normalized.last() {
-                if previous.kind() == mark.kind() {
-                    if previous == &mark {
-                        continue;
-                    }
-                    return Err(Error::InvalidMarkSet);
+            if let Some(previous) = normalized.last()
+                && previous.kind() == mark.kind()
+            {
+                if previous == &mark {
+                    continue;
                 }
+                return Err(Error::InvalidMarkSet);
             }
             normalized.push(mark);
         }
