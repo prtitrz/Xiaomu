@@ -71,6 +71,8 @@ examples/
   editor_harness/         standalone integration harness
 docs/
   planning.md             top-level architecture and roadmap
+  architecture.md         architecture that is currently true
+  engineering-rules.md    repository engineering constraints
 ```
 
 ## Roadmap
@@ -78,6 +80,20 @@ docs/
 The first hard gates are Unicode/IME correctness, transaction semantics, position mapping, multi-block editing and history. Tables, richer extensions and performance work follow only after those foundations are stable.
 
 See [docs/planning.md](docs/planning.md).
+
+## Development
+
+Engineering rules live in [docs/engineering-rules.md](docs/engineering-rules.md). Current architecture facts live in [docs/architecture.md](docs/architecture.md). Contribution workflow is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+The main local gates are:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets
+python tools/check_source_size.py
+python tools/check_dependency_boundaries.py
+```
 
 ## License
 

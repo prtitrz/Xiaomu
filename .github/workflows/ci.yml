@@ -2,9 +2,32 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python tools/check_source_size.py
+      - run: python tools/check_dependency_boundaries.py
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check bans licenses sources
+      - name: Check dependency advisories
+        continue-on-error: true
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories
+
   check:
     strategy:
       matrix:
@@ -16,6 +39,24 @@ jobs:
         with:
           toolchain: 1.97.1
           components: rustfmt, clippy
-      - run: cargo fmt --all -- --check
+      - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --all-targets
+
+  ci-success:
+    name: CI Success
+    needs:
+      - policy
+      - check
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify CI results
+        run: |
+          if [ "${{ needs.policy.result }}" != "success" ] || [ "${{ needs.check.result }}" != "success" ]; then
+            echo "CI failed"
+            exit 1
+          fi
+          echo "All CI checks passed"
