@@ -1,246 +1,272 @@
-# P0 Core Contract Progress
+# P0 Core Contract 进度
 
-Status: Active
+状态：进行中
 
-This file tracks execution evidence for P0. It is intentionally operational. Long-term architecture belongs in `docs/architecture.md`; phase design belongs in `design.md`; top-level direction belongs in `docs/planning.md`.
+本文档只记录 P0 的执行状态和验证证据。长期架构事实放在 `docs/architecture.md`，P0 设计放在 `design.md`，顶层路线以 `docs/planning.md` 为准。
 
-## Status legend
-
-```text
-[ ] not started
-[~] in progress
-[x] complete
-[!] blocked / needs decision
-```
-
-## Current state
-
-Current slice: **P0.2A Document value layer**
-
-Branch: `feat/p0-document-values`
-
-P0.0 and P0.1 are merged. P0.2 is intentionally split into a value-model slice followed by a storage/snapshot slice so canonical semantics can stabilize before tree mutation and structural sharing are introduced.
-
-## P0.0 Phase contract and module skeleton
-
-- [x] Create `docs/phases/p0-core-contract/design.md`
-- [x] Create `docs/phases/p0-core-contract/progress.md`
-- [x] Add/confirm `xiaomu-core` module skeleton for `document`, `text`, `selection`, `transaction`, `mapping`, `history`, and `commands`
-- [x] Add initial Core error/result types
-- [x] Confirm `#![forbid(unsafe_code)]` remains active in Core
-- [x] Review public/private visibility of bootstrap APIs
-- [x] Synchronize `docs/architecture.md` with the new Core module boundary
-- [x] Run repository source-size and dependency-boundary guards
-- [x] Run `cargo fmt --all -- --check`
-- [x] Run `cargo clippy --workspace --all-targets -- -D warnings`
-- [x] Run `cargo test --workspace --all-targets`
-
-Exit evidence:
+## 状态说明
 
 ```text
-PR #2 merged after CI Success. P0 Core module skeleton and phase contract established.
+[ ] 未开始
+[~] 进行中
+[x] 已完成
+[!] 阻塞 / 需要决策
 ```
 
-## P0.1 Text boundary
+## 当前状态
 
-- [x] Implement `TextBuffer`
-- [x] Implement `TextOffset`
-- [x] Implement `TextRange`
-- [x] Validate UTF-8 char boundaries on construction/use
-- [x] Revalidate stale offsets/ranges when used with a target buffer
-- [x] Add safe slicing APIs
-- [x] Add immutable replacement API
-- [x] Add ASCII fixture
-- [x] Add Chinese fixture
-- [x] Add mixed Chinese/Latin fixture
-- [x] Add emoji fixture
-- [x] Add combining-mark fixture
-- [x] Add BiDi fixture
-- [x] Test invalid boundary errors
-- [x] Test out-of-bounds errors
-- [x] Test stale-coordinate errors
-- [x] Confirm expected invalid input paths return typed errors
-- [x] Record the canonical text-coordinate decision in ADR 0001
-- [x] Run full `CI Success`
+当前切片：**P0.2B Node Storage 与 Immutable Snapshot**
 
-Exit evidence:
+当前分支：`feat/p0-document-snapshot`
+
+P0.0、P0.1、P0.2A 已合并。P0.2B 正在完成 canonical node tree、不可变 snapshot、full-tree validation 和 structural sharing 验证。
+
+## P0.0 Phase Contract 与模块骨架
+
+- [x] 创建 `docs/phases/p0-core-contract/design.md`
+- [x] 创建 `docs/phases/p0-core-contract/progress.md`
+- [x] 建立 `document`、`text`、`selection`、`transaction`、`mapping`、`history`、`commands` Core 模块边界
+- [x] 增加初始 Core `Error` / `Result`
+- [x] 保持 `#![forbid(unsafe_code)]`
+- [x] 审查 bootstrap API 的 public/private 可见性
+- [x] 同步 `docs/architecture.md`
+- [x] 运行 source-size 与 dependency-boundary guard
+- [x] 运行 `cargo fmt --all -- --check`
+- [x] 运行 `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] 运行 `cargo test --workspace --all-targets`
+
+完成证据：
 
 ```text
-PR #3 merged after current-head CI Success across Ubuntu, Windows, macOS, policy, and the summary gate.
+PR #2 在 CI Success 全绿后合并。
+P0 Core 模块骨架与阶段契约建立完成。
 ```
 
-## P0.2 Document model
+## P0.1 Text Boundary
 
-### P0.2A Document value layer
+- [x] 实现 `TextBuffer`
+- [x] 实现 `TextOffset`
+- [x] 实现 `TextRange`
+- [x] 构造 / 使用时验证 UTF-8 char boundary
+- [x] stale offset/range 使用时针对目标 buffer 重新校验
+- [x] safe slicing API
+- [x] immutable replacement API
+- [x] ASCII fixture
+- [x] 中文 fixture
+- [x] 中英混排 fixture
+- [x] emoji fixture
+- [x] combining-mark fixture
+- [x] BiDi fixture
+- [x] invalid boundary typed error
+- [x] out-of-bounds typed error
+- [x] stale-coordinate typed error
+- [x] 预期非法输入路径不 panic
+- [x] 用 ADR 0001 固化 Core text coordinate 决策
+- [x] 完整 `CI Success`
 
-- [x] Implement `DocumentVersion`
-- [x] Implement `DocumentRevision`
-- [x] Implement opaque `NodeId` value type
-- [x] Implement validated `HeadingLevel`
-- [x] Implement built-in/custom `NodeKind`
-- [x] Implement `MarkKind` / `Mark`
-- [x] Implement `LinkMark`
-- [x] Implement canonical `MarkSet` ordering
-- [x] Normalize identical duplicate marks
-- [x] Reject conflicting duplicate mark kinds
-- [x] Implement `TextRun`
-- [x] Reject persistent empty runs
-- [x] Split the document module into focused source files
-- [~] Run full `CI Success`
-
-### P0.2B Node storage and immutable snapshot
-
-- [ ] Provide deterministic NodeId allocation for tests
-- [ ] Implement `NodeAttrs`
-- [ ] Implement `NodeContent`
-- [ ] Implement `Node`
-- [ ] Implement `NodeStore`
-- [ ] Implement externally immutable `XiaomuDocument`
-- [ ] Implement root/tree validation
-- [ ] Reject unknown child IDs
-- [ ] Reject invalid parent/child shapes
-- [ ] Reject root removal/invalid root states
-- [ ] Normalize adjacent equal-mark text runs in inline content
-- [ ] Demonstrate node-level structural sharing across a revision
-
-Exit evidence:
+完成证据：
 
 ```text
-P0.2A implementation complete; PR CI pending. P0.2B begins only after this value-layer slice is merged.
+PR #3 已合并。
+Ubuntu / Windows / macOS / policy / CI Success 全绿。
 ```
 
-## P0.3 Position and selection
+## P0.2 Document Model
 
-- [ ] Implement `CursorAffinity`
-- [ ] Implement `TextPoint`
-- [ ] Implement `TextSelection`
-- [ ] Implement `NodeSelection`
-- [ ] Implement structural boundary position (`NodeGap` or final equivalent)
-- [ ] Validate selections against document snapshot
-- [ ] Test invalid/deleted node positions
-- [ ] Test Chinese/emoji text positions
+### P0.2A Document Value Layer
 
-Exit evidence:
+- [x] 实现 `DocumentVersion`
+- [x] 实现 `DocumentRevision`
+- [x] 实现 opaque `NodeId`
+- [x] 实现受校验的 `HeadingLevel`
+- [x] 实现 built-in/custom `NodeKind`
+- [x] 实现 `MarkKind` / `Mark`
+- [x] 实现 `LinkMark`
+- [x] 实现 `MarkSet` canonical ordering
+- [x] 相同重复 mark 自动规范化
+- [x] 同 kind 冲突 mark 被拒绝
+- [x] 实现 `TextRun`
+- [x] 禁止持久化空 `TextRun`
+- [x] 将 document model 按职责拆分到独立源码文件
+- [x] 完整 `CI Success`
+
+完成证据：
 
 ```text
-pending
+PR #4 已合并。
+Ubuntu / Windows / macOS / policy / CI Success 全绿。
 ```
 
-## P0.4 Transaction application
+### P0.2B Node Storage 与 Immutable Snapshot
 
-- [ ] Implement typed `Transaction`
-- [ ] Implement transaction origin
-- [ ] Add metadata seam without host-specific types
-- [ ] Implement `ReplaceText`
-- [ ] Implement `InsertNode`
-- [ ] Implement `RemoveNode`
-- [ ] Implement `SetNodeAttrs`
-- [ ] Implement `AddMark`
-- [ ] Implement `RemoveMark`
-- [ ] Ensure apply returns a new snapshot
-- [ ] Ensure apply validates resulting document
-- [ ] Confirm no public direct canonical mutation escape hatch
+- [x] 实现确定性 NodeId allocator
+- [x] 保证失败构建不消耗 NodeId
+- [x] 实现 `AttrValue` / `NodeAttrs`
+- [x] 未知 attrs preservation-first 保存，key 顺序确定
+- [x] 实现 `InlineContent`
+- [x] 实现 `NodeContent`
+- [x] 实现 immutable `Node`
+- [x] 实现 `NodeStore`
+- [x] `NodeStore` 使用 `Arc<Node>` 做 node-level structural sharing 原型
+- [x] 实现 safe bottom-up `NodeStoreBuilder`
+- [x] 实现 externally immutable `XiaomuDocument`
+- [x] 实现 full-tree validation
+- [x] 拒绝 unknown child ID
+- [x] 拒绝重复 child reference
+- [x] 拒绝非法 parent/child kind 关系
+- [x] 拒绝非法 node/content shape
+- [x] 拒绝非 Document root
+- [x] 拒绝 multiple parents
+- [x] 拒绝 cycle，并优先返回 `CyclicDocument`
+- [x] 拒绝 unreachable node
+- [x] 相邻且 `MarkSet` 相同的 `TextRun` 自动合并
+- [x] 用 revision 测试证明未变化 node payload 可共享
+- [x] 保持 `XiaomuDocument` 无公开 mutation escape hatch
+- [~] 运行完整 `CI Success`
 
-Exit evidence:
+当前验证重点：
 
 ```text
-pending
+1. cargo fmt / clippy / test 是否全部通过
+2. 三平台行为是否一致
+3. source-size / dependency-boundary / cargo-deny 是否保持全绿
+4. CI 通过后再同步 architecture.md 的最终实现事实
 ```
 
-## P0.5 Position mapping
+## P0.3 Position 与 Selection
 
-- [ ] Define P0 mapping result semantics
-- [ ] Implement text replacement mapping
-- [ ] Implement insertion mapping
-- [ ] Implement deletion mapping
-- [ ] Implement removed-node result
-- [ ] Compose mappings across a transaction
-- [ ] Add mapping tables for insertion/replacement/deletion
-- [ ] Add Chinese/emoji mapping fixtures
-- [ ] Add removed-node mapping fixtures
+- [ ] 实现 `CursorAffinity`
+- [ ] 实现 `TextPoint`
+- [ ] 实现 `TextSelection`
+- [ ] 实现 `NodeSelection`
+- [ ] 实现 structural boundary position（`NodeGap` 或最终等价类型）
+- [ ] selection 针对 document snapshot 校验
+- [ ] invalid / deleted node position 测试
+- [ ] 中文 / emoji text position 测试
 
-Exit evidence:
+完成证据：
 
 ```text
-pending
+待开始
 ```
 
-## P0.6 Inverse and randomized invariants
+## P0.4 Transaction Application
 
-- [ ] Define inverse/change-set prototype boundary
-- [ ] Invert text replacement
-- [ ] Invert node insertion/removal
-- [ ] Invert attrs changes
-- [ ] Invert mark changes
-- [ ] Add semantic round-trip helper
-- [ ] Add deterministic multi-step inverse tests
-- [ ] Add randomized valid transaction sequence tests where practical
-- [ ] Confirm random sequences preserve document validity
-- [ ] Confirm random sequences do not panic
+- [ ] 实现 typed `Transaction`
+- [ ] 实现 transaction origin
+- [ ] 增加不携带宿主专用类型的 metadata seam
+- [ ] 实现 `ReplaceText`
+- [ ] 实现 `InsertNode`
+- [ ] 实现 `RemoveNode`
+- [ ] 实现 `SetNodeAttrs`
+- [ ] 实现 `AddMark`
+- [ ] 实现 `RemoveMark`
+- [ ] apply 返回新 snapshot
+- [ ] apply 后重新验证 resulting document
+- [ ] 确认没有公开 direct canonical mutation escape hatch
 
-Exit evidence:
+完成证据：
 
 ```text
-pending
+待开始
 ```
 
-## P0.7 Contract stabilization
+## P0.5 Position Mapping
 
-- [ ] Review public rustdoc for semantic contracts
-- [ ] Document offset units explicitly
-- [ ] Document mapping deletion behavior explicitly
-- [ ] Update `docs/architecture.md` to implemented truth
-- [ ] Record any accepted long-lived ADRs
-- [ ] Review `docs/planning.md` for P0/P1 consistency
-- [ ] Record unresolved P1 dependencies
-- [ ] Run full `CI Success`
-- [ ] Mark P0 complete
+- [ ] 定义 P0 mapping result 语义
+- [ ] text replacement mapping
+- [ ] insertion mapping
+- [ ] deletion mapping
+- [ ] removed-node result
+- [ ] transaction 内 mapping composition
+- [ ] insertion / replacement / deletion mapping table
+- [ ] 中文 / emoji mapping fixture
+- [ ] removed-node mapping fixture
 
-Exit evidence:
+完成证据：
 
 ```text
-pending
+待开始
 ```
 
-## Phase Gate
+## P0.6 Inverse 与随机不变量
 
-P0 completes only when:
+- [ ] 定义 inverse / change-set prototype 边界
+- [ ] invert text replacement
+- [ ] invert node insertion / removal
+- [ ] invert attrs changes
+- [ ] invert mark changes
+- [ ] semantic round-trip helper
+- [ ] deterministic multi-step inverse tests
+- [ ] 可行范围内增加 randomized valid transaction sequence tests
+- [ ] 随机 sequence 保持 document validity
+- [ ] 随机 sequence 不 panic
 
-- [ ] versioned structured document model is implemented
-- [ ] snapshots are externally immutable
-- [ ] NodeId/NodeStore structural-sharing prototype works
-- [ ] TextRun-local marks normalize deterministically across inline content
-- [x] TextOffset/text boundary tests are green
-- [ ] position/selection model validates correctly
-- [ ] basic typed transactions preserve invariants
-- [ ] StepMap/ChangeMap prototype maps old positions explicitly
-- [ ] inverse prototype restores semantic original state
-- [x] Unicode/CJK/emoji text-boundary tests are green
-- [ ] property/randomized invariant tests are green
-- [ ] full P0 `CI Success` is green
+完成证据：
 
-## Decisions / questions log
+```text
+待开始
+```
 
-Record only decisions that affect P0 execution here. Durable architectural rationale should move to an ADR.
+## P0.7 Contract Stabilization
+
+- [ ] 审查 public rustdoc 的语义契约
+- [ ] 明确记录 offset unit
+- [ ] 明确记录 mapping deletion behavior
+- [ ] 更新 `docs/architecture.md` 与最终实现一致
+- [ ] 固化需要长期保留的 ADR
+- [ ] 复核 `docs/planning.md` 的 P0/P1 一致性
+- [ ] 记录 P1 尚未解决的依赖
+- [ ] 完整 `CI Success`
+- [ ] 标记 P0 完成
+
+完成证据：
+
+```text
+待开始
+```
+
+## P0 Phase Gate
+
+P0 只有在以下条件全部满足后才能完成：
+
+- [~] 版本化 structured document model 可用
+- [x] snapshot 对外不可变
+- [x] NodeId / NodeStore structural-sharing prototype 可工作
+- [x] TextRun-local marks 在 inline content 内确定性规范化
+- [x] TextOffset / text boundary 测试全绿
+- [ ] position / selection model 校验正确
+- [ ] typed transaction 保持 document invariant
+- [ ] StepMap / ChangeMap 可显式映射旧 position
+- [ ] inverse prototype 可恢复语义原状态
+- [x] Unicode / CJK / emoji text-boundary 测试全绿
+- [ ] property / randomized invariant tests 全绿
+- [ ] P0 最终 `CI Success` 全绿
+
+## 决策记录
+
+这里只记录影响 P0 执行的决定。长期且难逆转的架构理由应进入 ADR。
 
 ### 2026-08-22
 
-- P0 uses dedicated `design.md` and `progress.md` under `docs/phases/p0-core-contract/`.
-- Phase documents refine the top-level plan but do not duplicate it.
-- Core text offsets start as validated UTF-8 byte offsets behind an opaque newtype; UTF-16 remains a frontend/platform concern. Durable rationale is recorded in `docs/adr/0001-core-text-coordinate.md`.
-- P0 starts with `String` behind `TextBuffer`; rope selection remains benchmark-driven.
-- Node storage starts with standard-library ownership/structural-sharing primitives rather than binding the public contract to a persistent-collection crate.
-- The bootstrap `CRATE_NAME` constant was removed instead of carrying an accidental public API into P0.
-- Core semantic modules are public boundaries; the error implementation module remains private and re-exports only `Error` / `Result`.
-- `TextOffset` has no public raw integer constructor. Normal callers obtain coordinates through `TextBuffer::offset_at`.
-- An offset is not permanently valid merely because it was once validated. Buffer operations revalidate offsets/ranges so stale coordinates fail with typed errors after text changes.
-- P0 text safety is defined at UTF-8 Unicode-scalar boundaries. Grapheme-cluster cursor behavior remains a higher-level editing concern.
-- Text replacement returns a new `TextBuffer`, preserving the immutable-snapshot direction before `XiaomuDocument` exists.
-- P0.2 is split into value semantics and storage/snapshot mechanics so node storage does not prematurely freeze unresolved value contracts.
-- `NodeId` is public and comparable/hashable but has no normal external raw constructor; allocation remains a document/store responsibility.
-- `DocumentRevision` is explicitly local snapshot metadata, not a collaboration clock.
-- `MarkSet` uses deterministic semantic ordering, normalizes identical duplicates, and rejects conflicting values for one mark kind.
+- P0 使用 `docs/phases/p0-core-contract/design.md` 与 `progress.md` 作为专门阶段文档。
+- 面向项目维护和决策的阶段文档统一使用中文；代码标识、API 名称和公开 Rust rustdoc 可以继续使用英文。
+- Core text offset 采用 opaque `TextOffset` 包装的 validated UTF-8 byte offset；UTF-16 属于 frontend/platform adapter。长期理由见 `docs/adr/0001-core-text-coordinate.md`。
+- `TextBuffer` P0 先使用 `String`；是否切 rope 由 benchmark 决定。
+- Node storage 先使用标准库 ownership / `Arc` 做 structural sharing，不提前把公开契约绑定到 persistent collection crate。
+- Core semantic module 是公开边界，error 实现模块保持私有，只 re-export `Error` / `Result`。
+- `TextOffset` 没有 public raw integer constructor；普通调用者通过 `TextBuffer::offset_at` 获取坐标。
+- offset 即使曾经合法，也不能永久视为合法；每次针对目标 buffer 使用时重新校验。
+- P0 text safety 保证到 UTF-8 Unicode-scalar boundary；grapheme cursor 行为留给更高编辑层。
+- Text replacement 返回新 `TextBuffer`，保持 immutable snapshot 方向。
+- P0.2 拆成 value semantics（P0.2A）与 storage/snapshot（P0.2B），避免在值语义未稳定前冻结 storage contract。
+- `NodeId` 可比较、hash，但普通外部调用方不能从 raw integer 构造；分配由 document/store 负责。
+- `DocumentRevision` 是本地 snapshot metadata，不是 collaboration clock。
+- `MarkSet` 使用确定性语义顺序；完全相同的重复项规范化，同 kind 冲突值拒绝。
+- `XiaomuDocument` 的公开 API 只允许查询；P0.4 的 `Transaction::apply` 才会成为 canonical mutation 公开入口。
+- `NodeStoreBuilder` 使用确定性 allocator，并保证失败 insert 不推进 allocator，避免测试和后续 transaction fixture 出现无意义 ID 漂移。
+- Full-tree validator 对 cycle 给出明确 `CyclicDocument`，不让 cycle 被较次级的 multiple-parent 错误遮蔽。
 
-## Regression log
+## Regression Log
 
-No regressions recorded yet.
+当前没有已知 regression。
