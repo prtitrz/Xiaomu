@@ -1,0 +1,11 @@
+[package]
+name = "xiaomu-gpui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+xiaomu-core.workspace = true
+xiaomu-runtime.workspace = true
