@@ -187,7 +187,10 @@ fn every_invalid_byte_boundary_is_a_controlled_error() {
             if fixture.is_char_boundary(byte_index) {
                 assert!(result.is_ok());
             } else {
-                assert_eq!(result, Err(Error::InvalidTextBoundary { offset: byte_index }));
+                assert_eq!(
+                    result,
+                    Err(Error::InvalidTextBoundary { offset: byte_index })
+                );
             }
         }
     }
