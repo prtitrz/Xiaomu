@@ -1,7 +1,14 @@
-//! 文档选择模型。
+//! Document positions and selection semantics.
 //!
-//! P0.3 只定义核心语义，不负责 UI 光标渲染。
+//! This module owns typed text/structural positions and validation against a
+//! document snapshot. Visual caret projection remains a frontend concern.
 
-mod range;
+mod affinity;
+mod gap;
+mod model;
+mod point;
 
-pub use range::{Cursor, SelectionRange};
+pub use affinity::CursorAffinity;
+pub use gap::NodeGap;
+pub use model::{NodeSelection, TextSelection};
+pub use point::TextPoint;

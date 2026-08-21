@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前 `xiaomu-runtime`、`xiaomu-gpui`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已进入 P0，Text Boundary 和 P0.2 Document Model 已实现；Position / Selection、Transaction、Mapping、Inverse / History 仍按 P0 后续切片推进。
+当前 `xiaomu-runtime`、`xiaomu-gpui`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已进入 P0，Text Boundary、P0.2 Document Model 和 P0.3 Position / Selection 已实现；Transaction、Mapping、Inverse / History 仍按 P0 后续切片推进。
 
 ## Core 边界
 
@@ -163,6 +163,28 @@ store 不允许存在 root 不可达节点
 Cycle 会明确返回 `CyclicDocument`，不会被次级的 multiple-parent 错误遮蔽。
 
 P0.2 的 revision regression test 已证明：修改一个节点生成新 snapshot 时，未变化节点的 `Arc<Node>` payload 可以被复用。P0.2 只保留测试级 replacement helper 来证明 structural sharing；production mutation helper 不提前为 P0.4 预埋 dead code。
+
+### Position 与 Selection
+
+`selection/` 模块实现 typed position 与 selection，并对 `XiaomuDocument` snapshot 校验：
+
+```text
+CursorAffinity
+TextPoint
+NodeGap
+TextSelection
+NodeSelection
+```
+
+`TextPoint` 由 stable `NodeId`、`TextOffset` 和 `CursorAffinity` 组成。构造不触碰文档；使用时通过 `validate` 针对具体 snapshot 校验：节点必须存在、必须携带 inline content，offset 必须是该节点拼接文本的合法 UTF-8 scalar boundary（校验逻辑由 `InlineContent::validate_offset` 承担）。stale / deleted node 返回 `UnknownNode`，非 inline 目标返回 `InvalidSelection`。
+
+`NodeGap` 表示 parent child list 上的结构边界位置（`index` 为边界前的 child 数量），只对 Children-shaped node 有效。
+
+`TextSelection` 保存 anchor / focus 以保留用户意图；P0 要求两端落在同一个 inline node 内，跨 block selection 属于后续 session 层。`ordered_range` 返回逻辑排序后的半开 `TextRange`，affinity 不参与排序。`NodeSelection` 表示选中一个完整节点，只校验节点存在。
+
+`NodeStoreBuilder::peek_next_id` 提供确定性的“下一个未分配 NodeId”，供测试构造保证不存在的节点，不开放 raw `NodeId` 构造。
+
+视觉 caret 投影和 affinity 的视觉解析属于 frontend，不进入 Core。
 
 ## Runtime 边界
 

@@ -116,6 +116,17 @@ impl NodeStoreBuilder {
         Ok(id)
     }
 
+    /// Returns the identity that the next successful [`insert`](Self::insert)
+    /// would allocate.
+    ///
+    /// This gives tests a deterministic way to obtain a node identity that is
+    /// guaranteed to be absent from a finished store, without exposing raw
+    /// construction of `NodeId`.
+    #[must_use]
+    pub const fn peek_next_id(&self) -> NodeId {
+        NodeId::from_allocated(self.next_id)
+    }
+
     /// Returns the number of allocated nodes.
     #[must_use]
     pub fn len(&self) -> usize {

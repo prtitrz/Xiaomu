@@ -15,11 +15,11 @@
 
 ## 当前状态
 
-当前切片：**P0.2B Node Storage 与 Immutable Snapshot 已完成，等待 PR 最终 current-head CI 与合并**
+当前切片：**P0.3 Position 与 Selection 已完成实现并通过 fmt / clippy / test，等待 PR CI 后合并**
 
-当前分支：`feat/p0-document-snapshot`
+当前分支：`feat/p0-position-selection`
 
-P0.0、P0.1、P0.2A 已合并。P0.2B 的 canonical node tree、不可变 snapshot、full-tree validation 和 structural sharing 已完成实现并通过代码级完整 CI；本 PR 最后的中文架构/进度同步提交仍需通过 current-head CI 后合并。
+P0.0、P0.1、P0.2A、P0.2B 已合并。
 
 ## P0.0 Phase Contract 与模块骨架
 
@@ -138,19 +138,31 @@ CI Success 汇总全绿。
 
 ## P0.3 Position 与 Selection
 
-- [ ] 实现 `CursorAffinity`
-- [ ] 实现 `TextPoint`
-- [ ] 实现 `TextSelection`
-- [ ] 实现 `NodeSelection`
-- [ ] 实现 structural boundary position（`NodeGap` 或最终等价类型）
-- [ ] selection 针对 document snapshot 校验
-- [ ] invalid / deleted node position 测试
-- [ ] 中文 / emoji text position 测试
+- [x] 实现 `CursorAffinity`
+- [x] 实现 `TextPoint`
+- [x] 实现 `TextSelection`
+- [x] 实现 `NodeSelection`
+- [x] 实现 structural boundary position（`NodeGap`）
+- [x] selection 针对 document snapshot 校验
+- [x] invalid / deleted node position 测试
+- [x] 中文 / emoji text position 测试
+
+实现说明：
+
+```text
+TextPoint 构造不校验；validate 针对具体 snapshot 校验节点存在、inline content shape、UTF-8 boundary。
+InlineContent::validate_offset 承担拼接文本的 offset 校验。
+TextSelection P0 限制在单个 inline node 内；anchor/focus 保留用户意图，ordered_range 返回逻辑排序半开 range。
+NodeStoreBuilder::peek_next_id 提供确定性未分配 NodeId 供测试使用。
+```
 
 完成证据：
 
 ```text
-待开始
+分支 feat/p0-position-selection：
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿
+cargo test --workspace 15 个 test target 全绿（含 tests/position_selection.rs 6 个集成测试）
 ```
 
 ## P0.4 Transaction Application
@@ -238,7 +250,7 @@ P0 只有在以下条件全部满足后才能完成：
 - [x] NodeId / NodeStore structural-sharing prototype 可工作
 - [x] TextRun-local marks 在 inline content 内确定性规范化
 - [x] TextOffset / text boundary 测试全绿
-- [ ] position / selection model 校验正确
+- [x] position / selection model 校验正确
 - [ ] typed transaction 保持 document invariant
 - [ ] StepMap / ChangeMap 可显式映射旧 position
 - [ ] inverse prototype 可恢复语义原状态
@@ -270,6 +282,13 @@ P0 只有在以下条件全部满足后才能完成：
 - `NodeStoreBuilder` 使用确定性 allocator，并保证失败 insert 不推进 allocator，避免测试和后续 transaction fixture 出现无意义 ID 漂移。
 - Full-tree validator 对 cycle 给出明确 `CyclicDocument`，不让 cycle 被较次级的 multiple-parent 错误遮蔽。
 - P0.2 不为 P0.4 提前保留 production dead-code mutation helper；当前 structural-sharing replacement helper 仅在测试配置下存在，P0.4 再按正式 Transaction contract 引入内部 mutation API。
+
+### 2026-08-23（P0.3）
+
+- TextPoint 构造不触碰文档；合法性始终通过针对具体 snapshot 的 `validate` 建立，与“offset 不能永久视为合法”的既有决策一致。
+- `InlineContent` 增加跨 run 的 offset 校验；run 边界因 run 非空恒为合法坐标，run 内部按 UTF-8 scalar boundary 校验。
+- P0 的 `TextSelection` 限制在单个 inline node 内；跨 block selection 留给后续 session 层，不提前进入 Core contract。
+- `NodeStoreBuilder` 新增只读 `peek_next_id`，让测试获得确定性且保证不存在的 NodeId，同时继续不开放 raw NodeId 构造。
 
 ## Regression Log
 
