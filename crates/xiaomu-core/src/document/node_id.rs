@@ -14,6 +14,11 @@ impl NodeId {
     pub(crate) const fn from_allocated(raw: u64) -> Self {
         Self(raw)
     }
+
+    /// Returns the internal representation. Not a public contract.
+    pub(crate) const fn raw(self) -> u64 {
+        self.0
+    }
 }
 
 impl fmt::Debug for NodeId {

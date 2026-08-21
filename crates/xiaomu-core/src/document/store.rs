@@ -56,7 +56,10 @@ impl NodeStore {
         self.nodes.values().map(Arc::as_ref)
     }
 
-    #[cfg(test)]
+    /// Returns a store with one node's payload replaced.
+    ///
+    /// Unchanged node payloads are reused through `Arc`, keeping the
+    /// structural-sharing prototype intact.
     pub(crate) fn replace_node(&self, node: Node) -> Result<Self> {
         let id = node.id();
         if !self.nodes.contains_key(&id) {
@@ -66,6 +69,33 @@ impl NodeStore {
         let mut next = self.nodes.as_ref().clone();
         next.insert(id, Arc::new(node));
         Ok(Self::from_nodes(next))
+    }
+
+    /// Returns a store with one previously absent node added.
+    pub(crate) fn inserted(&self, node: Node) -> Result<Self> {
+        let id = node.id();
+        if self.nodes.contains_key(&id) {
+            return Err(Error::DuplicateChildReference);
+        }
+
+        let mut next = self.nodes.as_ref().clone();
+        next.insert(id, Arc::new(node));
+        Ok(Self::from_nodes(next))
+    }
+
+    /// Returns a store without the given node identities.
+    ///
+    /// Missing identities are ignored so callers can remove whole subtrees in
+    /// one pass.
+    pub(crate) fn without_nodes(&self, removed: &BTreeSet<NodeId>) -> Self {
+        let nodes = self
+            .nodes
+            .as_ref()
+            .iter()
+            .filter(|(id, _)| !removed.contains(id))
+            .map(|(id, node)| (*id, Arc::clone(node)))
+            .collect();
+        Self::from_nodes(nodes)
     }
 
     #[cfg(test)]

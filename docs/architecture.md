@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前 `xiaomu-runtime`、`xiaomu-gpui`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已进入 P0，Text Boundary、P0.2 Document Model 和 P0.3 Position / Selection 已实现；Transaction、Mapping、Inverse / History 仍按 P0 后续切片推进。
+当前 `xiaomu-runtime`、`xiaomu-gpui`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已进入 P0，Text Boundary、P0.2 Document Model、P0.3 Position / Selection 和 P0.4 Transaction Application 已实现；Mapping、Inverse / History 仍按 P0 后续切片推进。
 
 ## Core 边界
 
@@ -185,6 +185,32 @@ NodeSelection
 `NodeStoreBuilder::peek_next_id` 提供确定性的“下一个未分配 NodeId”，供测试构造保证不存在的节点，不开放 raw `NodeId` 构造。
 
 视觉 caret 投影和 affinity 的视觉解析属于 frontend，不进入 Core。
+
+### Transaction Application
+
+`transaction/` 模块实现 canonical mutation 的唯一公开入口：
+
+```text
+TransactionOrigin（UserInput / System / Extension）
+Transaction（origin + metadata + typed steps）
+TransactionStep：
+    ReplaceText
+    InsertNode
+    RemoveNode
+    SetNodeAttrs
+    AddMark
+    RemoveMark
+```
+
+`Transaction::apply(&XiaomuDocument) -> Result<XiaomuDocument>` 是原子的：steps 顺序应用在内部中间 store 上，最终状态经过 full-tree validation 才返回新 snapshot；任一 step 失败则整体失败且原 snapshot 不变。每次 apply 推进 `DocumentRevision`。
+
+文本与 mark steps 由 piece-based inline 编辑实现：runs 在 range 边界切分、编辑后重建并重新规范化。replacement 继承 `range.start` 所在 run 的 marks；AddMark 在 range 内替换同 kind 冲突 mark；结果不保留空 run，相邻同 mark run 自动合并。
+
+InsertNode 由 snapshot 内部 allocator 分配新 NodeId；RemoveNode 连同整个子树移除；root 不可移除。`NodeStore` 的 replace / insert / remove 原语均为 `pub(crate)`，公开 API 不存在 direct canonical mutation escape hatch。
+
+metadata seam 使用 `BTreeMap<String, String>`，不携带宿主专用类型。
+
+Position mapping（P0.5）与 inverse 生成（P0.6）将建立在同一 step 词表上。
 
 ## Runtime 边界
 
