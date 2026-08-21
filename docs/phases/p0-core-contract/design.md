@@ -1,148 +1,146 @@
-# P0 Core Contract Design
+# P0 Core Contract 设计
 
-Status: Active
+状态：进行中
 
-This document is the executable design for P0. The top-level roadmap remains in `docs/planning.md`; architecture that is already true remains in `docs/architecture.md`.
+本文档是 P0 的可执行设计。顶层路线以 `docs/planning.md` 为准；已经落地的架构事实记录在 `docs/architecture.md`。
 
-P0 exists to establish Xiaomu's canonical document semantics and mutation contracts before any native frontend code is introduced.
+P0 的目标是在任何 Native Frontend 代码进入项目之前，先建立晓木的 canonical document semantics（规范文档语义）和 mutation contract（修改契约）。
 
-## 1. Scope
+## 1. 范围
 
-P0 is a `xiaomu-core` phase. `xiaomu-testkit` may gain helpers used to exercise Core invariants.
+P0 主要发生在 `xiaomu-core`。`xiaomu-testkit` 可以增加用于验证 Core 不变量的测试辅助能力。
 
-P0 must deliver:
+P0 必须交付：
 
 ```text
-versioned document schema
-externally immutable document snapshots
-stable opaque NodeId values
-NodeStore and a structural-sharing prototype
-TextRun-local normalized marks
-TextOffset and Unicode text boundaries
-position and selection primitives
-typed transaction primitives
-StepMap / ChangeMap prototype
-validation
-inverse/change-set prototype
-property and regression tests
+版本化文档 schema
+对外不可变的文档 snapshot
+稳定且 opaque 的 NodeId
+NodeStore 与 structural sharing 原型
+TextRun 局部 marks 规范化
+TextOffset 与 Unicode 文本边界
+position / selection 基础类型
+typed transaction 基础能力
+StepMap / ChangeMap 原型
+文档校验
+inverse / change-set 原型
+property / regression tests
 ```
 
-P0 has no GPUI dependency.
+P0 不引入 GPUI 依赖。
 
-## 2. Non-goals
+## 2. 非目标
 
-P0 does not implement:
+P0 不实现：
 
 ```text
-native rendering or input
+Native 渲染与输入
 IME composition runtime
-clipboard integration
-host persistence APIs
-full command/keybinding behavior
-collaboration protocol
-collaborative undo
-production virtualization
-full table editing
-InlineAtom interaction semantics
-Markdown editing semantics
+剪贴板集成
+宿主持久化 API
+完整 command / keybinding 行为
+协作协议
+协作 undo
+生产级 virtualization
+完整表格编辑
+InlineAtom 交互语义
+Markdown 编辑语义
 ```
 
-P0 may reserve types or seams required by later phases, but it must not implement speculative systems solely for future completeness.
+P0 可以预留后续阶段必需的类型或 seam，但不能为了“以后可能用到”提前实现没有现实验证目标的系统。
 
-## 3. Core invariants
+## 3. Core 不变量
 
-The following are hard P0 invariants.
+以下约束属于 P0 硬约束。
 
-### 3.1 Canonical document state is structured
+### 3.1 Canonical document state 必须是结构化文档
 
-External formats are codecs. No Markdown, HTML, source byte range, or GPUI type is part of canonical document identity.
+Markdown、HTML、JSON 等外部格式都只是 codec。任何 external source offset、Markdown byte range 或 GPUI 类型都不能成为 canonical document identity 的一部分。
 
-### 3.2 Documents are immutable from the outside
+### 3.2 文档对外不可变
 
-Callers receive a document snapshot and query it through controlled APIs. Canonical nodes and stores do not expose public mutable fields that bypass validation.
+调用方拿到的是 document snapshot，只能通过受控 API 查询。Canonical node 和 store 不公开允许绕过校验的可变字段。
 
-Mutation follows:
+修改路径统一为：
 
 ```text
 Document + Transaction
         ↓
       apply
         ↓
-new Document + ChangeSet/Mapping + inverse information
+new Document + ChangeSet / Mapping + inverse information
 ```
 
-### 3.3 Node identity is stable and opaque
+### 3.3 NodeId 稳定且 opaque
 
-`NodeId` is a newtype whose representation is not part of the public semantic contract.
+`NodeId` 是 newtype，其内部表示不属于公开语义契约。
 
-P0 requires:
+P0 要求：
 
 ```text
-stable identity across edits that preserve a node
-no caller-constructed arbitrary raw IDs through normal APIs
-deterministic IDs available to tests
-no assumption that NodeId defines document order
+节点未被删除时，编辑前后保持稳定 identity
+普通调用方不能任意构造 raw NodeId
+测试可以获得确定性 NodeId
+NodeId 的数值顺序不得被视作文档顺序
 ```
 
-The first implementation may use a simple allocator. Wire-format identity and distributed ID allocation remain deferred.
+第一版允许使用简单 allocator。Wire-format identity 和分布式 ID 分配留到后续阶段。
 
-### 3.4 The canonical document is a tree
+### 3.4 Canonical document 是树
 
-The document root owns a structured node tree. A flat block vector must not become the public long-term model.
+文档根节点持有结构化 node tree。不能把 `Vec<BlockNode>` 一类扁平结构固化成长期公开 contract。
 
-Node content categories may include:
+Node content 至少需要覆盖：
 
 ```text
-children
-inline content
-atomic/custom payload
+Children
+InlineContent
+Atomic / Custom payload
 ```
 
-P0 only needs enough built-in node kinds to exercise the model and transactions. Paragraph and basic container nodes are sufficient for the first implementation slices; later P0 slices may add additional built-in kinds already defined by the top-level plan when they improve invariant coverage.
+P0 只实现足够验证模型和 transaction 的 built-in node kind。Paragraph、基础 container 等已经足够起步；后续可以在不破坏契约的前提下逐步增加顶层规划里已经定义的节点类型。
 
-### 3.5 Text offsets are typed and Unicode-safe
+### 3.5 Text offset 必须 typed 且 Unicode-safe
 
-`TextOffset` is an opaque Core coordinate within one text-bearing node or inline text container.
+`TextOffset` 是一个 text-bearing node / inline text container 内部的 opaque Core coordinate。
 
-The initial implementation uses UTF-8 byte offsets internally because Rust strings are UTF-8, but construction and mutation APIs must validate character boundaries. A caller must not be able to create an operational text range that points into the middle of a UTF-8 code point through normal safe APIs.
+第一版内部采用 UTF-8 byte offset，因为 Rust `str` / `String` 使用 UTF-8；但所有构造和修改入口必须验证 UTF-8 char boundary。普通安全 API 不能产生落在 UTF-8 code point 中间的可操作 range。
 
-UTF-16 conversion belongs to the future platform adapter and is not part of P0 Core coordinates.
+UTF-16 转换属于未来 platform adapter，不属于 Core coordinate contract。
 
-Required fixtures include:
+必须覆盖：
 
 ```text
 ASCII
-Chinese
-mixed Chinese/Latin
-emoji / surrogate-pair equivalents
+中文
+中英混排
+emoji / surrogate-pair 对应场景
 combining marks
-BiDi samples
+BiDi 文本
 ```
 
-P0 does not promise grapheme-cluster cursor movement. It does require that byte boundaries and Unicode scalar boundaries are never confused.
+P0 不承诺 grapheme-cluster 级光标移动，但必须保证 byte boundary 与 Unicode scalar boundary 不混淆。
 
-### 3.6 Marks are local to text runs
+### 3.6 Marks 存在于 TextRun 上
 
-Canonical marks are stored on `TextRun` values rather than in a global range table.
+Canonical mark 存储在 `TextRun` 上，不维护独立的全局 mark range table。
 
-Normalization rules:
+规范化规则：
 
 ```text
-adjacent runs with equal MarkSet merge
-persistent empty runs are rejected
-mark order is canonical
-invalid duplicate mark attributes are rejected or normalized
+相邻且 MarkSet 相同的 TextRun 自动合并
+禁止持久化空 TextRun
+mark 顺序固定
+冲突的重复 mark attrs 必须拒绝或明确规范化
 ```
 
-TextRun boundaries are an implementation detail. Positions and selections must not expose run segmentation as a semantic coordinate.
+TextRun 边界只是内部实现细节。Position / selection 不能暴露 run segmentation 作为用户可见坐标。
 
-### 3.7 Transactions are the only canonical mutation path
+### 3.7 Transaction 是唯一 canonical mutation 路径
 
-P0 introduces typed steps rather than ad hoc mutator methods.
+P0 引入 typed steps，不能靠随意 mutator 修改 canonical document。
 
-The first transaction surface should cover enough cases to validate text mutation, tree mutation, mapping, and inverse behavior without implementing all P2 editing commands.
-
-Initial step families:
+第一批 transaction 至少覆盖：
 
 ```text
 ReplaceText
@@ -153,148 +151,153 @@ AddMark
 RemoveMark
 ```
 
-`SplitNode`, `JoinNodes`, `MoveNode`, list-specific operations, and InlineAtom operations may be introduced during P0 only when the earlier contracts are stable enough to define their mapping/inverse semantics cleanly. Their interactive behavior remains P2/P4 work.
+`SplitNode`、`JoinNodes`、`MoveNode`、list 专用操作和 InlineAtom 操作可以在契约足够稳定后增加，但其完整交互行为属于后续阶段。
 
-Every applied transaction returns explicit change information. No subsystem may repair offsets independently after mutation.
+每次 transaction apply 必须返回明确的 change information。任何子系统都不能自行偷偷修 offset。
 
-### 3.8 Mapping is explicit
+### 3.8 Position mapping 必须显式
 
-Each applied step must produce mapping information sufficient to transform relevant old positions into the new document coordinate space.
+每个 applied step / transaction 都必须能够提供足够的 mapping 信息，把旧 position 映射到新的文档坐标空间。
 
-P0 mapping requirements begin with text replacement and node insertion/removal.
+P0 首先覆盖文本替换和节点插入 / 删除。
 
-The mapping API must distinguish a surviving mapped position from a position whose target was deleted. Silent clamping is not the default semantic contract.
+Mapping API 必须区分：
 
-Later phases may add recovery/bias policies on top of this explicit result.
+```text
+位置仍存在并成功映射
+目标节点已经删除
+```
 
-### 3.9 Inverse behavior is testable
+默认行为不能静默 clamp。
 
-For reversible P0 operations:
+### 3.9 Inverse 行为必须可测试
+
+对可逆 P0 operation：
 
 ```text
 D1 = apply(D0, T)
 D2 = apply(D1, inverse(T))
 ```
 
-`D2` must be semantically equivalent to `D0`, including normalized text/marks and structurally relevant node identity where the operation promises identity preservation.
+`D2` 必须在语义上等价于 `D0`，包括规范化后的 text / marks，以及该 operation 承诺保留的 node identity。
 
-Inverse generation may be represented as an inverse transaction or a change set that can construct one. The public API should not prematurely freeze that internal representation.
+Inverse 可以内部表现为 inverse transaction，也可以是能生成 inverse 的 change set；P0 不提前冻结最终公开表示。
 
-## 4. Initial implementation strategy
+## 4. 初始实现策略
 
-P0 favors correctness and observability over premature data-structure optimization.
+P0 优先保证正确性、可观察性和契约清晰，性能数据不足时不提前选择复杂数据结构。
 
 ### 4.1 Text storage
 
-Start with a small `TextBuffer` abstraction backed by `String`.
+先用 `String` 封装在 `TextBuffer` 后面。
 
-Reasons:
+原因：
 
 ```text
-simple Unicode boundary validation
-small dependency surface
-clear transaction semantics
-rope choice can remain benchmark-driven
+Unicode 边界验证简单
+依赖少
+transaction 语义清晰
+未来是否切 rope 可以由 benchmark 决定
 ```
 
-A future rope must fit behind the same semantic boundary.
+未来 rope 必须适配现有语义边界，而不是反向改变公开 contract。
 
-### 4.2 Node storage and snapshots
+### 4.2 Node storage 与 snapshot
 
-Start with standard-library ownership primitives and node-level structural sharing, for example immutable nodes behind `Arc` and a snapshot-owned store.
+第一版采用标准库所有权原语和 node-level structural sharing，例如 immutable node 放在 `Arc` 后面，由 snapshot 自己持有 store。
 
-The prototype must demonstrate that unchanged node payloads can be shared across document revisions. P0 does not require selecting a permanent HAMT/persistent-vector implementation.
+P0.2 必须实际证明：生成新 revision 时，未变化节点的 payload 可以复用。
 
-If map cloning becomes the dominant cost in later benchmarks, the store implementation may change without altering the public document contract.
+P0 不要求现在决定永久使用某个 HAMT / persistent-vector crate。如果以后 benchmark 证明 map clone 成为主要成本，可以替换实现，而不改变公开 document contract。
 
 ### 4.3 Error model
 
-Invalid operations return typed errors rather than panicking for expected bad input.
+调用方提供的预期错误输入返回 typed error，不应 panic。
 
-Examples:
+例如：
 
 ```text
 unknown NodeId
-wrong node/content kind
-invalid TextOffset boundary
-range out of bounds
-invalid parent/child relationship
-root removal
-invalid mark operation
+node/content kind 不匹配
+非法 TextOffset boundary
+range 越界
+非法 parent/child 关系
+非法 root state
+非法 mark operation
 ```
 
-Internal invariant violations may use debug assertions, but public safe APIs must report invalid caller input predictably.
+内部不变量可以使用 debug assertion，但公开 safe API 必须稳定返回可判断错误。
 
-## 5. Position and selection surface
+## 5. Position / Selection Surface
 
-P0 establishes the semantic shapes required by later phases without implementing visual caret behavior.
+P0 只建立后续阶段需要的语义结构，不实现视觉 caret 行为。
 
-Initial types:
+初始类型：
 
 ```text
 TextPoint
 TextSelection
 NodeSelection
-NodeGap or equivalent structural boundary position
+NodeGap 或等价 structural boundary position
 CursorAffinity
 ```
 
-`TextPoint` includes stable node identity and `TextOffset`.
+`TextPoint` 包含 stable node identity 和 `TextOffset`。
 
-`CursorAffinity` is retained in the type model so soft-wrap/BiDi frontend behavior does not later require changing the canonical selection contract. P0 does not implement visual affinity resolution.
+`CursorAffinity` 先进入类型模型，避免 soft wrap / BiDi 出现后再修改 canonical selection contract。P0 不实现视觉 affinity resolution。
 
-Cell selection remains deferred to the table phase.
+Cell selection 延后到 table 阶段。
 
-## 6. P0 implementation slices
+## 6. P0 实施切片
 
-### P0.0 Phase contract and module skeleton
+### P0.0 Phase contract 与模块骨架
 
-Deliver:
+交付：
 
 ```text
-phase design/progress docs
-core module boundaries
-public/private visibility policy applied
-initial error/result types
+P0 design / progress 文档
+Core 模块边界
+public/private 可见性策略
+初始 Error / Result 类型
 ```
 
-Gate: workspace CI remains green and no architecture boundary changes are required.
+Gate：workspace CI 保持全绿，架构边界无需返工。
 
-### P0.1 Text boundary
+### P0.1 Text Boundary
 
-Deliver:
+交付：
 
 ```text
 TextBuffer
 TextOffset
 TextRange
-validated slicing/replacement
+validated slicing / replacement
 UTF-8 boundary checks
 Unicode regression fixtures
 ```
 
-Gate: ASCII, Chinese, mixed text, emoji, combining-mark and BiDi boundary tests pass; invalid byte boundaries return errors and never panic.
+Gate：ASCII、中文、中英混排、emoji、combining mark、BiDi 测试通过；非法 byte boundary 返回 typed error，不能 panic。
 
-### P0.2 Document model
+### P0.2 Document Model
 
-Deliver:
+交付：
 
 ```text
 DocumentVersion / DocumentRevision
 NodeId
 Node / NodeKind / NodeAttrs / NodeContent
 NodeStore
-immutable document snapshot
-basic validation
+immutable XiaomuDocument snapshot
+full-tree validation
 node-level structural-sharing prototype
 TextRun / Mark / MarkSet normalization
 ```
 
-Gate: valid tree construction succeeds; malformed trees are rejected; unchanged node payloads are shared across a simple revision test.
+Gate：合法树可以构建；dangling child、非法 parent/child、多个 parent、cycle、非法 root、unreachable node 等 malformed state 被拒绝；简单 revision 测试证明未变化 node payload 会共享。
 
-### P0.3 Position and selection
+### P0.3 Position 与 Selection
 
-Deliver:
+交付：
 
 ```text
 TextPoint
@@ -302,14 +305,14 @@ CursorAffinity
 TextSelection
 NodeSelection
 structural boundary position
-selection validation against a document
+selection 对 document snapshot 的校验
 ```
 
-Gate: invalid node/range positions are rejected; Unicode fixture positions validate consistently.
+Gate：无效 node/range position 被拒绝；中文和 emoji position fixture 行为一致。
 
-### P0.4 Transaction application
+### P0.4 Transaction Application
 
-Deliver the first typed steps:
+第一批 typed steps：
 
 ```text
 ReplaceText
@@ -322,93 +325,93 @@ Transaction
 TransactionOrigin / metadata seam
 ```
 
-Gate: all mutations preserve document invariants; direct public mutation paths do not exist.
+Gate：所有 mutation 保持 document invariant；不存在公开的 canonical direct-mutation escape hatch。
 
-### P0.5 Position mapping
+### P0.5 Position Mapping
 
-Deliver:
+交付：
 
 ```text
 StepMap / ChangeMap prototype
 text replacement mapping
-node insertion/removal mapping
-explicit deleted-target result
+node insertion / removal mapping
+明确的 deleted-target result
 transaction mapping composition
 ```
 
-Gate: old-position to new-position tables cover insertion, deletion, replacement, Chinese/emoji offsets, and removed nodes.
+Gate：mapping table 覆盖 insertion、deletion、replacement、中文 / emoji offset 和 removed node。
 
-### P0.6 Inverse and randomized invariants
+### P0.6 Inverse 与随机不变量测试
 
-Deliver:
+交付：
 
 ```text
-inverse/change-set prototype
+inverse / change-set prototype
 transaction round-trip tests
 normalized-mark inverse tests
-random valid transaction sequences where practical
+可行范围内的随机 valid transaction sequence tests
 ```
 
-Gate: reversible operation sequences restore semantic original state; random tests do not produce invalid documents or panics.
+Gate：可逆 operation 可以恢复语义原状态；随机测试不产生非法 document，不 panic。
 
-### P0.7 Contract stabilization
+### P0.7 Contract Stabilization
 
-Deliver:
+交付：
 
 ```text
-public rustdoc review
-architecture.md synchronization
-P0 progress evidence complete
-unresolved P1 dependencies documented
+public rustdoc 审查
+architecture.md 与真实实现同步
+P0 progress evidence 完整
+P1 尚未解决的依赖明确记录
 ```
 
-Gate: top-level P0 gate is satisfied and `CI Success` is green.
+Gate：顶层 P0 Gate 全部满足，`CI Success` 全绿。
 
-## 7. Testing strategy
+## 7. 测试策略
 
-P0 tests should prefer semantic assertions over implementation-shape assertions.
+P0 测试优先断言语义，不绑定无关的内部实现形态。
 
-Required categories:
+必须覆盖：
 
 ```text
-unit tests for boundary/value types
+boundary / value type 单元测试
 normalization tests
 invalid-input tests
 transaction result tests
 mapping tables
 inverse tests
-property/randomized tests
+property / randomized tests
 regression fixtures
 ```
 
-Tests must not rely on incidental internal ordering unless ordering is part of the contract.
+除非排序本身属于 contract，否则测试不能依赖偶然的内部排序。
 
-## 8. Design changes during P0
+## 8. P0 期间的设计变更规则
 
-A small implementation detail can change directly in the P0 branch.
+小型实现细节可以直接在对应 P0 分支调整。
 
-Update this design document when a change alters a P0 contract, slice, or Gate.
+如果变更影响 P0 contract、切片边界或 Gate，需要同步更新本设计文档。
 
-Create an ADR when P0 settles a decision that is expensive to reverse or becomes a long-lived public semantic contract, such as a canonical position unit or a fundamental mapping/deletion policy.
+如果 P0 确定了未来很难逆转、会成为长期公开语义契约的决策，例如 canonical position unit 或 mapping deletion policy，需要创建 ADR。
 
-`docs/architecture.md` is updated only when the corresponding implementation is actually true.
+`docs/architecture.md` 只记录已经真实实现的架构，不记录尚未落地的计划。
 
-## 9. P0 completion definition
+## 9. P0 完成定义
 
-P0 is complete only when all of the following are true:
+只有以下条件全部满足，P0 才算完成：
 
 ```text
-versioned structured document model works
-snapshots are externally immutable
-text boundaries are Unicode-safe
-marks normalize deterministically
-positions/selections validate against documents
-typed transactions preserve invariants
-mapping is explicit and composable
-inverse prototype passes round-trip tests
-Unicode/CJK/emoji/property tests are green
-architecture docs match implementation
-CI Success is green
+版本化结构化 document model 可用
+snapshot 对外不可变
+text boundary Unicode-safe
+marks 确定性规范化
+position / selection 可针对 document 校验
+typed transaction 保持不变量
+mapping 显式且可组合
+inverse prototype 通过 round-trip
+Unicode / CJK / emoji / property tests 全绿
+架构文档与实现一致
+CI Success 全绿
 ```
 
-P1 must not compensate for missing Core invariants with GPUI-specific offset or mutation logic.
+P1 不能用 GPUI-specific offset 或 mutation logic 去补偿 P0 尚未解决的 Core 不变量。
