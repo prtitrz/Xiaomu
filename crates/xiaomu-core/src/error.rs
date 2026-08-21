@@ -17,6 +17,8 @@ pub enum Error {
     InvalidTextBoundary { offset: usize },
     /// A text coordinate or range exceeds the target text length.
     TextOutOfBounds { offset: usize, len: usize },
+    /// A text range has its start after its end.
+    InvalidTextRange { start: usize, end: usize },
     /// A referenced document node does not exist in the current snapshot.
     UnknownNode,
     /// The requested selection is not valid for the current snapshot.
@@ -35,6 +37,9 @@ impl fmt::Display for Error {
             }
             Self::TextOutOfBounds { offset, len } => {
                 write!(f, "text offset {offset} is out of bounds for length {len}")
+            }
+            Self::InvalidTextRange { start, end } => {
+                write!(f, "text range start {start} is after end {end}")
             }
             Self::UnknownNode => f.write_str("document node does not exist"),
             Self::InvalidSelection => f.write_str("selection is invalid for the document"),
