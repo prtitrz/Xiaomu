@@ -56,6 +56,7 @@ impl NodeStore {
         self.nodes.values().map(Arc::as_ref)
     }
 
+    #[cfg(test)]
     pub(crate) fn replace_node(&self, node: Node) -> Result<Self> {
         let id = node.id();
         if !self.nodes.contains_key(&id) {
