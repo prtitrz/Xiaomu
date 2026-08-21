@@ -17,6 +17,7 @@ pub struct XiaomuDocument {
     revision: DocumentRevision,
     root: NodeId,
     store: NodeStore,
+    next_node_id: u64,
 }
 
 impl XiaomuDocument {
@@ -29,8 +30,32 @@ impl XiaomuDocument {
             version: DocumentVersion::CURRENT,
             revision: DocumentRevision::INITIAL,
             root,
+            next_node_id: next_id_after(&store),
             store,
         })
+    }
+
+    /// Creates a validated snapshot from application output.
+    pub(crate) fn from_applied_parts(
+        version: DocumentVersion,
+        revision: DocumentRevision,
+        root: NodeId,
+        store: NodeStore,
+        next_node_id: u64,
+    ) -> Result<Self> {
+        validate_tree(root, &store)?;
+        Ok(Self {
+            version,
+            revision,
+            root,
+            store,
+            next_node_id,
+        })
+    }
+
+    /// Returns the node identity that the next inserted node will receive.
+    pub(crate) const fn next_node_id(&self) -> u64 {
+        self.next_node_id
     }
 
     /// Returns the canonical schema version.
@@ -76,6 +101,17 @@ impl XiaomuDocument {
     pub fn validate(&self) -> Result<()> {
         validate_tree(self.root, &self.store)
     }
+}
+
+fn next_id_after(store: &NodeStore) -> u64 {
+    store
+        .iter()
+        .map(Node::id)
+        .map(NodeId::raw)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .expect("node id space exhausted in a validated store is unreachable")
 }
 
 fn validate_tree(root: NodeId, store: &NodeStore) -> Result<()> {
@@ -228,6 +264,7 @@ mod tests {
             revision: original.revision.next().unwrap(),
             root: original.root,
             store: next_store,
+            next_node_id: original.next_node_id,
         };
 
         assert!(next.validate().is_ok());

@@ -15,11 +15,11 @@
 
 ## 当前状态
 
-当前切片：**P0.3 Position 与 Selection 已完成实现并通过 fmt / clippy / test，等待 PR CI 后合并**
+当前切片：**P0.4 Transaction Application 已完成实现并通过 fmt / clippy / test，等待 PR CI 后合并**
 
-当前分支：`feat/p0-position-selection`
+当前分支：`feat/p0-transaction-application`
 
-P0.0、P0.1、P0.2A、P0.2B 已合并。
+P0.0、P0.1、P0.2、P0.3 已合并。
 
 ## P0.0 Phase Contract 与模块骨架
 
@@ -167,23 +167,38 @@ cargo test --workspace 15 个 test target 全绿（含 tests/position_selection.
 
 ## P0.4 Transaction Application
 
-- [ ] 实现 typed `Transaction`
-- [ ] 实现 transaction origin
-- [ ] 增加不携带宿主专用类型的 metadata seam
-- [ ] 实现 `ReplaceText`
-- [ ] 实现 `InsertNode`
-- [ ] 实现 `RemoveNode`
-- [ ] 实现 `SetNodeAttrs`
-- [ ] 实现 `AddMark`
-- [ ] 实现 `RemoveMark`
-- [ ] apply 返回新 snapshot
-- [ ] apply 后重新验证 resulting document
-- [ ] 确认没有公开 direct canonical mutation escape hatch
+- [x] 实现 typed `Transaction`
+- [x] 实现 transaction origin
+- [x] 增加不携带宿主专用类型的 metadata seam
+- [x] 实现 `ReplaceText`
+- [x] 实现 `InsertNode`
+- [x] 实现 `RemoveNode`
+- [x] 实现 `SetNodeAttrs`
+- [x] 实现 `AddMark`
+- [x] 实现 `RemoveMark`
+- [x] apply 返回新 snapshot
+- [x] apply 后重新验证 resulting document
+- [x] 确认没有公开 direct canonical mutation escape hatch
+
+实现说明：
+
+```text
+Transaction = origin + metadata(BTreeMap<String, String>) + steps。
+apply 原子性：任一 step 失败即整体失败，原 snapshot 不变，无部分状态逃逸。
+step 应用在内部中间 store 上顺序进行；最终 snapshot 走 full-tree validation。
+ReplaceText / AddMark / RemoveMark 由 piece-based inline 编辑实现，replacement 继承 range.start 所在 piece 的 marks；
+AddMark 在 range 内替换同 kind 冲突 mark；结果经 InlineContent 规范化（相邻同 mark 合并、空 run 丢弃）。
+InsertNode 从 document allocator 分配新 NodeId；RemoveNode 连同子树一起从 store 移除；root 不可移除。
+NodeStore 的 replace/insert/remove 原语均为 pub(crate)，无公开 mutation escape hatch。
+```
 
 完成证据：
 
 ```text
-待开始
+分支 feat/p0-transaction-application：
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿
+cargo test --workspace 16 个 test target 全绿（含 tests/transaction_application.rs 12 个集成测试）
 ```
 
 ## P0.5 Position Mapping
@@ -251,7 +266,7 @@ P0 只有在以下条件全部满足后才能完成：
 - [x] TextRun-local marks 在 inline content 内确定性规范化
 - [x] TextOffset / text boundary 测试全绿
 - [x] position / selection model 校验正确
-- [ ] typed transaction 保持 document invariant
+- [x] typed transaction 保持 document invariant
 - [ ] StepMap / ChangeMap 可显式映射旧 position
 - [ ] inverse prototype 可恢复语义原状态
 - [x] Unicode / CJK / emoji text-boundary 测试全绿
@@ -289,6 +304,15 @@ P0 只有在以下条件全部满足后才能完成：
 - `InlineContent` 增加跨 run 的 offset 校验；run 边界因 run 非空恒为合法坐标，run 内部按 UTF-8 scalar boundary 校验。
 - P0 的 `TextSelection` 限制在单个 inline node 内；跨 block selection 留给后续 session 层，不提前进入 Core contract。
 - `NodeStoreBuilder` 新增只读 `peek_next_id`，让测试获得确定性且保证不存在的 NodeId，同时继续不开放 raw NodeId 构造。
+
+### 2026-08-23（P0.4）
+
+- `XiaomuDocument` 内部持有 next-node-id allocator 计数器，由 store 最大 raw id 推导初始值；`InsertNode` 由此分配稳定 NodeId。
+- apply 是原子的：step 顺序应用在内部中间 store 上，最终状态 full-tree validation 后才产出新 snapshot；任一 step 失败则整体失败。
+- ReplaceText 的 replacement 继承 `range.start` 所在 run 的 marks，保证连续输入的确定性；AddMark 在 range 内替换同 kind 冲突 mark 而不是拒绝。
+- RemoveNode 语义为移除节点及其整个子树，避免 unreachable node 违反 store 不变量；root 不可移除。
+- metadata seam 采用 `BTreeMap<String, String>`，不引入宿主专用类型。
+- 每次 apply（包括空 transaction）推进 `DocumentRevision`。
 
 ## Regression Log
 
