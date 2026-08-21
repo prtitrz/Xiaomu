@@ -19,6 +19,14 @@ pub enum Error {
     TextOutOfBounds { offset: usize, len: usize },
     /// A text range has its start after its end.
     InvalidTextRange { start: usize, end: usize },
+    /// A heading level is outside the supported range `1..=6`.
+    InvalidHeadingLevel { level: u8 },
+    /// An extension-defined node kind has an empty key.
+    InvalidCustomNodeKind,
+    /// A mark set contains conflicting values for one semantic mark kind.
+    InvalidMarkSet,
+    /// Canonical text runs must not persist empty text.
+    EmptyTextRun,
     /// A referenced document node does not exist in the current snapshot.
     UnknownNode,
     /// The requested selection is not valid for the current snapshot.
@@ -41,6 +49,12 @@ impl fmt::Display for Error {
             Self::InvalidTextRange { start, end } => {
                 write!(f, "text range start {start} is after end {end}")
             }
+            Self::InvalidHeadingLevel { level } => {
+                write!(f, "heading level {level} is outside the supported range 1..=6")
+            }
+            Self::InvalidCustomNodeKind => f.write_str("custom node kind key must not be empty"),
+            Self::InvalidMarkSet => f.write_str("mark set contains conflicting mark values"),
+            Self::EmptyTextRun => f.write_str("canonical text run must not be empty"),
             Self::UnknownNode => f.write_str("document node does not exist"),
             Self::InvalidSelection => f.write_str("selection is invalid for the document"),
             Self::InvalidDocument => f.write_str("document invariants are not satisfied"),
