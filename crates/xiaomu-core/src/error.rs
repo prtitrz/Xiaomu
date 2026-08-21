@@ -23,12 +23,30 @@ pub enum Error {
     InvalidHeadingLevel { level: u8 },
     /// An extension-defined node kind has an empty key.
     InvalidCustomNodeKind,
+    /// A node attribute key is empty after trimming.
+    InvalidNodeAttrKey,
     /// A mark set contains conflicting values for one semantic mark kind.
     InvalidMarkSet,
     /// Canonical text runs must not persist empty text.
     EmptyTextRun,
+    /// A node kind was paired with an incompatible content shape.
+    InvalidNodeContent,
     /// A referenced document node does not exist in the current snapshot.
     UnknownNode,
+    /// Node identity allocation exhausted its internal representation.
+    NodeIdExhausted,
+    /// One parent contains the same child reference more than once.
+    DuplicateChildReference,
+    /// A parent/child node-kind relationship violates document structure.
+    InvalidChildKind,
+    /// The selected root is missing or is not a document root.
+    InvalidRootNode,
+    /// The canonical node graph contains a cycle.
+    CyclicDocument,
+    /// A reachable node is referenced by more than one parent.
+    MultipleNodeParents,
+    /// The store contains a node that is not reachable from the document root.
+    UnreachableNode,
     /// The requested selection is not valid for the current snapshot.
     InvalidSelection,
     /// A document does not satisfy structural or content invariants.
@@ -56,9 +74,22 @@ impl fmt::Display for Error {
                 )
             }
             Self::InvalidCustomNodeKind => f.write_str("custom node kind key must not be empty"),
+            Self::InvalidNodeAttrKey => f.write_str("node attribute key must not be empty"),
             Self::InvalidMarkSet => f.write_str("mark set contains conflicting mark values"),
             Self::EmptyTextRun => f.write_str("canonical text run must not be empty"),
+            Self::InvalidNodeContent => {
+                f.write_str("node content shape is incompatible with its node kind")
+            }
             Self::UnknownNode => f.write_str("document node does not exist"),
+            Self::NodeIdExhausted => f.write_str("node identity space is exhausted"),
+            Self::DuplicateChildReference => {
+                f.write_str("parent contains a duplicate child reference")
+            }
+            Self::InvalidChildKind => f.write_str("parent does not accept this child node kind"),
+            Self::InvalidRootNode => f.write_str("document root must be a document node"),
+            Self::CyclicDocument => f.write_str("document node graph contains a cycle"),
+            Self::MultipleNodeParents => f.write_str("document node has multiple parents"),
+            Self::UnreachableNode => f.write_str("document store contains an unreachable node"),
             Self::InvalidSelection => f.write_str("selection is invalid for the document"),
             Self::InvalidDocument => f.write_str("document invariants are not satisfied"),
             Self::InvalidTransaction => f.write_str("transaction cannot be applied"),
