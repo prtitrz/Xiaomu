@@ -107,10 +107,7 @@ impl NodeStoreBuilder {
         self.validate_child_references(&kind, &content)?;
 
         let id = NodeId::from_allocated(self.next_id);
-        let next_id = self
-            .next_id
-            .checked_add(1)
-            .ok_or(Error::NodeIdExhausted)?;
+        let next_id = self.next_id.checked_add(1).ok_or(Error::NodeIdExhausted)?;
         let node = Node::new(id, kind, attrs, content)?;
 
         self.nodes.insert(id, Arc::new(node));
@@ -136,7 +133,11 @@ impl NodeStoreBuilder {
         NodeStore::from_nodes(self.nodes)
     }
 
-    fn validate_child_references(&self, parent_kind: &NodeKind, content: &NodeContent) -> Result<()> {
+    fn validate_child_references(
+        &self,
+        parent_kind: &NodeKind,
+        content: &NodeContent,
+    ) -> Result<()> {
         let Some(children) = content.as_children() else {
             return Ok(());
         };
