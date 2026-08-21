@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` depends only on the canonical Core model. `xiaomu-testkit` exists for test/support code and must not become a production dependency.
 
-`xiaomu-runtime`, `xiaomu-gpui`, the codec, testkit, and example harness are still bootstrap-level crates. `xiaomu-core` has entered P0 and now exposes the intended module boundaries for document semantics, text, selection, transactions, mapping, history primitives, and commands. The text boundary is implemented; the remaining semantic modules are still intentionally skeletal until their P0 slices are completed.
+`xiaomu-runtime`, `xiaomu-gpui`, the codec, testkit, and example harness are still bootstrap-level crates. `xiaomu-core` has entered P0 and exposes the intended module boundaries for document semantics, text, selection, transactions, mapping, history primitives, and commands. The text boundary and the first document value layer are implemented; node storage, full document snapshots, selections, transactions, mapping, and history remain incremental P0 work.
 
 ## Core boundary
 
@@ -82,6 +82,33 @@ TextRange
 The Core text boundary guarantees Unicode scalar safety, not grapheme-cluster cursor semantics. Combining-mark and grapheme navigation remain higher-level editing concerns. UTF-16 conversion remains outside Core and will belong to platform adapters.
 
 Text replacement currently returns a new `TextBuffer`, preserving the immutable-snapshot direction required by the document model.
+
+### Document value layer
+
+The first implemented document-value layer is split into focused modules under `document/` and currently provides:
+
+```text
+DocumentVersion
+DocumentRevision
+NodeId
+HeadingLevel
+NodeKind
+MarkKind
+Mark
+LinkMark
+MarkSet
+TextRun
+```
+
+`DocumentVersion` identifies canonical schema versions. `DocumentRevision` is local snapshot metadata and is explicitly not a collaboration clock or distributed operation identity.
+
+`NodeId` is stable and opaque. Its storage representation is not part of the public contract, and normal external APIs do not construct arbitrary raw IDs. Allocation remains owned by the upcoming node/store layer.
+
+`HeadingLevel` validates the built-in heading range `1..=6`. `NodeKind` covers built-in structural semantics plus extension-defined custom keys without exposing node storage shape.
+
+`MarkSet` canonicalizes mark order, removes identical duplicates, and rejects conflicting marks of the same semantic kind. `TextRun` couples a non-empty `TextBuffer` with one normalized `MarkSet`. Run segmentation is not a document coordinate and may later be normalized without changing user-visible positions.
+
+`NodeAttrs`, `NodeContent`, canonical `Node`, `NodeStore`, tree validation, immutable `XiaomuDocument`, and structural sharing are intentionally deferred to the next P0.2 slice rather than being mixed into this value layer.
 
 ## Runtime boundary
 
