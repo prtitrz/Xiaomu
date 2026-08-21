@@ -29,11 +29,25 @@ host application
 
 `xiaomu-codec-markdown` depends only on the canonical Core model. `xiaomu-testkit` exists for test/support code and must not become a production dependency.
 
-At the current bootstrap stage, the crates expose only minimal marker APIs. Their internal module trees have not yet been implemented.
+`xiaomu-runtime`, `xiaomu-gpui`, the codec, testkit, and example harness are still bootstrap-level crates. `xiaomu-core` has entered P0 and now exposes the intended module boundaries for document semantics, text, selection, transactions, mapping, history primitives, and commands. Most of those modules are intentionally skeletal until their P0 slices are implemented.
 
 ## Core boundary
 
 `xiaomu-core` is the home of document semantics and must not depend on a UI framework, host application, persistence layer, network layer, or codec.
+
+The current P0 module boundaries are:
+
+```text
+document
+text
+selection
+transaction
+mapping
+history
+commands
+```
+
+Core also exposes shared semantic `Error` / `Result` types. Canonical concrete model and transaction types are being implemented incrementally according to `docs/phases/p0-core-contract/design.md`.
 
 The Core contract being implemented from P0 includes:
 

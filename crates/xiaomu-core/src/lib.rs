@@ -1,6 +1,20 @@
 #![forbid(unsafe_code)]
 
-//! xiaomu-core: bootstrap crate for the Xiaomu native structured rich-text editor.
+//! Canonical document semantics for the Xiaomu native structured rich-text
+//! editor.
+//!
+//! `xiaomu-core` owns document structure, Unicode-safe text coordinates,
+//! selections, typed transactions, position mapping, and history primitives.
+//! It has no dependency on GPUI or a host application.
 
-/// Bootstrap marker kept intentionally small while the public API is designed.
-pub const CRATE_NAME: &str = "xiaomu-core";
+pub mod commands;
+pub mod document;
+pub mod history;
+pub mod mapping;
+pub mod selection;
+pub mod text;
+pub mod transaction;
+
+mod error;
+
+pub use error::{Error, Result};
