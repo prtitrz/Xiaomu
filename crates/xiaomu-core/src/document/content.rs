@@ -1,6 +1,7 @@
 //! Canonical node content shapes and inline normalization.
 
-use crate::Result;
+use crate::text::TextOffset;
+use crate::{Error, Result};
 
 use super::{NodeId, TextRun};
 
@@ -58,6 +59,37 @@ impl InlineContent {
     #[must_use]
     pub fn len_bytes(&self) -> usize {
         self.runs.iter().map(TextRun::len_bytes).sum()
+    }
+
+    /// Validates that `offset` is a usable coordinate in the concatenated
+    /// text of all runs.
+    ///
+    /// Run boundaries are always valid coordinates because runs are never
+    /// empty; offsets inside a run must fall on UTF-8 scalar boundaries of
+    /// that run's text.
+    pub fn validate_offset(&self, offset: TextOffset) -> Result<()> {
+        let raw = offset.as_usize();
+        if raw > self.len_bytes() {
+            return Err(Error::TextOutOfBounds {
+                offset: raw,
+                len: self.len_bytes(),
+            });
+        }
+
+        let mut remaining = raw;
+        for run in &self.runs {
+            let len = run.len_bytes();
+            if remaining <= len {
+                return run
+                    .text()
+                    .validate_offset(TextOffset::from_validated_byte_index(remaining));
+            }
+            remaining -= len;
+        }
+
+        // `raw == total length` with no runs means empty inline content,
+        // whose only valid coordinate is zero.
+        Ok(())
     }
 }
 
