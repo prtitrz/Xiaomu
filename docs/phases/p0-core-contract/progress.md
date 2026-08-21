@@ -15,11 +15,11 @@ This file tracks execution evidence for P0. It is intentionally operational. Lon
 
 ## Current state
 
-Current slice: **P0.1 Text boundary complete, pending merge**
+Current slice: **P0.2A Document value layer**
 
-Branch: `feat/p0-text-boundary`
+Branch: `feat/p0-document-values`
 
-P0.0 was merged after full `CI Success`. P0.1 has implemented and validated the Unicode-safe Core text boundary. P0.2 starts only after this focused slice is merged.
+P0.0 and P0.1 are merged. P0.2 is intentionally split into a value-model slice followed by a storage/snapshot slice so canonical semantics can stabilize before tree mutation and structural sharing are introduced.
 
 ## P0.0 Phase contract and module skeleton
 
@@ -66,17 +66,31 @@ PR #2 merged after CI Success. P0 Core module skeleton and phase contract establ
 Exit evidence:
 
 ```text
-PR #3 implementation head passed CI #44 across Ubuntu, Windows, macOS, policy, and CI Success.
-The final documentation-only ADR/progress commit remains subject to the protected current-head CI before merge.
+PR #3 merged after current-head CI Success across Ubuntu, Windows, macOS, policy, and the summary gate.
 ```
 
 ## P0.2 Document model
 
-- [ ] Implement `DocumentVersion`
-- [ ] Implement `DocumentRevision`
-- [ ] Implement opaque `NodeId`
+### P0.2A Document value layer
+
+- [x] Implement `DocumentVersion`
+- [x] Implement `DocumentRevision`
+- [x] Implement opaque `NodeId` value type
+- [x] Implement validated `HeadingLevel`
+- [x] Implement built-in/custom `NodeKind`
+- [x] Implement `MarkKind` / `Mark`
+- [x] Implement `LinkMark`
+- [x] Implement canonical `MarkSet` ordering
+- [x] Normalize identical duplicate marks
+- [x] Reject conflicting duplicate mark kinds
+- [x] Implement `TextRun`
+- [x] Reject persistent empty runs
+- [x] Split the document module into focused source files
+- [~] Run full `CI Success`
+
+### P0.2B Node storage and immutable snapshot
+
 - [ ] Provide deterministic NodeId allocation for tests
-- [ ] Implement `NodeKind`
 - [ ] Implement `NodeAttrs`
 - [ ] Implement `NodeContent`
 - [ ] Implement `Node`
@@ -86,16 +100,13 @@ The final documentation-only ADR/progress commit remains subject to the protecte
 - [ ] Reject unknown child IDs
 - [ ] Reject invalid parent/child shapes
 - [ ] Reject root removal/invalid root states
-- [ ] Implement `TextRun`
-- [ ] Implement `Mark` / `MarkSet`
-- [ ] Normalize adjacent equal-mark runs
-- [ ] Reject persistent empty runs
+- [ ] Normalize adjacent equal-mark text runs in inline content
 - [ ] Demonstrate node-level structural sharing across a revision
 
 Exit evidence:
 
 ```text
-pending
+P0.2A implementation complete; PR CI pending. P0.2B begins only after this value-layer slice is merged.
 ```
 
 ## P0.3 Position and selection
@@ -198,7 +209,7 @@ P0 completes only when:
 - [ ] versioned structured document model is implemented
 - [ ] snapshots are externally immutable
 - [ ] NodeId/NodeStore structural-sharing prototype works
-- [ ] TextRun-local marks normalize deterministically
+- [ ] TextRun-local marks normalize deterministically across inline content
 - [x] TextOffset/text boundary tests are green
 - [ ] position/selection model validates correctly
 - [ ] basic typed transactions preserve invariants
@@ -225,6 +236,10 @@ Record only decisions that affect P0 execution here. Durable architectural ratio
 - An offset is not permanently valid merely because it was once validated. Buffer operations revalidate offsets/ranges so stale coordinates fail with typed errors after text changes.
 - P0 text safety is defined at UTF-8 Unicode-scalar boundaries. Grapheme-cluster cursor behavior remains a higher-level editing concern.
 - Text replacement returns a new `TextBuffer`, preserving the immutable-snapshot direction before `XiaomuDocument` exists.
+- P0.2 is split into value semantics and storage/snapshot mechanics so node storage does not prematurely freeze unresolved value contracts.
+- `NodeId` is public and comparable/hashable but has no normal external raw constructor; allocation remains a document/store responsibility.
+- `DocumentRevision` is explicitly local snapshot metadata, not a collaboration clock.
+- `MarkSet` uses deterministic semantic ordering, normalizes identical duplicates, and rejects conflicting values for one mark kind.
 
 ## Regression log
 
