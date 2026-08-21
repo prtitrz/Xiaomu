@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` depends only on the canonical Core model. `xiaomu-testkit` exists for test/support code and must not become a production dependency.
 
-`xiaomu-runtime`, `xiaomu-gpui`, the codec, testkit, and example harness are still bootstrap-level crates. `xiaomu-core` has entered P0 and now exposes the intended module boundaries for document semantics, text, selection, transactions, mapping, history primitives, and commands. Most of those modules are intentionally skeletal until their P0 slices are implemented.
+`xiaomu-runtime`, `xiaomu-gpui`, the codec, testkit, and example harness are still bootstrap-level crates. `xiaomu-core` has entered P0 and now exposes the intended module boundaries for document semantics, text, selection, transactions, mapping, history primitives, and commands. The text boundary is implemented; the remaining semantic modules are still intentionally skeletal until their P0 slices are completed.
 
 ## Core boundary
 
@@ -62,6 +62,26 @@ commands and structural invariants
 ```
 
 Core forbids unsafe code.
+
+### Text boundary
+
+The implemented Core text boundary uses:
+
+```text
+TextBuffer
+TextOffset
+TextRange
+```
+
+`TextBuffer` is currently backed by `String`, but callers interact through its semantic API rather than the storage representation.
+
+`TextOffset` is an opaque UTF-8 byte coordinate. External callers cannot construct arbitrary raw offsets directly; offsets are obtained through `TextBuffer::offset_at`, which validates bounds and UTF-8 scalar boundaries. Existing offsets and ranges are revalidated when used with a buffer because edits can make previously valid coordinates stale.
+
+`TextRange` is half-open `[start, end)`. Expected invalid offsets and ranges return typed Core errors instead of panicking.
+
+The Core text boundary guarantees Unicode scalar safety, not grapheme-cluster cursor semantics. Combining-mark and grapheme navigation remain higher-level editing concerns. UTF-16 conversion remains outside Core and will belong to platform adapters.
+
+Text replacement currently returns a new `TextBuffer`, preserving the immutable-snapshot direction required by the document model.
 
 ## Runtime boundary
 
