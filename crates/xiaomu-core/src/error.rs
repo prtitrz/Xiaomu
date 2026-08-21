@@ -50,7 +50,10 @@ impl fmt::Display for Error {
                 write!(f, "text range start {start} is after end {end}")
             }
             Self::InvalidHeadingLevel { level } => {
-                write!(f, "heading level {level} is outside the supported range 1..=6")
+                write!(
+                    f,
+                    "heading level {level} is outside the supported range 1..=6"
+                )
             }
             Self::InvalidCustomNodeKind => f.write_str("custom node kind key must not be empty"),
             Self::InvalidMarkSet => f.write_str("mark set contains conflicting mark values"),
