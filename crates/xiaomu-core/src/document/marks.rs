@@ -100,7 +100,7 @@ impl MarkSet {
         let mut marks: Vec<_> = marks.into_iter().collect();
         marks.sort_by_key(Mark::kind);
 
-        let mut normalized = Vec::with_capacity(marks.len());
+        let mut normalized: Vec<Mark> = Vec::with_capacity(marks.len());
         for mark in marks {
             if let Some(previous) = normalized.last() {
                 if previous.kind() == mark.kind() {
