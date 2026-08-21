@@ -117,15 +117,16 @@ fn validate_tree(root: NodeId, store: &NodeStore) -> Result<()> {
                 return Err(Error::InvalidChildKind);
             }
 
+            if active.contains(child_id) {
+                return Err(Error::CyclicDocument);
+            }
+
             let count = parent_counts.entry(*child_id).or_default();
             *count += 1;
             if *count > 1 {
                 return Err(Error::MultipleNodeParents);
             }
 
-            if active.contains(child_id) {
-                return Err(Error::CyclicDocument);
-            }
             stack.push((*child_id, true));
         }
     }
@@ -139,4 +140,100 @@ fn validate_tree(root: NodeId, store: &NodeStore) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::{
+        InlineContent, MarkSet, NodeAttrs, NodeContent, NodeStoreBuilder, TextRun,
+    };
+
+    #[test]
+    fn cycles_are_reported_as_cycles_before_multiple_parent_errors() {
+        let mut builder = NodeStoreBuilder::new();
+        let leaf_quote = builder
+            .insert(
+                NodeKind::Quote,
+                NodeAttrs::empty(),
+                NodeContent::children([]),
+            )
+            .unwrap();
+        let parent_quote = builder
+            .insert(
+                NodeKind::Quote,
+                NodeAttrs::empty(),
+                NodeContent::children([leaf_quote]),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([parent_quote]),
+            )
+            .unwrap();
+        let store = builder.finish();
+
+        let cyclic_leaf = store
+            .get(leaf_quote)
+            .unwrap()
+            .with_content(NodeContent::children([parent_quote]))
+            .unwrap();
+        let cyclic_store = store.replace_node(cyclic_leaf).unwrap();
+
+        assert_eq!(
+            validate_tree(root, &cyclic_store),
+            Err(Error::CyclicDocument)
+        );
+    }
+
+    #[test]
+    fn a_new_revision_reuses_unchanged_node_payloads() {
+        let mut builder = NodeStoreBuilder::new();
+        let changed = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::empty_inline(),
+            )
+            .unwrap();
+        let unchanged = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::empty_inline(),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([changed, unchanged]),
+            )
+            .unwrap();
+        let original = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+        let replacement = original
+            .store
+            .get(changed)
+            .unwrap()
+            .with_content(NodeContent::Inline(
+                InlineContent::new([TextRun::new("changed", MarkSet::empty()).unwrap()]).unwrap(),
+            ))
+            .unwrap();
+        let next_store = original.store.replace_node(replacement).unwrap();
+        let next = XiaomuDocument {
+            version: original.version,
+            revision: original.revision.next().unwrap(),
+            root: original.root,
+            store: next_store,
+        };
+
+        assert!(next.validate().is_ok());
+        assert_eq!(next.revision().as_u64(), 1);
+        assert!(!original.store.shares_node_payload(&next.store, changed));
+        assert!(original.store.shares_node_payload(&next.store, unchanged));
+        assert!(original.store.shares_node_payload(&next.store, root));
+    }
 }
