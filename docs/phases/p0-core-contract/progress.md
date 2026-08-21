@@ -15,11 +15,11 @@ This file tracks execution evidence for P0. It is intentionally operational. Lon
 
 ## Current state
 
-Current slice: **P0.0 Phase contract and module skeleton**
+Current slice: **P0.1 Text boundary**
 
-Branch: `feat/p0-core-contract`
+Branch: `feat/p0-text-boundary`
 
-P0 started with the phase design and progress documents in place before implementation.
+P0.0 was merged after full `CI Success`. P0.1 is implementing and validating the Unicode-safe Core text boundary before the canonical document model is introduced.
 
 ## P0.0 Phase contract and module skeleton
 
@@ -30,38 +30,42 @@ P0 started with the phase design and progress documents in place before implemen
 - [x] Confirm `#![forbid(unsafe_code)]` remains active in Core
 - [x] Review public/private visibility of bootstrap APIs
 - [x] Synchronize `docs/architecture.md` with the new Core module boundary
-- [ ] Run repository source-size and dependency-boundary guards
-- [ ] Run `cargo fmt --all -- --check`
-- [ ] Run `cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] Run `cargo test --workspace --all-targets`
+- [x] Run repository source-size and dependency-boundary guards
+- [x] Run `cargo fmt --all -- --check`
+- [x] Run `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] Run `cargo test --workspace --all-targets`
 
 Exit evidence:
 
 ```text
-Implementation skeleton complete; CI evidence pending.
+PR #2 merged after CI Success. P0 Core module skeleton and phase contract established.
 ```
 
 ## P0.1 Text boundary
 
-- [ ] Implement `TextBuffer`
-- [ ] Implement `TextOffset`
-- [ ] Implement `TextRange`
-- [ ] Validate UTF-8 char boundaries on construction/use
-- [ ] Add safe slicing APIs
-- [ ] Add safe replacement APIs
-- [ ] Add ASCII fixture
-- [ ] Add Chinese fixture
-- [ ] Add mixed Chinese/Latin fixture
-- [ ] Add emoji fixture
-- [ ] Add combining-mark fixture
-- [ ] Add BiDi fixture
-- [ ] Test invalid boundary errors
-- [ ] Confirm expected invalid input never panics
+- [x] Implement `TextBuffer`
+- [x] Implement `TextOffset`
+- [x] Implement `TextRange`
+- [x] Validate UTF-8 char boundaries on construction/use
+- [x] Revalidate stale offsets/ranges when used with a target buffer
+- [x] Add safe slicing APIs
+- [x] Add immutable replacement API
+- [x] Add ASCII fixture
+- [x] Add Chinese fixture
+- [x] Add mixed Chinese/Latin fixture
+- [x] Add emoji fixture
+- [x] Add combining-mark fixture
+- [x] Add BiDi fixture
+- [x] Test invalid boundary errors
+- [x] Test out-of-bounds errors
+- [x] Test stale-coordinate errors
+- [x] Confirm expected invalid input paths return typed errors
+- [~] Run full `CI Success`
 
 Exit evidence:
 
 ```text
-pending
+Implementation and regression matrix complete; PR CI pending.
 ```
 
 ## P0.2 Document model
@@ -215,6 +219,10 @@ Record only decisions that affect P0 execution here. Durable architectural ratio
 - Node storage starts with standard-library ownership/structural-sharing primitives rather than binding the public contract to a persistent-collection crate.
 - The bootstrap `CRATE_NAME` constant was removed instead of carrying an accidental public API into P0.
 - Core semantic modules are public boundaries; the error implementation module remains private and re-exports only `Error` / `Result`.
+- `TextOffset` has no public raw integer constructor. Normal callers obtain coordinates through `TextBuffer::offset_at`.
+- An offset is not permanently valid merely because it was once validated. Buffer operations revalidate offsets/ranges so stale coordinates fail with typed errors after text changes.
+- P0 text safety is defined at UTF-8 Unicode-scalar boundaries. Grapheme-cluster cursor behavior remains a higher-level editing concern.
+- Text replacement returns a new `TextBuffer`, preserving the immutable-snapshot direction before `XiaomuDocument` exists.
 
 ## Regression log
 
