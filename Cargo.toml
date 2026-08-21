@@ -18,6 +18,6 @@ repository = "https://github.com/prtitrz/Xiaomu"
 authors = ["prtitrz"]
 
 [workspace.dependencies]
-xiaomu-core = { path = "crates/xiaomu-core" }
-xiaomu-runtime = { path = "crates/xiaomu-runtime" }
-xiaomu-gpui = { path = "crates/xiaomu-gpui" }
+xiaomu-core = { version = "0.1.0", path = "crates/xiaomu-core" }
+xiaomu-runtime = { version = "0.1.0", path = "crates/xiaomu-runtime" }
+xiaomu-gpui = { version = "0.1.0", path = "crates/xiaomu-gpui" }
