@@ -15,11 +15,11 @@
 
 ## 当前状态
 
-当前切片：**P0.2B Node Storage 与 Immutable Snapshot**
+当前切片：**P0.2B Node Storage 与 Immutable Snapshot 已完成，等待 PR 最终 current-head CI 与合并**
 
 当前分支：`feat/p0-document-snapshot`
 
-P0.0、P0.1、P0.2A 已合并。P0.2B 正在完成 canonical node tree、不可变 snapshot、full-tree validation 和 structural sharing 验证。
+P0.0、P0.1、P0.2A 已合并。P0.2B 的 canonical node tree、不可变 snapshot、full-tree validation 和 structural sharing 已完成实现并通过代码级完整 CI；本 PR 最后的中文架构/进度同步提交仍需通过 current-head CI 后合并。
 
 ## P0.0 Phase Contract 与模块骨架
 
@@ -122,15 +122,18 @@ Ubuntu / Windows / macOS / policy / CI Success 全绿。
 - [x] 相邻且 `MarkSet` 相同的 `TextRun` 自动合并
 - [x] 用 revision 测试证明未变化 node payload 可共享
 - [x] 保持 `XiaomuDocument` 无公开 mutation escape hatch
-- [~] 运行完整 `CI Success`
+- [x] 代码级完整 `CI Success`
+- [x] `docs/architecture.md` 同步为真实实现并切换为中文
 
-当前验证重点：
+完成证据：
 
 ```text
-1. cargo fmt / clippy / test 是否全部通过
-2. 三平台行为是否一致
-3. source-size / dependency-boundary / cargo-deny 是否保持全绿
-4. CI 通过后再同步 architecture.md 的最终实现事实
+PR #5 的实现 head 7d9b4f7 通过 CI #57：
+Ubuntu / Windows / macOS 的 fmt / clippy / test 全绿；
+policy 的 source-size / dependency-boundary / cargo-deny / advisory 全绿；
+CI Success 汇总全绿。
+
+最后的 architecture/progress 文档同步提交仍需通过 current-head CI 后才可合并。
 ```
 
 ## P0.3 Position 与 Selection
@@ -213,7 +216,7 @@ Ubuntu / Windows / macOS / policy / CI Success 全绿。
 - [ ] 审查 public rustdoc 的语义契约
 - [ ] 明确记录 offset unit
 - [ ] 明确记录 mapping deletion behavior
-- [ ] 更新 `docs/architecture.md` 与最终实现一致
+- [ ] 更新 `docs/architecture.md` 与最终 P0 实现一致
 - [ ] 固化需要长期保留的 ADR
 - [ ] 复核 `docs/planning.md` 的 P0/P1 一致性
 - [ ] 记录 P1 尚未解决的依赖
@@ -230,7 +233,7 @@ Ubuntu / Windows / macOS / policy / CI Success 全绿。
 
 P0 只有在以下条件全部满足后才能完成：
 
-- [~] 版本化 structured document model 可用
+- [x] 版本化 structured document model 可用
 - [x] snapshot 对外不可变
 - [x] NodeId / NodeStore structural-sharing prototype 可工作
 - [x] TextRun-local marks 在 inline content 内确定性规范化
@@ -266,6 +269,7 @@ P0 只有在以下条件全部满足后才能完成：
 - `XiaomuDocument` 的公开 API 只允许查询；P0.4 的 `Transaction::apply` 才会成为 canonical mutation 公开入口。
 - `NodeStoreBuilder` 使用确定性 allocator，并保证失败 insert 不推进 allocator，避免测试和后续 transaction fixture 出现无意义 ID 漂移。
 - Full-tree validator 对 cycle 给出明确 `CyclicDocument`，不让 cycle 被较次级的 multiple-parent 错误遮蔽。
+- P0.2 不为 P0.4 提前保留 production dead-code mutation helper；当前 structural-sharing replacement helper 仅在测试配置下存在，P0.4 再按正式 Transaction contract 引入内部 mutation API。
 
 ## Regression Log
 
