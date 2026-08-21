@@ -15,11 +15,11 @@ This file tracks execution evidence for P0. It is intentionally operational. Lon
 
 ## Current state
 
-Current slice: **P0.1 Text boundary**
+Current slice: **P0.1 Text boundary complete, pending merge**
 
 Branch: `feat/p0-text-boundary`
 
-P0.0 was merged after full `CI Success`. P0.1 is implementing and validating the Unicode-safe Core text boundary before the canonical document model is introduced.
+P0.0 was merged after full `CI Success`. P0.1 has implemented and validated the Unicode-safe Core text boundary. P0.2 starts only after this focused slice is merged.
 
 ## P0.0 Phase contract and module skeleton
 
@@ -60,12 +60,14 @@ PR #2 merged after CI Success. P0 Core module skeleton and phase contract establ
 - [x] Test out-of-bounds errors
 - [x] Test stale-coordinate errors
 - [x] Confirm expected invalid input paths return typed errors
-- [~] Run full `CI Success`
+- [x] Record the canonical text-coordinate decision in ADR 0001
+- [x] Run full `CI Success`
 
 Exit evidence:
 
 ```text
-Implementation and regression matrix complete; PR CI pending.
+PR #3 implementation head passed CI #44 across Ubuntu, Windows, macOS, policy, and CI Success.
+The final documentation-only ADR/progress commit remains subject to the protected current-head CI before merge.
 ```
 
 ## P0.2 Document model
@@ -197,14 +199,14 @@ P0 completes only when:
 - [ ] snapshots are externally immutable
 - [ ] NodeId/NodeStore structural-sharing prototype works
 - [ ] TextRun-local marks normalize deterministically
-- [ ] TextOffset/text boundary tests are green
+- [x] TextOffset/text boundary tests are green
 - [ ] position/selection model validates correctly
 - [ ] basic typed transactions preserve invariants
 - [ ] StepMap/ChangeMap prototype maps old positions explicitly
 - [ ] inverse prototype restores semantic original state
-- [ ] Unicode/CJK/emoji tests are green
+- [x] Unicode/CJK/emoji text-boundary tests are green
 - [ ] property/randomized invariant tests are green
-- [ ] `CI Success` is green
+- [ ] full P0 `CI Success` is green
 
 ## Decisions / questions log
 
@@ -214,7 +216,7 @@ Record only decisions that affect P0 execution here. Durable architectural ratio
 
 - P0 uses dedicated `design.md` and `progress.md` under `docs/phases/p0-core-contract/`.
 - Phase documents refine the top-level plan but do not duplicate it.
-- Core text offsets start as validated UTF-8 byte offsets behind an opaque newtype; UTF-16 remains a frontend/platform concern.
+- Core text offsets start as validated UTF-8 byte offsets behind an opaque newtype; UTF-16 remains a frontend/platform concern. Durable rationale is recorded in `docs/adr/0001-core-text-coordinate.md`.
 - P0 starts with `String` behind `TextBuffer`; rope selection remains benchmark-driven.
 - Node storage starts with standard-library ownership/structural-sharing primitives rather than binding the public contract to a persistent-collection crate.
 - The bootstrap `CRATE_NAME` constant was removed instead of carrying an accidental public API into P0.
