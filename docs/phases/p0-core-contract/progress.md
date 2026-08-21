@@ -25,10 +25,11 @@ P0 started with the phase design and progress documents in place before implemen
 
 - [x] Create `docs/phases/p0-core-contract/design.md`
 - [x] Create `docs/phases/p0-core-contract/progress.md`
-- [ ] Add/confirm `xiaomu-core` module skeleton for `document`, `text`, `selection`, `transaction`, `mapping`, `history`, and `commands`
-- [ ] Add initial Core error/result types
-- [ ] Confirm `#![forbid(unsafe_code)]` remains active in Core
-- [ ] Review public/private visibility of bootstrap APIs
+- [x] Add/confirm `xiaomu-core` module skeleton for `document`, `text`, `selection`, `transaction`, `mapping`, `history`, and `commands`
+- [x] Add initial Core error/result types
+- [x] Confirm `#![forbid(unsafe_code)]` remains active in Core
+- [x] Review public/private visibility of bootstrap APIs
+- [x] Synchronize `docs/architecture.md` with the new Core module boundary
 - [ ] Run repository source-size and dependency-boundary guards
 - [ ] Run `cargo fmt --all -- --check`
 - [ ] Run `cargo clippy --workspace --all-targets -- -D warnings`
@@ -37,7 +38,7 @@ P0 started with the phase design and progress documents in place before implemen
 Exit evidence:
 
 ```text
-pending
+Implementation skeleton complete; CI evidence pending.
 ```
 
 ## P0.1 Text boundary
@@ -212,6 +213,8 @@ Record only decisions that affect P0 execution here. Durable architectural ratio
 - Core text offsets start as validated UTF-8 byte offsets behind an opaque newtype; UTF-16 remains a frontend/platform concern.
 - P0 starts with `String` behind `TextBuffer`; rope selection remains benchmark-driven.
 - Node storage starts with standard-library ownership/structural-sharing primitives rather than binding the public contract to a persistent-collection crate.
+- The bootstrap `CRATE_NAME` constant was removed instead of carrying an accidental public API into P0.
+- Core semantic modules are public boundaries; the error implementation module remains private and re-exports only `Error` / `Result`.
 
 ## Regression log
 
