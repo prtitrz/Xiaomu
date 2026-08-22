@@ -60,25 +60,24 @@ pub(super) fn spans_within(inline: &InlineContent, range: TextRange) -> Result<V
     Ok(spans)
 }
 
-/// Returns the mark set of the run containing `offset`.
+/// Returns the mark set that a replacement starting at `offset` would
+/// inherit under `replace_text`'s rules.
 ///
-/// `offset == len` resolves to the last run; empty content resolves to the
-/// empty mark set.
-fn marks_at(inline: &InlineContent, offset: usize) -> MarkSet {
+/// A replacement inherits the marks of the first run whose end reaches the
+/// start offset, so a start exactly at a run boundary resolves to the
+/// preceding run; offset zero resolves to the first run and an insertion at
+/// the very end resolves to the last run.
+fn inherited_marks_at(inline: &InlineContent, offset: usize) -> MarkSet {
     let mut cursor = 0usize;
     for run in inline.runs() {
         let run_end = cursor + run.len_bytes();
-        if offset < run_end {
+        if offset <= run_end {
             return run.marks().clone();
         }
         cursor = run_end;
     }
 
-    inline
-        .runs()
-        .last()
-        .map(|run| run.marks().clone())
-        .unwrap_or_else(MarkSet::empty)
+    MarkSet::empty()
 }
 
 fn offset(raw: usize) -> TextOffset {
@@ -87,9 +86,9 @@ fn offset(raw: usize) -> TextOffset {
 
 /// Builds the inverse steps of one applied `ReplaceText`.
 ///
-/// The inverse restores the old text, strips the marks the restored span
-/// carries from the replacement, and re-adds each old span's marks so even
-/// replacements crossing differently-marked runs round-trip exactly.
+/// The inverse restores the old text, strips the marks the replacement had
+/// inherited from the restored span, and re-adds each old span's marks so
+/// even replacements crossing differently-marked runs round-trip exactly.
 pub(super) fn replace_text_inverse(
     node: NodeId,
     range: TextRange,
@@ -119,17 +118,12 @@ pub(super) fn replace_text_inverse(
         replacement: old_text,
     }];
 
-    // After the restoring replacement, the span carries the marks that the
-    // original replacement inherited. For a deletion (empty replacement) the
-    // restored text inherits the marks at the preceding boundary instead.
-    let boundary = if replacement.is_empty() && start > 0 {
-        start - 1
-    } else {
-        start
-    };
+    // After the restoring replacement, the restored span carries exactly the
+    // marks the original replacement had inherited. Strip them so the
+    // per-span re-add below reconstructs the original segmentation.
     let restored_span =
         TextRange::new(offset(start), offset(start + old_len)).expect("inverse span stays ordered");
-    for mark in marks_at(pre, boundary).as_slice() {
+    for mark in inherited_marks_at(pre, start).as_slice() {
         steps.push(TransactionStep::RemoveMark {
             node,
             range: restored_span,
@@ -247,10 +241,17 @@ mod tests {
     fn marks_at_resolves_containing_and_last_runs() {
         let bold = MarkSet::new([Mark::Bold]).unwrap();
         let link = MarkSet::new([Mark::Link(LinkMark::new("https://x.example", None))]).unwrap();
-        let content = inline(&[("ab", bold), ("cd", link)]);
+        let content = inline(&[("ab", bold.clone()), ("cd", link.clone())]);
 
-        assert_eq!(marks_at(&content, 0), marks_at(&content, 1));
-        assert_eq!(marks_at(&content, 4), content.runs()[1].marks().clone());
-        assert_eq!(marks_at(&InlineContent::empty(), 0), MarkSet::empty());
+        // Boundary offsets resolve to the preceding run, matching the
+        // inheritance rules of `replace_text`.
+        assert_eq!(inherited_marks_at(&content, 0), bold);
+        assert_eq!(inherited_marks_at(&content, 2), bold);
+        assert_eq!(inherited_marks_at(&content, 3), link);
+        assert_eq!(inherited_marks_at(&content, 4), link);
+        assert_eq!(
+            inherited_marks_at(&InlineContent::empty(), 0),
+            MarkSet::empty()
+        );
     }
 }
