@@ -227,11 +227,14 @@ MappedPosition（Mapped / Deleted）
 
 ```text
 text replacement：range 之前的 offset 不变；range 终点及之后按长度差平移；
-                  range 内部与起点由 MapBias 解析到 replacement 边界
+                  range 内部与起点由 MapBias 解析到 replacement 边界；
+                  空 range（纯插入）的插入点同样由 MapBias 解析
 child insertion：插入点之后的 boundary 平移 +1；恰好位于插入点的 boundary 由 MapBias 解析
 child removal：仅其后的 boundary 平移 -1；指向被删 child 的 boundary 在前一个兄弟处存活
 removed subtree：目标位于被删子树内的 position / selection 显式 Deleted，不静默 clamp
 ```
+
+长期 mapping 决策（显式 bias、显式 Deleted 结果）见 `docs/adr/0002-position-mapping-policy.md`。
 
 `ChangeMap` 没有公开构造入口。映射是纯坐标算术，不校验 snapshot；映射结果与任何 stale 坐标一样需要针对目标 snapshot 重新校验。属性与 mark steps 不移动 position，不产生 step map 条目。`NodeInserted` 的 step map 携带新分配的 `NodeId`，插入后的结构定位不需要重新猜测 identity。
 
