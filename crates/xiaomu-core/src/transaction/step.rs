@@ -1,6 +1,6 @@
 //! Typed transaction steps.
 
-use crate::document::{Mark, MarkKind, NodeAttrs, NodeContent, NodeId};
+use crate::document::{Mark, MarkKind, Node, NodeAttrs, NodeContent, NodeId};
 use crate::text::TextRange;
 
 /// One typed canonical mutation inside a [`Transaction`](super::Transaction).
@@ -62,6 +62,25 @@ pub enum TransactionStep {
         range: TextRange,
         /// Mark to apply.
         mark: Mark,
+    },
+    /// Re-inserts a previously removed subtree under `parent` at `index`,
+    /// keeping every original node identity and payload.
+    ///
+    /// This step is produced by inverse generation; it is the exact inverse
+    /// of `RemoveNode`. Every identity in `nodes` must currently be absent
+    /// from the store, `root` must be one of `nodes`, and the re-attached
+    /// subtree must pass full-tree validation like any other step. Its
+    /// mapping data is a `NodeInserted` entry carrying the subtree root.
+    RestoreSubtree {
+        /// Existing parent whose child list gains the subtree root.
+        parent: NodeId,
+        /// Number of children before the re-inserted root.
+        index: usize,
+        /// Identity of the subtree root within `nodes`.
+        root: NodeId,
+        /// The removed nodes with their original payloads, in deterministic
+        /// identity order.
+        nodes: Vec<Node>,
     },
     /// Removes every mark of `kind` from `[range.start, range.end)` of one
     /// inline node.

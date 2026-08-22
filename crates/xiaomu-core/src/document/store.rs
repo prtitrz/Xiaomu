@@ -15,7 +15,10 @@ use super::{Node, NodeAttrs, NodeContent, NodeId, NodeKind};
 /// Replacing one node clones only the ordered map and reuses all unchanged node
 /// payloads. This is the P0 structural-sharing prototype; the public contract
 /// does not depend on this concrete representation.
-#[derive(Clone, Debug)]
+///
+/// Equality compares stored node payloads by identity; structural sharing of
+/// payloads is deliberately not part of equality.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeStore {
     nodes: Arc<BTreeMap<NodeId, Arc<Node>>>,
 }

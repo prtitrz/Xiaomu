@@ -5,11 +5,12 @@
 //! there is no public direct-mutation path into `XiaomuDocument`.
 //!
 //! P0.4 covers the first batch of typed steps. Application also produces the
-//! explicit change data used for position mapping (P0.5); inverse generation
-//! (P0.6) will build on the same step vocabulary.
+//! explicit change data used for position mapping (P0.5) and the inverse
+//! transaction used for undo round-trips (P0.6).
 
 mod apply;
 mod inline;
+mod inverse;
 mod step;
 
 use std::collections::BTreeMap;
@@ -51,6 +52,7 @@ pub struct Transaction {
 pub struct AppliedTransaction {
     document: XiaomuDocument,
     changes: ChangeMap,
+    inverse: Transaction,
 }
 
 impl AppliedTransaction {
@@ -64,6 +66,19 @@ impl AppliedTransaction {
     #[must_use]
     pub const fn changes(&self) -> &ChangeMap {
         &self.changes
+    }
+
+    /// Returns a transaction that undoes this application.
+    ///
+    /// Applying the inverse against [`Self::document`] reproduces the exact
+    /// node store and root of the snapshot the original transaction was
+    /// applied to; only the revision moves forward. Inverse steps are
+    /// recorded while the engine still sees each step's before-state, so
+    /// text, mark, and attribute changes round-trip exactly, and restored
+    /// subtrees keep their original node identities.
+    #[must_use]
+    pub const fn inverse(&self) -> &Transaction {
+        &self.inverse
     }
 
     /// Consumes the outcome and returns the new snapshot.
@@ -94,6 +109,15 @@ impl Transaction {
     /// Adds one step in place.
     pub fn push_step(&mut self, step: TransactionStep) {
         self.steps.push(step);
+    }
+
+    /// Assembles a transaction from already-ordered steps.
+    pub(crate) fn from_steps(origin: TransactionOrigin, steps: Vec<TransactionStep>) -> Self {
+        Self {
+            origin,
+            metadata: BTreeMap::new(),
+            steps,
+        }
     }
 
     /// Attaches one metadata entry; empty keys are rejected.
@@ -137,8 +161,13 @@ impl Transaction {
     /// [`MappedPosition::Deleted`](crate::mapping::MappedPosition::Deleted)
     /// instead of being clamped.
     pub fn apply_with_changes(&self, document: &XiaomuDocument) -> Result<AppliedTransaction> {
-        let (document, changes) = apply::apply_steps(document, &self.steps)?;
-        Ok(AppliedTransaction { document, changes })
+        let (document, changes, inverse_steps) = apply::apply_steps(document, &self.steps)?;
+        let inverse = Transaction::from_steps(TransactionOrigin::System, inverse_steps);
+        Ok(AppliedTransaction {
+            document,
+            changes,
+            inverse,
+        })
     }
 
     /// Applies this transaction to `document`.
