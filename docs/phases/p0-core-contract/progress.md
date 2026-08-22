@@ -346,6 +346,12 @@ P0 只有在以下条件全部满足后才能完成：
 - `TextSelection` 映射采用向外 bias（两端向 replacement 外侧解析），collapsed selection 用 Start bias 保持 collapsed。
 - 属性与 mark steps 不移动 position，不产生 step map 条目；`NodeInserted` 的 step map 携带新分配的 `NodeId`，供上层定位插入结果。
 
+### 2026-08-23（P0.5 评审）
+
+- 评审发现并修复：`TextReplaced` 空 range（纯文本插入）时，插入点上的 offset 恒被平移到插入文本之后，`MapBias` 失效；修复后空 range 插入点按 bias 解析（Start→原地，End→越过插入文本），补回归测试（PR #9）。
+- mapping 的 bias / deletion policy 属于难逆转的长期语义决策，固化为 `docs/adr/0002-position-mapping-policy.md`。
+- 历史评审结论存档：跨节点 TextSelection 建议被拒绝（跨 block selection 归 session/editor 层，见 planning.md §5.2）；apply 返回类型已按评审建议落地为 `AppliedTransaction`。
+
 ## Regression Log
 
-当前没有已知 regression。
+- 2026-08-23：P0.5 空 range 插入点 bias 失效，PR #9 修复并附回归测试；无遗留影响。
