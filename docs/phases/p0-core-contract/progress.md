@@ -15,11 +15,11 @@
 
 ## 当前状态
 
-当前切片：**P0.4 Transaction Application 已完成实现并通过 fmt / clippy / test，等待 PR CI 后合并**
+当前切片：**P0.5 Position Mapping 已完成实现并通过 fmt / clippy / test，等待 PR CI 后合并**
 
-当前分支：`feat/p0-transaction-application`
+当前分支：`feat/p0-position-mapping`
 
-P0.0、P0.1、P0.2、P0.3 已合并。
+P0.0、P0.1、P0.2、P0.3、P0.4 已合并。
 
 ## P0.0 Phase Contract 与模块骨架
 
@@ -203,20 +203,41 @@ cargo test --workspace 16 个 test target 全绿（含 tests/transaction_applica
 
 ## P0.5 Position Mapping
 
-- [ ] 定义 P0 mapping result 语义
-- [ ] text replacement mapping
-- [ ] insertion mapping
-- [ ] deletion mapping
-- [ ] removed-node result
-- [ ] transaction 内 mapping composition
-- [ ] insertion / replacement / deletion mapping table
-- [ ] 中文 / emoji mapping fixture
-- [ ] removed-node mapping fixture
+- [x] 定义 P0 mapping result 语义
+- [x] text replacement mapping
+- [x] insertion mapping
+- [x] deletion mapping
+- [x] removed-node result
+- [x] transaction 内 mapping composition
+- [x] insertion / replacement / deletion mapping table
+- [x] 中文 / emoji mapping fixture
+- [x] removed-node mapping fixture
+
+实现说明：
+
+```text
+StepMap 记录单个 step 的映射数据（TextReplaced / NodeInserted / NodeRemoved），
+坐标是 step 应用时中间状态的坐标，由 apply 引擎在应用 step 时直接产出。
+ChangeMap 按 application order 组合 step maps，无公开构造入口；
+Transaction::apply_with_changes 返回 AppliedTransaction（新 snapshot + ChangeMap），
+Transaction::apply 保持只要新 snapshot 的旧入口。
+映射结果 MappedPosition 显式区分 Mapped 与 Deleted：
+目标位于被删子树内的 position / selection 一律 Deleted，不静默 clamp。
+落在被替换 range 内部/起点的 offset 与恰好位于插入点的 NodeGap 由 MapBias（Start/End）显式解析。
+删除 child 时指向被删 child 的 gap 在前一个兄弟处存活，仅其后 gap 平移 -1，无歧义。
+映射是纯坐标算术，不校验 snapshot；映射结果需要针对目标 snapshot 重新校验。
+TextSelection 映射采用向外 bias，覆盖被替换内容的 selection 仍覆盖 replacement；collapsed 保持 collapsed。
+属性与 mark steps 不移动 position，不产生 step map 条目；NodeInserted 的 step map 携带新分配的 NodeId。
+```
 
 完成证据：
 
 ```text
-待开始
+分支 feat/p0-position-mapping：
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿
+cargo test --workspace 17 个 test target 全绿（含 tests/position_mapping.rs 9 个集成测试、mapping 模块 5 个单元测试）
+tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
 ```
 
 ## P0.6 Inverse 与随机不变量
@@ -267,7 +288,7 @@ P0 只有在以下条件全部满足后才能完成：
 - [x] TextOffset / text boundary 测试全绿
 - [x] position / selection model 校验正确
 - [x] typed transaction 保持 document invariant
-- [ ] StepMap / ChangeMap 可显式映射旧 position
+- [x] StepMap / ChangeMap 可显式映射旧 position
 - [ ] inverse prototype 可恢复语义原状态
 - [x] Unicode / CJK / emoji text-boundary 测试全绿
 - [ ] property / randomized invariant tests 全绿
@@ -313,6 +334,17 @@ P0 只有在以下条件全部满足后才能完成：
 - RemoveNode 语义为移除节点及其整个子树，避免 unreachable node 违反 store 不变量；root 不可移除。
 - metadata seam 采用 `BTreeMap<String, String>`，不引入宿主专用类型。
 - 每次 apply（包括空 transaction）推进 `DocumentRevision`。
+
+### 2026-08-22（P0.5）
+
+- Mapping 数据只由 transaction application 产出（`apply_with_changes` → `AppliedTransaction`），`ChangeMap` 无公开构造入口，其他子系统不允许自行修补 offset。
+- 映射结果 `MappedPosition` 显式区分 `Mapped` / `Deleted`；目标节点位于被删子树内时返回 `Deleted`，默认行为不静默 clamp。
+- 落在被替换 range 内部/起点的 offset、恰好位于插入点的 `NodeGap` 属于歧义位置，由调用方显式传入 `MapBias`（Start/End）解析，而不是隐式选择。
+- 删除 child 对 gap 无歧义：指向被删 child 的 gap 在前一个兄弟处存活，仅其后的 gap 平移 -1。
+- `ChangeMap` 组合按 application order 折叠，`Deleted` 短路；step map 记录的是 step 应用时中间状态的坐标，因此组合天然正确。
+- 映射是纯坐标算术，不校验 snapshot；映射结果与任何 stale 坐标一样需要针对目标 snapshot 重新校验。
+- `TextSelection` 映射采用向外 bias（两端向 replacement 外侧解析），collapsed selection 用 Start bias 保持 collapsed。
+- 属性与 mark steps 不移动 position，不产生 step map 条目；`NodeInserted` 的 step map 携带新分配的 `NodeId`，供上层定位插入结果。
 
 ## Regression Log
 

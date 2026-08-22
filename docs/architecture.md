@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前 `xiaomu-runtime`、`xiaomu-gpui`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已进入 P0，Text Boundary、P0.2 Document Model、P0.3 Position / Selection 和 P0.4 Transaction Application 已实现；Mapping、Inverse / History 仍按 P0 后续切片推进。
+当前 `xiaomu-runtime`、`xiaomu-gpui`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已进入 P0，Text Boundary、P0.2 Document Model、P0.3 Position / Selection、P0.4 Transaction Application 和 P0.5 Position Mapping 已实现；Inverse / History 仍按 P0 后续切片推进。
 
 ## Core 边界
 
@@ -202,7 +202,7 @@ TransactionStep：
     RemoveMark
 ```
 
-`Transaction::apply(&XiaomuDocument) -> Result<XiaomuDocument>` 是原子的：steps 顺序应用在内部中间 store 上，最终状态经过 full-tree validation 才返回新 snapshot；任一 step 失败则整体失败且原 snapshot 不变。每次 apply 推进 `DocumentRevision`。
+`Transaction::apply_with_changes(&XiaomuDocument) -> Result<AppliedTransaction>` 是原子的：steps 顺序应用在内部中间 store 上，最终状态经过 full-tree validation 才返回新 snapshot 和 mapping 数据；任一 step 失败则整体失败且原 snapshot 不变。`Transaction::apply` 是只要新 snapshot 的便捷入口。每次 apply 推进 `DocumentRevision`。
 
 文本与 mark steps 由 piece-based inline 编辑实现：runs 在 range 边界切分、编辑后重建并重新规范化。replacement 继承 `range.start` 所在 run 的 marks；AddMark 在 range 内替换同 kind 冲突 mark；结果不保留空 run，相邻同 mark run 自动合并。
 
@@ -210,7 +210,32 @@ InsertNode 由 snapshot 内部 allocator 分配新 NodeId；RemoveNode 连同整
 
 metadata seam 使用 `BTreeMap<String, String>`，不携带宿主专用类型。
 
-Position mapping（P0.5）与 inverse 生成（P0.6）将建立在同一 step 词表上。
+应用过程同时产出 P0.5 的 position mapping 数据；inverse 生成（P0.6）将建立在同一 step 词表上。
+
+### Position Mapping
+
+`mapping/` 模块实现显式 position mapping。映射数据只由 transaction application 产出，其他子系统不允许自行修补 offset：
+
+```text
+StepMap（TextReplaced / NodeInserted / NodeRemoved）
+ChangeMap（按 application order 组合的 step maps）
+MapBias（Start / End）
+MappedPosition（Mapped / Deleted）
+```
+
+`ChangeMap` 把旧 snapshot 的 position 按 step 顺序折叠映射到新 snapshot 的坐标空间；任一 step 删除目标节点后结果保持 `Deleted`。映射语义：
+
+```text
+text replacement：range 之前的 offset 不变；range 终点及之后按长度差平移；
+                  range 内部与起点由 MapBias 解析到 replacement 边界
+child insertion：插入点之后的 boundary 平移 +1；恰好位于插入点的 boundary 由 MapBias 解析
+child removal：仅其后的 boundary 平移 -1；指向被删 child 的 boundary 在前一个兄弟处存活
+removed subtree：目标位于被删子树内的 position / selection 显式 Deleted，不静默 clamp
+```
+
+`ChangeMap` 没有公开构造入口。映射是纯坐标算术，不校验 snapshot；映射结果与任何 stale 坐标一样需要针对目标 snapshot 重新校验。属性与 mark steps 不移动 position，不产生 step map 条目。`NodeInserted` 的 step map 携带新分配的 `NodeId`，插入后的结构定位不需要重新猜测 identity。
+
+`TextSelection` 的映射采用向外 bias：两端解析向 replacement 外侧，覆盖被替换内容的 selection 仍覆盖 replacement；collapsed selection 保持 collapsed。
 
 ## Runtime 边界
 
