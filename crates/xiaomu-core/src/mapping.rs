@@ -87,10 +87,12 @@ pub enum StepMap {
 impl StepMap {
     /// Maps one text point across this step.
     ///
-    /// Offsets before the replaced range stay put, offsets at or after its
-    /// end shift by the length delta, and offsets inside `[range.start,
+    /// Offsets before the replaced range stay put, offsets after its end
+    /// shift by the length delta, and offsets inside `[range.start,
     /// range.end)` resolve to the replacement boundary chosen by `bias`.
-    /// Affinity is preserved. Text points of other nodes are unaffected.
+    /// An empty range is a pure insertion: the position exactly at its start
+    /// is the insertion boundary and also resolves by `bias`. Affinity is
+    /// preserved. Text points of other nodes are unaffected.
     #[must_use]
     pub fn map_text_point(&self, point: TextPoint, bias: MapBias) -> MappedPosition<TextPoint> {
         match self {
@@ -107,9 +109,15 @@ impl StepMap {
                 let end = range.end().as_usize();
                 let old = point.offset().as_usize();
 
-                let mapped = if old < start {
-                    old
-                } else if old >= end {
+                let mapped = if old < start || (start == end && old == start) {
+                    // Before the edit, or exactly at an empty-range insertion
+                    // point, which is the insertion boundary itself.
+                    if start == end && old == start && bias == MapBias::End {
+                        start + *replacement_len
+                    } else {
+                        old
+                    }
+                } else if old > end || (old == end && old > start) {
                     old - (end - start) + *replacement_len
                 } else {
                     match bias {
@@ -316,6 +324,31 @@ mod tests {
             range: range(start, end),
             replacement_len: len,
         }
+    }
+
+    #[test]
+    fn empty_range_insertion_resolves_the_boundary_by_bias() {
+        let step = replaced(3, 3, 4);
+
+        // A pure insertion at byte 3: the caret sitting exactly there is the
+        // insertion boundary and resolves by bias.
+        assert_eq!(
+            step.map_text_point(point(1, 3), MapBias::Start),
+            MappedPosition::Mapped(point(1, 3))
+        );
+        assert_eq!(
+            step.map_text_point(point(1, 3), MapBias::End),
+            MappedPosition::Mapped(point(1, 7))
+        );
+        // Earlier and later positions shift as usual.
+        assert_eq!(
+            step.map_text_point(point(1, 1), MapBias::End),
+            MappedPosition::Mapped(point(1, 1))
+        );
+        assert_eq!(
+            step.map_text_point(point(1, 6), MapBias::Start),
+            MappedPosition::Mapped(point(1, 10))
+        );
     }
 
     #[test]
