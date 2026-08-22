@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前 `xiaomu-runtime`、`xiaomu-gpui`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已进入 P0，Text Boundary、P0.2 Document Model、P0.3 Position / Selection、P0.4 Transaction Application 和 P0.5 Position Mapping 已实现；Inverse / History 仍按 P0 后续切片推进。
+当前 `xiaomu-runtime`、`xiaomu-gpui`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已进入 P0，Text Boundary、P0.2 Document Model、P0.3 Position / Selection、P0.4 Transaction Application、P0.5 Position Mapping 和 P0.6 Inverse 已实现；History 栈与 command 行为仍按 P0 后续切片推进。
 
 ## Core 边界
 
@@ -197,6 +197,7 @@ TransactionStep：
     ReplaceText
     InsertNode
     RemoveNode
+    RestoreSubtree
     SetNodeAttrs
     AddMark
     RemoveMark
@@ -206,11 +207,11 @@ TransactionStep：
 
 文本与 mark steps 由 piece-based inline 编辑实现：runs 在 range 边界切分、编辑后重建并重新规范化。replacement 继承 `range.start` 所在 run 的 marks；AddMark 在 range 内替换同 kind 冲突 mark；结果不保留空 run，相邻同 mark run 自动合并。
 
-InsertNode 由 snapshot 内部 allocator 分配新 NodeId；RemoveNode 连同整个子树移除；root 不可移除。`NodeStore` 的 replace / insert / remove 原语均为 `pub(crate)`，公开 API 不存在 direct canonical mutation escape hatch。
+InsertNode 由 snapshot 内部 allocator 分配新 NodeId；RemoveNode 连同整个子树移除；root 不可移除。`RestoreSubtree` 是 `RemoveNode` 的精确逆 step：以原 NodeId 与 payload 整体回插先前移除的子树，要求所有 id 当前不存在，映射数据记为携带子树根的 `NodeInserted`。`NodeStore` 的 replace / insert / remove 原语均为 `pub(crate)`，公开 API 不存在 direct canonical mutation escape hatch。
 
 metadata seam 使用 `BTreeMap<String, String>`，不携带宿主专用类型。
 
-应用过程同时产出 P0.5 的 position mapping 数据；inverse 生成（P0.6）将建立在同一 step 词表上。
+应用过程同时产出 P0.5 的 position mapping 数据与 P0.6 的 inverse transaction。
 
 ### Position Mapping
 
@@ -239,6 +240,25 @@ removed subtree：目标位于被删子树内的 position / selection 显式 Del
 `ChangeMap` 没有公开构造入口。映射是纯坐标算术，不校验 snapshot；映射结果与任何 stale 坐标一样需要针对目标 snapshot 重新校验。属性与 mark steps 不移动 position，不产生 step map 条目。`NodeInserted` 的 step map 携带新分配的 `NodeId`，插入后的结构定位不需要重新猜测 identity。
 
 `TextSelection` 的映射采用向外 bias：两端解析向 replacement 外侧，覆盖被替换内容的 selection 仍覆盖 replacement；collapsed selection 保持 collapsed。
+
+### Inverse 与 Undo Round-trip
+
+`AppliedTransaction::inverse()` 返回一个 `System` origin 的逆 `Transaction`。inverse steps 由 apply 引擎在应用每个 step 时同步记录，因为只有此时能看到该 step 的 before-state：
+
+```text
+ReplaceText   逆 = 恢复旧文本 + 剥离 replacement 继承的 marks + 按旧 piece 重新加回 marks
+AddMark       逆 = 整段 RemoveMark + 按旧 piece 恢复原值
+RemoveMark    逆 = 按旧 piece 恢复被移除的 mark
+InsertNode    逆 = RemoveNode（新分配的节点）
+RemoveNode    逆 = RestoreSubtree（原 NodeId 与 payload 整体回插）
+SetNodeAttrs  逆 = 换回旧 attrs
+```
+
+`ReplaceText` 的逆特别处理 mark 继承差异：非空 replacement 继承 `range.start` 所在 run 的 marks，纯删除回插时则继承前一个边界 run 的 marks，因此跨 run 替换与 run 边界删除都能精确还原规范化后的 text / marks。
+
+逆 step group 按 step 反序组合；group 内坐标与其原 step 产生的中间状态一致，多 step transaction 的逆无需重放中间文档。对 `inverse().apply(&applied.document())` 的结果，store 与 root 与原 snapshot 完全相等（不止语义等价，被删子树的 NodeId 也原样恢复）；只有 revision 前进。`NodeStore` 的相等语义按 payload 内容比较，与 structural sharing 无关。
+
+随机不变量测试（确定性 xorshift，无外部依赖）在随机 valid transaction 序列上同时验证：document 始终合法、旧 position 映射后仍落在合法坐标、每笔 transaction round-trip 还原 store、以及整链反序 undo 回到初始 store。
 
 ## Runtime 边界
 

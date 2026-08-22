@@ -70,9 +70,15 @@ fn split_pieces(inline: &InlineContent, range: TextRange) -> Result<Vec<Piece>> 
             pieces.push(Piece::new(marks.clone(), run_text[from..to].to_owned()));
         }
 
-        // Untouched suffix after the affected span.
-        if run_end > end {
-            pieces.push(Piece::new(marks, run_text[end - run_start..].to_owned()));
+        // Untouched suffix after the affected span. A run that starts at or
+        // after `end` is entirely suffix; slicing from `end - run_start`
+        // would underflow for such runs.
+        let suffix_start = end.max(run_start);
+        if run_end > suffix_start {
+            pieces.push(Piece::new(
+                marks,
+                run_text[suffix_start - run_start..].to_owned(),
+            ));
         }
     }
 
@@ -299,6 +305,36 @@ mod tests {
 
         let cleared = remove_mark(&next, range(0, 4), MarkKind::Bold).unwrap();
         assert!(cleared.runs()[0].marks().is_empty());
+    }
+
+    #[test]
+    fn mark_ops_leave_later_runs_untouched() {
+        // Regression: ranges that end before the last run must not slice the
+        // suffix with an underflowing index.
+        let bold = MarkSet::new([Mark::Bold]).unwrap();
+        let italic = MarkSet::new([Mark::Italic]).unwrap();
+        let content = InlineContent::new([
+            TextRun::new("你好", bold.clone()).unwrap(),
+            TextRun::new("world", MarkSet::empty()).unwrap(),
+            TextRun::new("tail", italic).unwrap(),
+        ])
+        .unwrap();
+
+        let next = add_mark(&content, range(0, 3), Mark::Code).unwrap();
+        assert_eq!(next.runs().len(), 4);
+        assert_eq!(next.runs()[0].text().as_str(), "你");
+        assert!(next.runs()[0].marks().contains(MarkKind::Code));
+        assert_eq!(next.runs()[1].text().as_str(), "好");
+        assert_eq!(next.runs()[1].marks(), &bold);
+        assert_eq!(next.runs()[2].text().as_str(), "world");
+        assert_eq!(next.runs()[3].text().as_str(), "tail");
+
+        let cleared = remove_mark(&content, range(0, 3), MarkKind::Bold).unwrap();
+        assert_eq!(cleared.runs().len(), 4);
+        assert_eq!(cleared.runs()[0].text().as_str(), "你");
+        assert!(cleared.runs()[0].marks().is_empty());
+        assert!(cleared.runs()[1].marks().contains(MarkKind::Bold));
+        assert_eq!(cleared.runs()[3].text().as_str(), "tail");
     }
 
     #[test]

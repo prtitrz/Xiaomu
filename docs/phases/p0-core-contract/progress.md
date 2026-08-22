@@ -15,11 +15,11 @@
 
 ## 当前状态
 
-当前切片：**P0.5 Position Mapping 已完成实现并通过 fmt / clippy / test，等待 PR CI 后合并**
+当前切片：**P0.6 Inverse 与随机不变量已完成实现并通过 fmt / clippy / test，等待 PR CI 后合并**
 
-当前分支：`feat/p0-position-mapping`
+当前分支：`feat/p0-inverse-randomized`
 
-P0.0、P0.1、P0.2、P0.3、P0.4 已合并。
+P0.0、P0.1、P0.2、P0.3、P0.4、P0.5（含评审修复 #9/#10）已合并。
 
 ## P0.0 Phase Contract 与模块骨架
 
@@ -242,21 +242,46 @@ tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
 
 ## P0.6 Inverse 与随机不变量
 
-- [ ] 定义 inverse / change-set prototype 边界
-- [ ] invert text replacement
-- [ ] invert node insertion / removal
-- [ ] invert attrs changes
-- [ ] invert mark changes
-- [ ] semantic round-trip helper
-- [ ] deterministic multi-step inverse tests
-- [ ] 可行范围内增加 randomized valid transaction sequence tests
-- [ ] 随机 sequence 保持 document validity
-- [ ] 随机 sequence 不 panic
+- [x] 定义 inverse / change-set prototype 边界
+- [x] invert text replacement
+- [x] invert node insertion / removal
+- [x] invert attrs changes
+- [x] invert mark changes
+- [x] semantic round-trip helper
+- [x] deterministic multi-step inverse tests
+- [x] 可行范围内增加 randomized valid transaction sequence tests
+- [x] 随机 sequence 保持 document validity
+- [x] 随机 sequence 不 panic
+
+实现说明：
+
+```text
+inverse steps 由 apply 引擎在应用每个 step 时同步记录（此时可见 before-state）；
+AppliedTransaction::inverse() 返回 System origin 的逆 Transaction，P0 不引入独立 history 栈。
+逆 step group 按 step 反序组合，group 内坐标与其原 step 产生的中间状态一致，
+多 step transaction 的逆不需要重放中间文档。
+ReplaceText 的逆 = 恢复旧文本 + 剥离 replacement 继承的 marks + 按旧 piece 重新加回 marks；
+纯删除回插时继承边界为前一个 run，跨 run 替换与 run 边界删除都能精确还原。
+AddMark 逆 = 整段 RemoveMark + 按旧 piece 恢复原值；RemoveMark 逆 = 按旧 piece 恢复；
+SetNodeAttrs 逆 = 换回旧 attrs；InsertNode 逆 = RemoveNode。
+RemoveNode 的逆是新 step RestoreSubtree：以原 NodeId 与 payload 整体回插子树，
+要求所有 id 当前不存在；round-trip 后 store 与 root 与原 snapshot 完全相等（不止语义等价）。
+NodeStore 增加按 payload 内容的相等语义（与 structural sharing 无关）以支持 round-trip 断言。
+随机测试使用确定性 xorshift（无外部依赖）：8 seeds × 10 笔随机（1-3 step）transaction，
+同时验证 document validity、旧 position 映射后坐标合法、单笔 round-trip、整链反序 undo 回初始 store。
+随机测试发现并修复 P0.4 遗留 bug：split_pieces 对 range 结束于后续 run 之前的多 run 内容
+在 suffix 切片处 usize 下溢。
+```
 
 完成证据：
 
 ```text
-待开始
+分支 feat/p0-inverse-randomized：
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿
+cargo test --workspace 18 个 test target 全绿
+（含 tests/inverse_roundtrip.rs 9 个集成测试：8 个确定性 round-trip/链式 undo + 1 个随机不变量）
+tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
 ```
 
 ## P0.7 Contract Stabilization
@@ -289,9 +314,9 @@ P0 只有在以下条件全部满足后才能完成：
 - [x] position / selection model 校验正确
 - [x] typed transaction 保持 document invariant
 - [x] StepMap / ChangeMap 可显式映射旧 position
-- [ ] inverse prototype 可恢复语义原状态
+- [x] inverse prototype 可恢复语义原状态
 - [x] Unicode / CJK / emoji text-boundary 测试全绿
-- [ ] property / randomized invariant tests 全绿
+- [x] property / randomized invariant tests 全绿
 - [ ] P0 最终 `CI Success` 全绿
 
 ## 决策记录
@@ -352,6 +377,17 @@ P0 只有在以下条件全部满足后才能完成：
 - mapping 的 bias / deletion policy 属于难逆转的长期语义决策，固化为 `docs/adr/0002-position-mapping-policy.md`。
 - 历史评审结论存档：跨节点 TextSelection 建议被拒绝（跨 block selection 归 session/editor 层，见 planning.md §5.2）；apply 返回类型已按评审建议落地为 `AppliedTransaction`。
 
+### 2026-08-22（P0.6）
+
+- inverse steps 在 apply 时同步生成（引擎此时可见 before-state）；`AppliedTransaction::inverse()` 返回 System origin 的逆 Transaction，P0 不引入独立 history 栈，undo 栈编排留给后续阶段。
+- `RemoveNode` 的逆是新 step `RestoreSubtree`：以原 NodeId 与 payload 整体回插子树，要求所有 id 当前不存在、root 必须在 nodes 内；round-trip 后 store 与 root 完全相等（不止语义等价，被删子树 identity 原样恢复）。
+- `ReplaceText` 的逆由"恢复旧文本 + 剥离继承 marks + 按旧 piece 重加 marks"组成；空 replacement 回插时继承边界为前一个 run，处理与 P0.4 继承规则的差异。
+- 逆 step group 按 step 反序组合，组内坐标与其原 step 的中间状态一致；同 transaction 内先删父节点子节点等顺序约束由"子必须先于祖先删除"天然保证逆序回插合法。
+- `NodeStore` 增加按 payload 内容的 `PartialEq`（与 structural sharing 无关），用于 round-trip 断言。
+- 随机测试采用确定性 xorshift，不引入 dev 依赖；生成器只产生 boundary-valid range 与结构合法 step，模拟逐 step 生成多 step transaction。
+- P0.6 随机测试发现 P0.4 遗留 bug（split_pieces suffix 下溢），修复附 inline.rs 单元回归测试。
+
 ## Regression Log
 
 - 2026-08-23：P0.5 空 range 插入点 bias 失效，PR #9 修复并附回归测试；无遗留影响。
+- 2026-08-22：P0.4 引入的 `split_pieces` suffix 切片在"range 结束于后续 run 之前"的多 run inline 内容上 usize 下溢（debug 下 panic，多 run mark 操作触发）；P0.6 随机不变量测试发现，修复为按 `end.max(run_start)` 起切，附 `mark_ops_leave_later_runs_untouched` 回归测试。

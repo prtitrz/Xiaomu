@@ -2,7 +2,8 @@
 //!
 //! Steps are applied in order against intermediate stores. Full-tree
 //! validation runs once on the final state; intermediate states are kept
-//! internally and never escape the engine.
+//! internally and never escape the engine. While applying, the engine also
+//! records the inverse steps of every step; see [`super::inverse`].
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -14,6 +15,7 @@ use crate::text::TextRange;
 use crate::{Error, Result};
 
 use super::inline;
+use super::inverse;
 use super::step::TransactionStep;
 
 /// Working state of one application pass.
@@ -62,47 +64,47 @@ impl ApplyContext {
             .ok_or(Error::InvalidTransaction)
     }
 
-    /// Applies one step and returns its mapping data when the step can move
-    /// positions. Attribute and mark steps never move positions and return
-    /// `None`.
-    fn apply_step(&mut self, step: &TransactionStep) -> Result<Option<StepMap>> {
+    /// Applies one step and returns its mapping data together with the
+    /// inverse steps that undo it.
+    ///
+    /// Attribute and mark steps never move positions and return no mapping
+    /// data. Every step kind produces inverse steps so whole transactions
+    /// stay exactly invertible.
+    fn apply_step(
+        &mut self,
+        step: &TransactionStep,
+    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
         match step {
             TransactionStep::ReplaceText {
                 node,
                 range,
                 replacement,
-            } => self
-                .apply_replace_text(*node, *range, replacement)
-                .map(Some),
+            } => self.apply_replace_text(*node, *range, replacement),
             TransactionStep::InsertNode {
                 parent,
                 index,
                 kind,
                 attrs,
                 content,
-            } => self
-                .apply_insert_node(*parent, *index, kind, attrs.clone(), content.clone())
-                .map(Some),
-            TransactionStep::RemoveNode { node } => self.apply_remove_node(*node).map(Some),
+            } => self.apply_insert_node(*parent, *index, kind, attrs.clone(), content.clone()),
+            TransactionStep::RestoreSubtree {
+                parent,
+                index,
+                root,
+                nodes,
+            } => self.apply_restore_subtree(*parent, *index, *root, nodes),
+            TransactionStep::RemoveNode { node } => self.apply_remove_node(*node),
             TransactionStep::SetNodeAttrs { node, attrs } => {
-                if self.store.get(*node).is_none() {
-                    return Err(Error::UnknownNode);
-                }
-                self.rewrite_node(*node, attrs.clone(), self.content_of(*node)?)?;
-                Ok(None)
+                self.apply_set_node_attrs(*node, attrs)
             }
             TransactionStep::AddMark { node, range, mark } => {
-                self.apply_mark_change(*node, *range, MarkChange::Add(mark.clone()))?;
-                Ok(None)
+                self.apply_mark_change(*node, *range, MarkChange::Add(mark.clone()))
             }
             TransactionStep::RemoveMark {
                 node,
                 range,
                 mark_kind,
-            } => {
-                self.apply_mark_change(*node, *range, MarkChange::Remove(*mark_kind))?;
-                Ok(None)
-            }
+            } => self.apply_mark_change(*node, *range, MarkChange::Remove(*mark_kind)),
         }
     }
 
@@ -118,16 +120,20 @@ impl ApplyContext {
         node: NodeId,
         range: TextRange,
         replacement: &str,
-    ) -> Result<StepMap> {
+    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
         let content = self.inline_content(node)?;
+        let spans = inverse::spans_within(&content, range)?;
         let next = inline::replace_text(&content, range, replacement)?;
         self.rewrite_node(node, self.attrs_of(node)?, NodeContent::Inline(next))?;
 
-        Ok(StepMap::TextReplaced {
+        let step_map = StepMap::TextReplaced {
             node,
             range,
             replacement_len: replacement.len(),
-        })
+        };
+        let inverse_steps =
+            inverse::replace_text_inverse(node, range, replacement, &content, &spans);
+        Ok((Some(step_map), inverse_steps))
     }
 
     fn apply_mark_change(
@@ -135,13 +141,21 @@ impl ApplyContext {
         node: NodeId,
         range: TextRange,
         change: MarkChange,
-    ) -> Result<()> {
+    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
         let content = self.inline_content(node)?;
+        let spans = inverse::spans_within(&content, range)?;
+        let inverse_steps = match &change {
+            MarkChange::Add(mark) => inverse::add_mark_inverse(node, range, mark.kind(), &spans),
+            MarkChange::Remove(kind) => inverse::remove_mark_inverse(node, *kind, &spans),
+        };
+
         let next = match change {
             MarkChange::Add(mark) => inline::add_mark(&content, range, mark)?,
             MarkChange::Remove(kind) => inline::remove_mark(&content, range, kind)?,
         };
-        self.rewrite_node(node, self.attrs_of(node)?, NodeContent::Inline(next))
+        self.rewrite_node(node, self.attrs_of(node)?, NodeContent::Inline(next))?;
+
+        Ok((None, inverse_steps))
     }
 
     fn attrs_of(&self, id: NodeId) -> Result<NodeAttrs> {
@@ -151,6 +165,25 @@ impl ApplyContext {
             .map(|node| node.attrs().clone())
     }
 
+    fn apply_set_node_attrs(
+        &mut self,
+        node: NodeId,
+        attrs: &NodeAttrs,
+    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+        if self.store.get(node).is_none() {
+            return Err(Error::UnknownNode);
+        }
+
+        let previous = self.attrs_of(node)?;
+        self.rewrite_node(node, attrs.clone(), self.content_of(node)?)?;
+
+        let inverse = vec![TransactionStep::SetNodeAttrs {
+            node,
+            attrs: previous,
+        }];
+        Ok((None, inverse))
+    }
+
     fn apply_insert_node(
         &mut self,
         parent: NodeId,
@@ -158,7 +191,7 @@ impl ApplyContext {
         kind: &NodeKind,
         attrs: NodeAttrs,
         content: NodeContent,
-    ) -> Result<StepMap> {
+    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
         let mut children = self.children(parent)?;
         if index > children.len() {
             return Err(Error::InvalidTransaction);
@@ -172,20 +205,73 @@ impl ApplyContext {
             NodeContent::children(children),
         )?;
 
-        Ok(StepMap::NodeInserted {
+        let step_map = StepMap::NodeInserted {
             parent,
             index,
             inserted: id,
-        })
+        };
+        let inverse = vec![TransactionStep::RemoveNode { node: id }];
+        Ok((Some(step_map), inverse))
     }
 
-    fn apply_remove_node(&mut self, node: NodeId) -> Result<StepMap> {
+    fn apply_restore_subtree(
+        &mut self,
+        parent: NodeId,
+        index: usize,
+        root: NodeId,
+        nodes: &[Node],
+    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+        if !nodes.iter().any(|node| node.id() == root) {
+            return Err(Error::InvalidTransaction);
+        }
+        if nodes.iter().any(|node| self.store.contains(node.id())) {
+            return Err(Error::InvalidTransaction);
+        }
+
+        let mut children = self.children(parent)?;
+        if index > children.len() {
+            return Err(Error::InvalidTransaction);
+        }
+
+        for node in nodes {
+            let ceiling = node
+                .id()
+                .raw()
+                .checked_add(1)
+                .ok_or(Error::NodeIdExhausted)?;
+            self.next_node_id = self.next_node_id.max(ceiling);
+            self.store = self.store.inserted(node.clone())?;
+        }
+        children.insert(index, root);
+        self.rewrite_node(
+            parent,
+            self.attrs_of(parent)?,
+            NodeContent::children(children),
+        )?;
+
+        let step_map = StepMap::NodeInserted {
+            parent,
+            index,
+            inserted: root,
+        };
+        let inverse = vec![TransactionStep::RemoveNode { node: root }];
+        Ok((Some(step_map), inverse))
+    }
+
+    fn apply_remove_node(
+        &mut self,
+        node: NodeId,
+    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
         if node == self.root {
             return Err(Error::InvalidTransaction);
         }
 
         let parent = self.find_parent(node)?;
         let subtree = self.collect_subtree(node);
+        let payloads: Vec<Node> = subtree
+            .iter()
+            .filter_map(|id| self.store.get(*id).cloned())
+            .collect();
 
         let mut children = self.children(parent)?;
         let index = children
@@ -200,11 +286,18 @@ impl ApplyContext {
         )?;
         self.store = self.store.without_nodes(&subtree);
 
-        Ok(StepMap::NodeRemoved {
+        let step_map = StepMap::NodeRemoved {
             parent,
             index,
             removed: subtree,
-        })
+        };
+        let inverse = vec![TransactionStep::RestoreSubtree {
+            parent,
+            index,
+            root: node,
+            nodes: payloads,
+        }];
+        Ok((Some(step_map), inverse))
     }
 
     fn find_parent(&self, target: NodeId) -> Result<NodeId> {
@@ -246,12 +339,16 @@ enum MarkChange {
     Remove(crate::document::MarkKind),
 }
 
-/// Applies `steps` in order and returns a fully validated snapshot together
-/// with the composed mapping data of the transaction.
+/// Applies `steps` in order and returns a fully validated snapshot, the
+/// composed mapping data, and the inverse steps of the whole transaction.
+///
+/// Inverse step groups are recorded per step and reversed here, so each
+/// group's coordinates match the intermediate state its original step
+/// produced.
 pub(super) fn apply_steps(
     document: &XiaomuDocument,
     steps: &[TransactionStep],
-) -> Result<(XiaomuDocument, ChangeMap)> {
+) -> Result<(XiaomuDocument, ChangeMap, Vec<TransactionStep>)> {
     let mut context = ApplyContext {
         root: document.root(),
         store: document.store().clone(),
@@ -259,10 +356,13 @@ pub(super) fn apply_steps(
     };
 
     let mut step_maps = Vec::new();
+    let mut inverse_groups: Vec<Vec<TransactionStep>> = Vec::new();
     for step in steps {
-        if let Some(step_map) = context.apply_step(step)? {
+        let (step_map, inverse_steps) = context.apply_step(step)?;
+        if let Some(step_map) = step_map {
             step_maps.push(step_map);
         }
+        inverse_groups.push(inverse_steps);
     }
 
     let revision = document
@@ -277,5 +377,6 @@ pub(super) fn apply_steps(
         context.next_node_id,
     )?;
 
-    Ok((applied, ChangeMap::from_steps(step_maps)))
+    let inverse_steps = inverse_groups.into_iter().rev().flatten().collect();
+    Ok((applied, ChangeMap::from_steps(step_maps), inverse_steps))
 }
