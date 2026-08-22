@@ -66,11 +66,22 @@ pub enum TransactionStep {
     /// Re-inserts a previously removed subtree under `parent` at `index`,
     /// keeping every original node identity and payload.
     ///
-    /// This step is produced by inverse generation; it is the exact inverse
-    /// of `RemoveNode`. Every identity in `nodes` must currently be absent
-    /// from the store, `root` must be one of `nodes`, and the re-attached
-    /// subtree must pass full-tree validation like any other step. Its
-    /// mapping data is a `NodeInserted` entry carrying the subtree root.
+    /// This step exists so that undo can restore a removed subtree exactly;
+    /// its intended producer is [`AppliedTransaction::inverse`](super::AppliedTransaction::inverse).
+    /// It is **not** a general-purpose copy or move primitive:
+    ///
+    /// - every identity in `nodes` must currently be absent from the store,
+    ///   so the step can never duplicate or overwrite live nodes;
+    /// - node identities cannot be minted by callers, so `nodes` can only
+    ///   carry payloads obtained from snapshots of the same document
+    ///   lineage — in practice, payloads that this document previously
+    ///   removed;
+    /// - `root` must be one of `nodes`, and the re-attached subtree must
+    ///   pass full-tree validation like any other step.
+    ///
+    /// Violations fail application atomically with `InvalidTransaction` or a
+    /// validation error. Its mapping data is a `NodeInserted` entry carrying
+    /// the subtree root.
     RestoreSubtree {
         /// Existing parent whose child list gains the subtree root.
         parent: NodeId,

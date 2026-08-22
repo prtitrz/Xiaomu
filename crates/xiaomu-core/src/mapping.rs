@@ -13,6 +13,10 @@
 //! range are resolved by an explicit [`MapBias`]. The arithmetic is pure: it
 //! does not consult a snapshot, so mapped results should be validated against
 //! the target snapshot exactly like any other stale coordinate.
+//!
+//! The long-term bias and deletion policy is fixed by `docs/adr/0002` in the
+//! repository: explicit `Mapped` / `Deleted` results, caller-supplied bias for
+//! ambiguous boundaries, and no clamping anywhere in Core.
 
 use std::collections::BTreeSet;
 

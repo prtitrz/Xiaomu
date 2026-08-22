@@ -7,6 +7,10 @@
 //! obtain offsets from a `TextBuffer`, which validates UTF-8 scalar boundaries.
 //! A previously valid offset must still be revalidated when used with another
 //! buffer or a later revision because edits can invalidate old coordinates.
+//!
+//! The long-term coordinate decision (UTF-8 scalar boundaries in Core,
+//! UTF-16 only in platform adapters) is fixed by `docs/adr/0001` in the
+//! repository.
 
 use core::fmt;
 

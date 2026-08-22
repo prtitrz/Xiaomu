@@ -15,11 +15,11 @@
 
 ## 当前状态
 
-当前切片：**P0.6 Inverse 与随机不变量已完成实现并通过 fmt / clippy / test，等待 PR CI 后合并**
+当前切片：**P0.7 Contract Stabilization 已完成实现，本 PR 合并即 P0 收官**
 
-当前分支：`feat/p0-inverse-randomized`
+当前分支：`feat/p0-contract-stabilization`
 
-P0.0、P0.1、P0.2、P0.3、P0.4、P0.5（含评审修复 #9/#10）已合并。
+P0.0–P0.6（含评审修复 #9/#10/#12）已合并。
 
 ## P0.0 Phase Contract 与模块骨架
 
@@ -286,20 +286,58 @@ tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
 
 ## P0.7 Contract Stabilization
 
-- [ ] 审查 public rustdoc 的语义契约
-- [ ] 明确记录 offset unit
-- [ ] 明确记录 mapping deletion behavior
-- [ ] 更新 `docs/architecture.md` 与最终 P0 实现一致
-- [ ] 固化需要长期保留的 ADR
-- [ ] 复核 `docs/planning.md` 的 P0/P1 一致性
-- [ ] 记录 P1 尚未解决的依赖
-- [ ] 完整 `CI Success`
-- [ ] 标记 P0 完成
+- [x] 审查 public rustdoc 的语义契约
+- [x] 明确记录 offset unit
+- [x] 明确记录 mapping deletion behavior
+- [x] 更新 `docs/architecture.md` 与最终 P0 实现一致
+- [x] 固化需要长期保留的 ADR
+- [x] 复核 `docs/planning.md` 的 P0/P1 一致性
+- [x] 记录 P1 尚未解决的依赖
+- [x] 完整 `CI Success`
+- [x] 标记 P0 完成
+
+实现说明：
+
+```text
+rustdoc 契约：core 增加 #![warn(missing_docs)] 作为长期门禁；补齐 Error 变体字段文档；
+RestoreSubtree 契约按 P0.6 评审意见强化（不可铸造 NodeId、id 冲突原子失败、
+非通用 copy/move 原语）；mapping / text 模块文档显式引用 ADR 0002 / 0001。
+offset unit：crate 文档与 text 模块明确"UTF-8 byte offset + Unicode scalar boundary"；
+mapping deletion：mapping 模块明确"显式 Deleted + 显式 bias，无静默 clamp"。
+architecture.md：修正 #12 之后的 mark 继承规则描述（逆与 replace_text 共用同一判定，
+run 边界解析到前一个 run）；补 RestoreSubtree 防误用语义。
+ADR：新增 0003（undo 采用 apply 时记录的精确逆 transaction；store 完全相等、
+NodeId 原样恢复；RestoreSubtree 防误用；逆 group 反序组合）。
+planning.md 复核：§16 P0 交付清单与实现一致（versioned schema / immutable snapshot /
+structural sharing / normalized marks / text boundary / position-selection / basic transactions /
+StepMap-ChangeMap / validation / inverse prototype），P1 段落无需修改。
+```
+
+P1 尚未解决的依赖（进入 P1 前需要明确归属）：
+
+```text
+1. Transaction 未携带 before/after selection 与 history_group（planning §6 的长期字段）；
+   P1 session 层需要决定在 runtime 侧编排还是届时扩展 Transaction contract。
+2. history 栈 / typing coalescing / undo selection 恢复未实现；Core 只提供精确 inverse
+   transaction（ADR 0003），undo 编排属于 runtime/session 层。
+3. TextSelection 仍限单个 inline node 内；跨 block selection 属 P2 document selection。
+4. SplitNode / JoinNodes / MoveNode / list / InlineAtom steps 未实现（P2/P4 范围）；
+   P1 单 block 输入用现有 ReplaceText / InsertNode / RemoveNode 已足够。
+5. Grapheme-cluster 光标移动与视觉 affinity resolution 属 frontend（ADR 0001 边界）。
+6. GPUI 依赖尚未引入；进入 P1 按 planning §17 pin explicit revision 并单独 PR。
+7. commands.rs / history.rs 仍为占位模块；command 行为与 history 编排按 planning §9
+   在 runtime 层落地，Core 只在需要时提供语义支持。
+```
 
 完成证据：
 
 ```text
-待开始
+分支 feat/p0-contract-stabilization：
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿（含 missing_docs）
+cargo test --workspace 18 个 test target 全绿
+tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
+本 PR head 的 CI Success 即 P0 最终 Gate 证据；合并后 P0 标记完成。
 ```
 
 ## P0 Phase Gate
@@ -317,7 +355,7 @@ P0 只有在以下条件全部满足后才能完成：
 - [x] inverse prototype 可恢复语义原状态
 - [x] Unicode / CJK / emoji text-boundary 测试全绿
 - [x] property / randomized invariant tests 全绿
-- [ ] P0 最终 `CI Success` 全绿
+- [x] P0 最终 `CI Success` 全绿
 
 ## 决策记录
 
@@ -392,6 +430,14 @@ P0 只有在以下条件全部满足后才能完成：
 - 评审发现并修复：`ReplaceText` 逆步骤的 mark 剥离列表用 `marks_at(start)`（run 边界归后一个 run）计算，而实际继承规则是“range_start 所在 run 或其前一个 run”；非空 replacement 恰好从 run 边界开始时，恢复文本残留前一个 run 的 marks，round-trip 不等。修复为 `inherited_marks_at`（`offset <= run_end`，与 `replace_text` 同一判定），同时消除了空 replacement 的 start-1 特例；附 run 边界回归测试。
 - 随机不变量测试种子从 8 提升到 32，提高此类 run 边界组合的捕获率。
 - `RestoreSubtree` 作为公开 step kind 由引擎产出但外部也可构造；P0.7 public rustdoc 审查时需复核其契约描述是否足以防止误用。
+
+### 2026-08-22（P0.7）
+
+- core 增加 `#![warn(missing_docs)]` 作为 public rustdoc 的长期门禁，纳入 clippy `-D warnings` 的 CI 路径。
+- `RestoreSubtree` rustdoc 按 P0.6 评审意见强化：明确其不是通用 copy/move 原语、NodeId 不可铸造、payload 只能来自同一文档 lineage、id 冲突原子失败。
+- undo 语义固化为 ADR 0003：apply 时记录精确逆 transaction，round-trip 后 store 与 root 完全相等，NodeId 原样恢复；`ReplaceText` 逆的 mark 剥离必须与 `replace_text` 共用同一条继承判定（#12 的教训）。
+- planning.md §16 P0 交付清单与实现核对一致；P1 未解决依赖已在本节记录（7 项）。
+- P0 Phase Gate 全部满足，P0 完成；下一阶段 P1 Single Block Native Input。
 
 ## Regression Log
 
