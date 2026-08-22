@@ -207,7 +207,7 @@ TransactionStep：
 
 文本与 mark steps 由 piece-based inline 编辑实现：runs 在 range 边界切分、编辑后重建并重新规范化。replacement 继承 `range.start` 所在 run 的 marks；AddMark 在 range 内替换同 kind 冲突 mark；结果不保留空 run，相邻同 mark run 自动合并。
 
-InsertNode 由 snapshot 内部 allocator 分配新 NodeId；RemoveNode 连同整个子树移除；root 不可移除。`RestoreSubtree` 是 `RemoveNode` 的精确逆 step：以原 NodeId 与 payload 整体回插先前移除的子树，要求所有 id 当前不存在，映射数据记为携带子树根的 `NodeInserted`。`NodeStore` 的 replace / insert / remove 原语均为 `pub(crate)`，公开 API 不存在 direct canonical mutation escape hatch。
+InsertNode 由 snapshot 内部 allocator 分配新 NodeId；RemoveNode 连同整个子树移除；root 不可移除。`RestoreSubtree` 是 `RemoveNode` 的精确逆 step：以原 NodeId 与 payload 整体回插先前移除的子树，要求所有 id 当前不存在，映射数据记为携带子树根的 `NodeInserted`。它不是通用的 copy / move 原语——调用方无法铸造 NodeId，payload 只能来自同一文档 lineage 的历史 snapshot，且 id 冲突时原子失败。`NodeStore` 的 replace / insert / remove 原语均为 `pub(crate)`，公开 API 不存在 direct canonical mutation escape hatch。
 
 metadata seam 使用 `BTreeMap<String, String>`，不携带宿主专用类型。
 
@@ -254,7 +254,7 @@ RemoveNode    逆 = RestoreSubtree（原 NodeId 与 payload 整体回插）
 SetNodeAttrs  逆 = 换回旧 attrs
 ```
 
-`ReplaceText` 的逆特别处理 mark 继承差异：非空 replacement 继承 `range.start` 所在 run 的 marks，纯删除回插时则继承前一个边界 run 的 marks，因此跨 run 替换与 run 边界删除都能精确还原规范化后的 text / marks。
+`ReplaceText` 的逆用与 `replace_text` 完全相同的继承规则（首个 end 触及 `range.start` 的 run；run 边界解析到前一个 run）计算需要剥离的 marks，因此跨 run 替换、run 边界编辑与纯删除都能精确还原规范化后的 text / marks。
 
 逆 step group 按 step 反序组合；group 内坐标与其原 step 产生的中间状态一致，多 step transaction 的逆无需重放中间文档。对 `inverse().apply(&applied.document())` 的结果，store 与 root 与原 snapshot 完全相等（不止语义等价，被删子树的 NodeId 也原样恢复）；只有 revision 前进。`NodeStore` 的相等语义按 payload 内容比较，与 structural sharing 无关。
 

@@ -14,13 +14,29 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[non_exhaustive]
 pub enum Error {
     /// A text coordinate does not point to a valid UTF-8 character boundary.
-    InvalidTextBoundary { offset: usize },
+    InvalidTextBoundary {
+        /// The offending UTF-8 byte offset.
+        offset: usize,
+    },
     /// A text coordinate or range exceeds the target text length.
-    TextOutOfBounds { offset: usize, len: usize },
+    TextOutOfBounds {
+        /// The offending UTF-8 byte offset.
+        offset: usize,
+        /// The target text length in UTF-8 bytes.
+        len: usize,
+    },
     /// A text range has its start after its end.
-    InvalidTextRange { start: usize, end: usize },
+    InvalidTextRange {
+        /// The range start in UTF-8 bytes.
+        start: usize,
+        /// The range end in UTF-8 bytes.
+        end: usize,
+    },
     /// A heading level is outside the supported range `1..=6`.
-    InvalidHeadingLevel { level: u8 },
+    InvalidHeadingLevel {
+        /// The offending heading level.
+        level: u8,
+    },
     /// An extension-defined node kind has an empty key.
     InvalidCustomNodeKind,
     /// A node attribute key is empty after trimming.
