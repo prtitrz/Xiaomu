@@ -387,7 +387,15 @@ P0 只有在以下条件全部满足后才能完成：
 - 随机测试采用确定性 xorshift，不引入 dev 依赖；生成器只产生 boundary-valid range 与结构合法 step，模拟逐 step 生成多 step transaction。
 - P0.6 随机测试发现 P0.4 遗留 bug（split_pieces suffix 下溢），修复附 inline.rs 单元回归测试。
 
+### 2026-08-23（P0.6 评审）
+
+- 评审发现并修复：`ReplaceText` 逆步骤的 mark 剥离列表用 `marks_at(start)`（run 边界归后一个 run）计算，而实际继承规则是“range_start 所在 run 或其前一个 run”；非空 replacement 恰好从 run 边界开始时，恢复文本残留前一个 run 的 marks，round-trip 不等。修复为 `inherited_marks_at`（`offset <= run_end`，与 `replace_text` 同一判定），同时消除了空 replacement 的 start-1 特例；附 run 边界回归测试。
+- 随机不变量测试种子从 8 提升到 32，提高此类 run 边界组合的捕获率。
+- `RestoreSubtree` 作为公开 step kind 由引擎产出但外部也可构造；P0.7 public rustdoc 审查时需复核其契约描述是否足以防止误用。
+
 ## Regression Log
+
+- 2026-08-23（二）：P0.6 `ReplaceText` 逆在“非空 replacement 从 run 边界开始”时 mark 恢复不完整（恢复文本多带前一 run 的 marks），PR 评审修复并附 `replace_text_at_run_end_boundary_round_trips` 回归测试；随机种子提升至 32。
 
 - 2026-08-23：P0.5 空 range 插入点 bias 失效，PR #9 修复并附回归测试；无遗留影响。
 - 2026-08-22：P0.4 引入的 `split_pieces` suffix 切片在"range 结束于后续 run 之前"的多 run inline 内容上 usize 下溢（debug 下 panic，多 run mark 操作触发）；P0.6 随机不变量测试发现，修复为按 `end.max(run_start)` 起切，附 `mark_ops_leave_later_runs_untouched` 回归测试。

@@ -92,6 +92,41 @@ fn assert_round_trips(document: &XiaomuDocument, transaction: Transaction) {
 }
 
 #[test]
+fn replace_text_at_run_end_boundary_round_trips() {
+    // Regression: a non-empty replacement starting exactly at a run boundary
+    // inherits the preceding run's marks; the inverse must strip exactly
+    // those and restore the original marks of every span.
+    let mut builder = NodeStoreBuilder::new();
+    let paragraph = builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            inline(&[("ab", bold()), ("cd", italic())]),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([paragraph]),
+        )
+        .unwrap();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+    assert_round_trips(
+        &document,
+        Transaction::new(TransactionOrigin::UserInput)
+            .with_step(replace_text(paragraph, 2, 3, "X")),
+    );
+
+    // Deletion starting at the same boundary inherits the preceding run too.
+    assert_round_trips(
+        &document,
+        Transaction::new(TransactionOrigin::UserInput).with_step(replace_text(paragraph, 2, 4, "")),
+    );
+}
+
+#[test]
 fn replace_text_inverse_restores_text_and_marks_across_runs() {
     let (document, paragraph) = marked_fixture();
 
@@ -567,7 +602,7 @@ fn check_mapping_invariants(before: &XiaomuDocument, changes: &ChangeMap, after:
 
 #[test]
 fn random_transaction_sequences_stay_valid_and_round_trip() {
-    for seed in 1..=8u64 {
+    for seed in 1..=32u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
         let initial = random_document(&mut rng);
         let mut current = initial.clone();
