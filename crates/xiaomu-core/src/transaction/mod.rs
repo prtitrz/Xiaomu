@@ -4,8 +4,9 @@
 //! validates the resulting document and returns a new immutable snapshot;
 //! there is no public direct-mutation path into `XiaomuDocument`.
 //!
-//! P0.4 covers the first batch of typed steps. Position mapping (P0.5) and
-//! inverse generation (P0.6) build on the same step vocabulary.
+//! P0.4 covers the first batch of typed steps. Application also produces the
+//! explicit change data used for position mapping (P0.5); inverse generation
+//! (P0.6) will build on the same step vocabulary.
 
 mod apply;
 mod inline;
@@ -14,6 +15,7 @@ mod step;
 use std::collections::BTreeMap;
 
 use crate::document::XiaomuDocument;
+use crate::mapping::ChangeMap;
 use crate::{Error, Result};
 
 pub use step::TransactionStep;
@@ -42,6 +44,33 @@ pub struct Transaction {
     origin: TransactionOrigin,
     metadata: BTreeMap<String, String>,
     steps: Vec<TransactionStep>,
+}
+
+/// One applied transaction: the next snapshot plus its explicit change data.
+#[derive(Clone, Debug)]
+pub struct AppliedTransaction {
+    document: XiaomuDocument,
+    changes: ChangeMap,
+}
+
+impl AppliedTransaction {
+    /// Returns the fully validated new snapshot.
+    #[must_use]
+    pub const fn document(&self) -> &XiaomuDocument {
+        &self.document
+    }
+
+    /// Returns the mapping data produced by application.
+    #[must_use]
+    pub const fn changes(&self) -> &ChangeMap {
+        &self.changes
+    }
+
+    /// Consumes the outcome and returns the new snapshot.
+    #[must_use]
+    pub fn into_document(self) -> XiaomuDocument {
+        self.document
+    }
 }
 
 impl Transaction {
@@ -100,11 +129,25 @@ impl Transaction {
         &self.steps
     }
 
+    /// Applies this transaction to `document` and returns the new snapshot
+    /// together with explicit change data.
+    ///
+    /// The returned [`ChangeMap`] translates positions of the input snapshot
+    /// into coordinates of the returned snapshot; deleted targets surface as
+    /// [`MappedPosition::Deleted`](crate::mapping::MappedPosition::Deleted)
+    /// instead of being clamped.
+    pub fn apply_with_changes(&self, document: &XiaomuDocument) -> Result<AppliedTransaction> {
+        let (document, changes) = apply::apply_steps(document, &self.steps)?;
+        Ok(AppliedTransaction { document, changes })
+    }
+
     /// Applies this transaction to `document`.
     ///
     /// Returns a fully validated snapshot at the next revision. The input
-    /// snapshot is never modified.
+    /// snapshot is never modified. Use [`Transaction::apply_with_changes`]
+    /// when the change data is needed for position mapping.
     pub fn apply(&self, document: &XiaomuDocument) -> Result<XiaomuDocument> {
-        apply::apply_steps(document, &self.steps)
+        self.apply_with_changes(document)
+            .map(AppliedTransaction::into_document)
     }
 }
