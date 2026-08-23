@@ -68,6 +68,10 @@ macOS 本机构建需要 Xcode Metal Toolchain 组件（新版 Xcode 拆分下�
 xiaomu-gpui 新增编译级 smoke：px/Hsla 解析 + 链接验证，无窗口、无显示服务器依赖；
 crate 文档同步为 GPUI adapter 定位描述。
 传递依赖存在 future-incompat 提示（block、proc-macro-error2），不阻塞当前构建。
+CI 适配：gpui 的 test 二进制在 Linux 链接期需要 libxcb / libxkbcommon / libxkbcommon-x11，
+ubuntu job 增加 apt 安装 libxcb1-dev / libxkbcommon-dev / libxkbcommon-x11-dev；
+首轮 CI 证实 macOS runner 自带 Metal Toolchain，ubuntu 链接失败是唯一真实失败
+（windows 因 matrix fail-fast 被连带取消，非自身错误）。
 ```
 
 完成证据：

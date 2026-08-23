@@ -39,6 +39,13 @@ jobs:
         with:
           toolchain: 1.97.1
           components: rustfmt, clippy
+      # GPUI links against X11/XCB and xkbcommon on Linux; the test binaries
+      # need the development libraries present at link time.
+      - name: Install Linux link dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all -- --check
