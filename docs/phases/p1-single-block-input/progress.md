@@ -1,0 +1,109 @@
+# P1 Single Block Native Input 进度
+
+状态：进行中
+
+本文档只记录 P1 的执行状态和验证证据。长期架构事实放在 `docs/architecture.md`，P1 设计放在 `design.md`，顶层路线以 `docs/planning.md` 为准。
+
+## 状态说明
+
+```text
+[ ] 未开始
+[~] 进行中
+[x] 已完成
+[!] 阻塞 / 需要决策
+```
+
+## 当前状态
+
+当前切片：**P1.0 Phase Contract 进行中**
+
+当前分支：`feat/p1-phase-contract`
+
+前置状态：P0 已完成并合入 main（PR #13，commit e8f3a30）。
+
+## P1.0 Phase Contract 与阶段骨架
+
+- [x] 创建 `docs/phases/p1-single-block-input/design.md`
+- [x] 创建 `docs/phases/p1-single-block-input/progress.md`
+- [x] 记录 P0 移交的 7 项前置依赖归属（见下方决策记录）
+- [x] 运行 source-size 与 dependency-boundary guard
+- [x] 运行 `cargo fmt --all -- --check`
+- [x] 运行 `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] 运行 `cargo test --workspace --all-targets`
+
+完成证据：
+
+```text
+分支 feat/p1-phase-contract（本地）：
+uv run python tools/check_source_size.py 全绿
+uv run python tools/check_dependency_boundaries.py 全绿
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿
+cargo test --workspace --all-targets 全绿：18 个 test target，
+xiaomu-core 95 个测试全部通过（含 inverse_roundtrip 随机不变量）。
+本 PR 的远端 CI Success 即 P1.0 Gate 证据。
+```
+
+## P0 移交的 P1 前置依赖与归属
+
+P0.7 在 progress.md 记录了 7 项"进入 P1 前需要明确归属"的依赖，处置如下：
+
+```text
+1. Transaction 未携带 before/after selection 与 history_group
+   → 归属 runtime：DocumentSession 持有 selection 与 history 栈，
+     EditIntent 通过 runtime SelectionUpdate 明确 after-selection，普通 apply 才使用 ChangeMap fallback；
+     Core contract 不动。
+2. history 栈 / typing coalescing / undo selection 恢复
+   → P1 在 runtime HistoryStack 实现基础 undo/redo 与 selection 恢复；
+     undo = 重放 AppliedTransaction::inverse()（ADR 0003）；typing coalescing 留到 P3。
+3. TextSelection 限单个 inline node 内
+   → 维持；跨 block selection 属 P2 document selection。
+4. SplitNode / JoinNodes / MoveNode / list / InlineAtom steps 未实现
+   → 维持 P2/P4 范围；P1 单 block 内容编辑只使用 ReplaceText / AddMark / RemoveMark，
+     不允许删除当前 inline node。
+5. Grapheme-cluster 光标移动与视觉 affinity resolution
+   → 属 frontend；P1 的 Left / Right / Backspace / Delete 按 Unicode scalar boundary，
+     Home / End 到 Paragraph 逻辑首尾；视觉行导航与 grapheme 留作后续增强（ADR 0001 边界）。
+6. GPUI 依赖尚未引入
+   → P1.1 单独 PR 从 crates.io pin 精确版本（planning §17）。
+7. commands.rs / history.rs 占位模块
+   → command 行为与 history 编排按 planning §9 在 runtime 层落地；
+     Core 占位模块保持不动，待 Core 真需要语义支持时再启用。
+```
+
+## 决策记录
+
+这里只记录影响 P1 执行的决定。长期且难逆转的架构理由应进入 ADR。
+
+### 2026-08-23（P1.0）
+
+- selection 状态与 undo/redo 栈在 runtime 侧编排：新建 `DocumentSession`（xiaomu-runtime）持有 selection 与 history；每个 EditIntent 产出 runtime `EditPlan { transaction, selection_update }`，由 intent-specific `SelectionUpdate` 决定 after-selection，不扩展 Core Transaction contract（符合 planning §9、ADR 0003、P0.3 评审结论）。
+- P1 不定义结构删除后的 selection fallback：任何导致当前 `TextSelection` 映射为 `Deleted` 的 transaction 都原子失败；父级 `NodeGap` / 邻近 block 收敛留到 P2 document-level selection。
+- GPUI 从 crates.io 引入并以精确版本 pin（`gpui = "=x.y.z"`），升级走单独 PR；不使用 git revision 依赖。
+- undo 实现为会话内重放 `AppliedTransaction::inverse()`，round-trip 要求 store 完全相等；history entry 保存 before/after selection，恢复时直接校验并使用对应 selection；typing coalescing / history grouping 留到 P3。
+- caret 移动 P1 按 Unicode scalar boundary；Home / End 到 Paragraph 逻辑首尾；视觉行导航和 grapheme cluster 光标留作后续增强。
+- IME `CompositionState` 位于 GPUI adapter，维护 base selection、preedit、preedit selection 与 virtual projection；composition 全程不写 canonical document，commit 单笔入历史，cancel 恢复 composition 前状态。
+- 合法空操作返回 `SessionOutcome::NoChange`，不调用 Core apply，不增加 revision / notification / history。
+- P1 文档沿用 P0 惯例：阶段文档中文，代码标识 / API 名 / 公开 rustdoc 用英文。
+
+## P1 Phase Gate
+
+P1 只有在以下条件全部满足后才能完成：
+
+- [ ] GPUI 依赖 pinned 引入，dependency-boundary guard 全绿
+- [ ] DocumentSession 编排 snapshot / selection / history，无绕过路径
+- [ ] selection 在任何公开读取点针对当前 snapshot 合法
+- [ ] undo / redo 恢复精确 store 状态与合理 selection
+- [ ] intent-specific SelectionUpdate 正确处理插入、替换、删除与 mark
+- [ ] Deleted update 原子失败；no-op 不增加 revision / notification / history
+- [ ] undo 后新编辑清空 redo
+- [ ] IME composition 不触碰 canonical document，commit / cancel 语义正确
+- [ ] 单 block 键盘编辑 + hit-test + clipboard + 基础 marks 实机可用
+- [ ] 真实 IME（Microsoft Pinyin）+ selection + undo 手动 Gate 通过
+- [ ] session 纯逻辑测试在 CI 无显示器环境全绿
+- [ ] 架构文档与实现一致
+- [ ] P1 最终 `CI Success` 全绿
+
+## Regression Log
+
+（暂无）
