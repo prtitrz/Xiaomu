@@ -30,4 +30,8 @@ allow = [
   "CC0-1.0",
   "ISC",
   "Zlib",
+  # Enters via libfuzzer-sys (libFuzzer bindings, `(MIT OR Apache-2.0) AND
+  # NCSA`) through gpui's image -> ravif -> rav1e chain. NCSA is a permissive
+  # OSI-approved license.
+  "NCSA",
 ]

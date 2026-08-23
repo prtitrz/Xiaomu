@@ -15,11 +15,11 @@
 
 ## 当前状态
 
-当前切片：**P1.0 Phase Contract 进行中**
+当前切片：**P1.1 GPUI 依赖引入已完成实现并通过本地检查，等待 PR CI 后合并**
 
-当前分支：`feat/p1-phase-contract`
+当前分支：`feat/p1-gpui-dependency`
 
-前置状态：P0 已完成并合入 main（PR #13，commit e8f3a30）。
+前置状态：P0 已完成并合入 main（PR #13，commit e8f3a30）；P1.0 随 PR #14 合入完成。
 
 ## P1.0 Phase Contract 与阶段骨架
 
@@ -42,6 +42,44 @@ cargo clippy --workspace --all-targets -- -D warnings 全绿
 cargo test --workspace --all-targets 全绿：18 个 test target，
 xiaomu-core 95 个测试全部通过（含 inverse_roundtrip 随机不变量）。
 本 PR 的远端 CI Success 即 P1.0 Gate 证据。
+```
+
+## P1.1 GPUI 依赖引入
+
+- [x] workspace 依赖表 pin crates.io `gpui = "=0.2.2"`
+- [x] `tools/check_dependency_boundaries.py` ALLOWED 表核对（xiaomu-gpui → core + runtime 已声明，无需修改）
+- [x] cargo-deny 策略核对 / 必要豁免（新增 NCSA）
+- [x] 编译级 smoke（`gpui_platform_layer_links`，不依赖窗口环境）
+- [x] Cargo.lock 提交（依赖树约 700 包）
+- [x] architecture.md 同步
+
+实现说明：
+
+```text
+gpui 0.2.2 是 crates.io 当前最新版（2025-10-22 发布，Apache-2.0），
+按 planning §17 以 "=0.2.2" 精确 pin 在 workspace.dependencies，升级走单独 PR。
+cargo-deny licenses 需要新增 NCSA：libfuzzer-sys（`(MIT OR Apache-2.0) AND NCSA`）
+经 gpui → image → ravif → rav1e 链进入依赖树；NCSA 为 permissive、OSI 批准。
+macOS 本机构建需要 Xcode Metal Toolchain 组件（新版 Xcode 拆分下载；
+`xcodebuild -downloadComponent MetalToolchain`），因为 gpui build script
+在构建期用 xcrun metal 预编译 Metal shader——这是 gpui 自身的构建要求，
+与是否打开窗口无关；不使用 runtime-shaders / macos-blade 特性绕过，
+避免改变生产渲染路径。
+xiaomu-gpui 新增编译级 smoke：px/Hsla 解析 + 链接验证，无窗口、无显示服务器依赖；
+crate 文档同步为 GPUI adapter 定位描述。
+传递依赖存在 future-incompat 提示（block、proc-macro-error2），不阻塞当前构建。
+```
+
+完成证据：
+
+```text
+分支 feat/p1-gpui-dependency：
+cargo deny check bans licenses sources 全绿（NCSA 豁免后）
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿
+cargo test --workspace --all-targets 全绿（含 xiaomu-gpui gpui_platform_layer_links）
+tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
+三平台 CI（ubuntu / windows / macos）以本 PR 远端运行为准。
 ```
 
 ## P0 移交的 P1 前置依赖与归属
@@ -86,11 +124,18 @@ P0.7 在 progress.md 记录了 7 项"进入 P1 前需要明确归属"的依赖�
 - 合法空操作返回 `SessionOutcome::NoChange`，不调用 Core apply，不增加 revision / notification / history。
 - P1 文档沿用 P0 惯例：阶段文档中文，代码标识 / API 名 / 公开 rustdoc 用英文。
 
+### 2026-08-22（P1.1）
+
+- GPUI 采用 crates.io 发布版而非 git revision：`gpui = "=0.2.2"`（crates.io 当前最新），精确 pin 在 workspace.dependencies；升级只走单独 PR。
+- cargo-deny licenses 新增 NCSA 豁免：来源是 libfuzzer-sys（libFuzzer 绑定）经 image → ravif → rav1e 的必然传递链，无法通过 feature 裁剪；NCSA 为 permissive、OSI 批准。
+- macOS 构建 gpui 需要 Xcode Metal Toolchain 组件（build script 构建期预编译 Metal shader）。不采用 gpui 的 runtime-shaders / macos-blade 特性绕过，避免改变生产渲染路径；本地环境用 `xcodebuild -downloadComponent MetalToolchain` 一次性解决。
+- xiaomu-gpui 的 P1.1 交付是编译级 smoke（px / Hsla 解析 + 链接验证），不引入窗口依赖；gpui 类型暂不进入任何公开 API。
+
 ## P1 Phase Gate
 
 P1 只有在以下条件全部满足后才能完成：
 
-- [ ] GPUI 依赖 pinned 引入，dependency-boundary guard 全绿
+- [x] GPUI 依赖 pinned 引入，dependency-boundary guard 全绿
 - [ ] DocumentSession 编排 snapshot / selection / history，无绕过路径
 - [ ] selection 在任何公开读取点针对当前 snapshot 合法
 - [ ] undo / redo 恢复精确 store 状态与合理 selection

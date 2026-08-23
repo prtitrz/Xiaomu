@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前 `xiaomu-runtime`、`xiaomu-gpui`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已进入 P0，Text Boundary、P0.2 Document Model、P0.3 Position / Selection、P0.4 Transaction Application、P0.5 Position Mapping 和 P0.6 Inverse 已实现；History 栈与 command 行为仍按 P0 后续切片推进。
+当前 `xiaomu-runtime`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已完成 P0；`xiaomu-gpui` 已按 P1.1 从 crates.io 精确 pin 引入 GPUI `0.2.2`，adapter 实现按 P1 后续切片推进。
 
 ## Core 边界
 
@@ -274,7 +274,7 @@ Runtime 保持 `#![forbid(unsafe_code)]`。
 
 GPUI platform type 不能泄漏到 Core 或 Runtime public contract。
 
-GPUI dependency 当前尚未正式引入。进入 P1 时按 `planning.md` 固定 explicit revision。
+GPUI dependency 已按 P1.1 从 crates.io 以精确版本引入：workspace 依赖表 pin `gpui = "=0.2.2"`，升级只走单独 PR（`docs/planning.md` §17）。构建期行为：gpui 的 build script 在 macOS 上用 `xcrun metal` 预编译 Metal shader，本机构建需要 Xcode Metal Toolchain 组件（`xcodebuild -downloadComponent MetalToolchain`）；cargo-deny 的 license allow 列表为此新增 NCSA（经 `libfuzzer-sys` 由 `image → ravif → rav1e` 链带入，permissive 且 OSI 批准）。当前 xiaomu-gpui 只有编译级 smoke，不打开窗口。
 
 ## Codec 边界
 

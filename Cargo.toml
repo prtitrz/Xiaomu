@@ -18,6 +18,9 @@ repository = "https://github.com/prtitrz/Xiaomu"
 authors = ["prtitrz"]
 
 [workspace.dependencies]
+# GPUI is pinned to an exact crates.io version per planning §17; upgrades
+# happen in dedicated pull requests only.
+gpui = "=0.2.2"
 xiaomu-core = { version = "0.1.0", path = "crates/xiaomu-core" }
 xiaomu-runtime = { version = "0.1.0", path = "crates/xiaomu-runtime" }
 xiaomu-gpui = { version = "0.1.0", path = "crates/xiaomu-gpui" }
