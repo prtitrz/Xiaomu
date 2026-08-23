@@ -11,8 +11,6 @@ use gpui::{
     size,
 };
 
-use xiaomu_core::document::MarkKind;
-
 use super::ParagraphView;
 
 /// Renders one paragraph view's inline content.
@@ -74,16 +72,53 @@ impl Element for ParagraphElement {
     ) -> Self::PrepaintState {
         let view = self.view.read(cx);
         let session = view.session();
-        let selection = session.selection();
-        let focus = selection.focus().offset().as_usize();
-        let anchor = selection.anchor().offset().as_usize();
 
         let style = window.text_style();
         let font = style.font();
         let font_size = style.font_size.to_pixels(window.rem_size());
         let color = style.color;
 
-        let (display_text, runs) = paragraph_runs(view, &font, color);
+        let (display_text, segments) = view.display_content();
+        let runs: Vec<TextRun> = segments
+            .iter()
+            .map(|segment| {
+                let mut font = font.clone();
+                if segment.bold {
+                    font.weight = FontWeight::BOLD;
+                }
+                if segment.italic {
+                    font.style = FontStyle::Italic;
+                }
+                // Only the preedit segment carries an explicit underline;
+                // canonical segments keep their own mark styling.
+                let underline = segment.underline.then_some(UnderlineStyle {
+                    color: Some(color),
+                    thickness: px(1.0),
+                    wavy: false,
+                });
+                TextRun {
+                    len: segment.text.len(),
+                    font,
+                    color,
+                    background_color: None,
+                    underline,
+                    strikethrough: segment.strike.then_some(StrikethroughStyle {
+                        color: Some(color),
+                        thickness: px(1.0),
+                    }),
+                }
+            })
+            .collect();
+        // The caret sits at the composition caret while composing, and at
+        // the canonical selection focus otherwise.
+        let caret_byte = view
+            .composing_caret_byte()
+            .unwrap_or_else(|| session.selection().focus().offset().as_usize());
+        let anchor_byte = if view.is_composing() {
+            caret_byte
+        } else {
+            session.selection().anchor().offset().as_usize()
+        };
         let line = window.text_system().shape_line(
             SharedString::new(display_text.as_ref()),
             font_size,
@@ -91,8 +126,8 @@ impl Element for ParagraphElement {
             None,
         );
 
-        let (selection, cursor) = if anchor == focus {
-            let caret_x = line.x_for_index(focus);
+        let (selection, cursor) = if anchor_byte == caret_byte {
+            let caret_x = line.x_for_index(caret_byte);
             (
                 None,
                 Some(fill(
@@ -104,7 +139,7 @@ impl Element for ParagraphElement {
                 )),
             )
         } else {
-            let (start, end) = (anchor.min(focus), anchor.max(focus));
+            let (start, end) = (anchor_byte.min(caret_byte), anchor_byte.max(caret_byte));
             (
                 Some(fill(
                     Bounds::from_corners(
@@ -161,68 +196,4 @@ impl Element for ParagraphElement {
             view.last_bounds = Some(bounds);
         });
     }
-}
-
-/// Returns the concatenated text and mark-aware style runs of the view's
-/// inline node.
-fn paragraph_runs(
-    view: &ParagraphView,
-    base_font: &gpui::Font,
-    color: gpui::Hsla,
-) -> (String, Vec<TextRun>) {
-    let Some(inline) = view
-        .session()
-        .document()
-        .node(view.node())
-        .and_then(|node| node.content().as_inline())
-    else {
-        return (String::new(), Vec::new());
-    };
-
-    let text: String = inline
-        .runs()
-        .iter()
-        .map(|run| run.text().as_str())
-        .collect();
-    if text.is_empty() {
-        return (String::new(), Vec::new());
-    }
-
-    let runs = inline
-        .runs()
-        .iter()
-        .map(|run| {
-            let marks = run.marks();
-            let mut font = base_font.clone();
-            if marks.contains(MarkKind::Bold) {
-                font.weight = FontWeight::BOLD;
-            }
-            if marks.contains(MarkKind::Italic) {
-                font.style = FontStyle::Italic;
-            }
-            let underline = marks
-                .contains(MarkKind::Underline)
-                .then_some(UnderlineStyle {
-                    color: Some(color),
-                    thickness: px(1.0),
-                    wavy: false,
-                });
-            let strikethrough = marks
-                .contains(MarkKind::Strike)
-                .then_some(StrikethroughStyle {
-                    color: Some(color),
-                    thickness: px(1.0),
-                });
-            TextRun {
-                len: run.len_bytes(),
-                font,
-                color,
-                background_color: None,
-                underline,
-                strikethrough,
-            }
-        })
-        .collect();
-
-    (text, runs)
 }

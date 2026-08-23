@@ -15,11 +15,11 @@
 
 ## 当前状态
 
-当前切片：**P1.3 GPUI 单块编辑基础已完成实现，本地 macOS 启动冒烟通过；Windows 实机 Gate 待执行，等待 PR CI 后合并**
+当前切片：**P1.4 IME composition 已完成实现并通过 fmt / clippy / test；Windows 实机 IME 矩阵待执行手动 Gate**
 
-当前分支：`feat/p1-single-block-basics`
+当前分支：`feat/p1-ime-composition`
 
-前置状态：P0 已完成（PR #13）；P1.0 / P1.1 / P1.2 已合并（PR #14 / #15 / #16）。
+前置状态：P0 已完成（PR #13）；P1.0 / P1.1 / P1.2 / P1.3 已合并（PR #14–#17）。
 
 ## P1.0 Phase Contract 与阶段骨架
 
@@ -135,7 +135,7 @@ cargo deny check bans licenses sources 全绿
 - [x] Left / Right、Shift 选择、Paragraph Home / End、Backspace / Delete（含 SelectAll / Undo / Redo 绑定）
 - [x] 最小 hit-test（点击 / 拖拽 → boundary 校验的 offset）
 - [x] editor_harness 接入单段编辑器
-- [ ] Windows 实机键盘编辑闭环（Gate，待在 Windows 上执行手动清单）
+- [x] Windows 实机键盘编辑闭环（英文直输 / 方向键 / 选择 / Home/End / Backspace/Delete / undo-redo 可用；中文 IME 表现与 macOS 相同的已知停损限制，归因同一条，修复属 P1.4）
 
 实现说明：
 
@@ -170,6 +170,48 @@ cargo fmt / clippy -D warnings / cargo test --workspace / 两个 guard 全绿
 两者均为 setMarkedText 路径被当作普通输入立即提交、且从不报告 marked range 所致，
 属 P1.4 CompositionState 的修复范围（见 Regression Log）。
 Windows 实机 Gate（键盘编辑闭环手动清单）待执行后补充证据。
+```
+
+## P1.4 IME Composition
+
+- [x] UTF-16 range → TextOffset 转换层（P1.3 已建，本切片接入全部查询路径）
+- [x] `CompositionState` + virtual text projection（`input/composition.rs` 纯状态机）
+- [x] selected / marked / text / bounds 查询与连续 preedit update
+- [x] begin / update / commit / cancel / focus-loss 状态转移测试
+- [x] marked text 瞬态渲染（下划线 preedit，不写 canonical document）
+- [x] commit 一次入历史 / cancel 恢复 composition 前状态
+- [ ] planning §8 Windows 矩阵实机执行（Microsoft Pinyin 连续 composition、候选窗、中文标点、中英混排、emoji / surrogate、combining marks、选区替换、焦点恢复）
+
+实现说明：
+
+```text
+CompositionState（纯逻辑，无窗口依赖）：base_selection + base_range + preedit +
+preedit_selected_utf16；project() 生成 virtual projection。
+平台 callback 映射（针对 pin 的 gpui 0.2.2 核对 crates.io 源码）：
+  macOS   setMarkedText → begin_or_update；insertText → commit；unmarkText → cancel/idle no-op
+  Windows GCS_COMPSTR → begin_or_update；GCS_RESULTSTR → commit（非空）；
+          WM_IME_COMPOSITION lparam==0 → 以空文本 replace_text_in_range 到达 → 按 cancel 处理
+空 commit 即 cancel：真实 IME 结果串永不为空，且空插入会误删 base 选区。
+InputHandler 全部查询（text_for_range / selected_text_range / marked_text_range /
+bounds_for_range / character_index_for_point）改答 virtual projection；
+composition 全程 document revision 不变（preedit 只存在于 adapter）。
+commit 路径：两次 PlaceCaret（base_range）+ InsertText = 单笔 transaction、单条 undo。
+cancel 路径：PlaceCaret 恢复 base_selection；焦点丢失经 window.on_focus_out 订阅取消。
+composing 期间键盘编辑动作被忽略（防止 canonical 编辑破坏 base range），鼠标点击先 cancel。
+渲染：preedit 作为独立 underlined segment 参与排版，caret 定位到 preedit 内平台 selection 终点。
+block_view/mod.rs 超 source-size 700 行硬限，EntityInputHandler impl 拆分至 block_view/input_handler.rs。
+```
+
+完成证据：
+
+```text
+分支 feat/p1-ime-composition：
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿
+cargo test --workspace 全绿（新增 input/composition.rs 6 个状态机单元测试，19 个 test target）
+tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
+Windows 本机启动冒烟：harness 窗口正常打开、进程稳定（自动验证无窗口依赖部分全绿）。
+Windows Microsoft Pinyin 手动矩阵待执行后补充证据（回归验收：P1.3 Regression Log 两条——连续拼音不粘连、提交后 preedit 清除）。
 ```
 
 ## P0 移交的 P1 前置依赖与归属
