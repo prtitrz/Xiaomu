@@ -16,6 +16,14 @@ use crate::input::utf16;
 
 use super::ParagraphView;
 
+macro_rules! ime_debug {
+    ($($arg:tt)*) => {
+        if std::env::var_os("XIAOMU_IME_DEBUG").is_some() {
+            eprintln!("xiaomu-ime: {}", format_args!($($arg)*));
+        }
+    };
+}
+
 impl EntityInputHandler for ParagraphView {
     fn text_for_range(
         &mut self,
@@ -64,6 +72,7 @@ impl EntityInputHandler for ParagraphView {
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        ime_debug!("unmark_text");
         // macOS sends unmarkText both after a commit (already idle: no-op)
         // and as a pure cancellation (still composing).
         self.cancel_if_composing(cx);
@@ -77,6 +86,7 @@ impl EntityInputHandler for ParagraphView {
         cx: &mut Context<Self>,
     ) {
         if self.composition.is_some() {
+            ime_debug!("replace_text_in_range while composing: {text:?}");
             // macOS commits through here (insertText); Windows ends a
             // composition through here as well — including cancellations,
             // which arrive as an empty replacement.
@@ -87,6 +97,7 @@ impl EntityInputHandler for ParagraphView {
             return;
         }
 
+        ime_debug!("plain replace_text_in_range: range={replacement_range:?} text={text:?}");
         if let Some(range_utf16) = replacement_range {
             // Select the explicit range with selection-only intents (no
             // history entries), then insert over it as one transaction.
@@ -132,6 +143,7 @@ impl EntityInputHandler for ParagraphView {
     ) {
         // Begin or continue composition; the preedit never touches the
         // canonical document.
+        ime_debug!("mark: range={range_utf16:?} text={new_text:?} sel={new_selected_range:?}");
         self.mark_text(range_utf16, new_text, new_selected_range, cx);
     }
 
