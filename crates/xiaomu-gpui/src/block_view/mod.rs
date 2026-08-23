@@ -455,6 +455,7 @@ impl ParagraphView {
         range_utf16: Option<Range<usize>>,
         new_text: &str,
         new_selected_range: Option<Range<usize>>,
+        cx: &mut Context<Self>,
     ) {
         let canonical = self.canonical_text();
 
@@ -489,6 +490,10 @@ impl ParagraphView {
         if let Some(state) = self.composition.as_mut() {
             *state = state.update(new_text, new_selected_range);
         }
+
+        // The preedit is a view transient: without an explicit repaint the
+        // marked text would stay invisible while the IME session continues.
+        cx.notify();
     }
 
     /// Builds the displayed text plus its styled segments.
