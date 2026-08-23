@@ -1,6 +1,12 @@
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
-//! xiaomu-runtime: bootstrap crate for the Xiaomu native structured rich-text editor.
+//! Xiaomu runtime: editing-session orchestration on top of `xiaomu-core`.
+//!
+//! The runtime owns the [`session::DocumentSession`]: current snapshot,
+//! current selection, basic undo/redo, and frontend-neutral change
+//! notifications. Editing flows through typed intents that become Core
+//! transactions plus intent-specific after-selection policies. Frontends
+//! (GPUI first) sit on top of this crate and their types never leak into it.
 
-/// Bootstrap marker kept intentionally small while the public API is designed.
-pub const CRATE_NAME: &str = "xiaomu-runtime";
+pub mod session;

@@ -1,0 +1,364 @@
+//! Typed editing intents and intent-specific selection policies.
+//!
+//! Intents and selection policies live in the runtime, not in the Core
+//! transaction contract: the same Core steps can serve many commands, and
+//! only the session knows which after-selection a command promises.
+
+use xiaomu_core::document::{InlineContent, Mark, MarkKind, NodeId};
+use xiaomu_core::selection::TextSelection;
+use xiaomu_core::text::TextRange;
+use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
+
+use super::SessionError;
+
+/// One caret movement direction over the paragraph's logical text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CaretMove {
+    /// Previous Unicode scalar boundary (Left).
+    Backward,
+    /// Next Unicode scalar boundary (Right).
+    Forward,
+    /// Logical start of the paragraph (Home).
+    ToStart,
+    /// Logical end of the paragraph (End).
+    ToEnd,
+}
+
+/// A typed editing intent.
+///
+/// P1 keeps all text editing inside one inline node; structural intents
+/// (split, join, move) belong to later phases.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EditIntent {
+    /// Insert `text` at the current selection, replacing a non-collapsed
+    /// selection. Empty text over a collapsed caret is a no-op.
+    InsertText {
+        /// Replacement text; may be empty (deletes the selection).
+        text: String,
+    },
+    /// Delete one Unicode scalar before the caret, or the whole selection.
+    Backspace,
+    /// Delete one Unicode scalar after the caret, or the whole selection.
+    Delete,
+    /// Move the caret focus without producing a transaction.
+    MoveCaret {
+        /// Movement direction over the logical text.
+        caret_move: CaretMove,
+        /// Keep the anchor and move only the focus (Shift).
+        extend_selection: bool,
+    },
+    /// Toggle one mark over the whole selection.
+    ///
+    /// A collapsed selection is a no-op; P1 has no pending-mark state.
+    ToggleMark {
+        /// The mark to apply; an existing mark of the same kind over the
+        /// whole selection is removed instead.
+        mark: Mark,
+    },
+}
+
+/// How the session derives the selection after a plan commits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SelectionUpdate {
+    /// Collapse the caret right after the replacement text of the primary
+    /// edit (InsertText / paste / IME commit).
+    CaretAfterReplacement,
+    /// Collapse the caret at the start of the primary edit
+    /// (Backspace / Delete).
+    CaretAtEditStart,
+    /// Map the previous selection through the change map with outward bias
+    /// (mark edits and non-intent applies).
+    MapExisting,
+}
+
+/// The coordinates of the primary text edit of a plan.
+///
+/// Caret-oriented selection policies resolve against these coordinates in
+/// the post-commit snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrimaryEdit {
+    pub(crate) node: NodeId,
+    pub(crate) range: TextRange,
+    pub(crate) inserted_len: usize,
+}
+
+impl PrimaryEdit {
+    /// Returns the inline node the edit applies to.
+    #[must_use]
+    pub const fn node(&self) -> NodeId {
+        self.node
+    }
+
+    /// Returns the replaced half-open range in the pre-edit coordinates.
+    #[must_use]
+    pub const fn range(&self) -> TextRange {
+        self.range
+    }
+
+    /// Returns the UTF-8 byte length of the inserted text.
+    #[must_use]
+    pub const fn inserted_len(&self) -> usize {
+        self.inserted_len
+    }
+}
+
+/// A planned edit: the Core transaction plus the runtime selection policy.
+///
+/// Plans are produced by the session from intents; callers never construct
+/// them directly.
+#[derive(Clone, Debug)]
+pub struct EditPlan {
+    transaction: Transaction,
+    selection_update: SelectionUpdate,
+    primary_edit: Option<PrimaryEdit>,
+}
+
+impl EditPlan {
+    pub(crate) fn new(
+        transaction: Transaction,
+        selection_update: SelectionUpdate,
+        primary_edit: Option<PrimaryEdit>,
+    ) -> Self {
+        Self {
+            transaction,
+            selection_update,
+            primary_edit,
+        }
+    }
+
+    /// Returns the Core transaction to apply.
+    #[must_use]
+    pub const fn transaction(&self) -> &Transaction {
+        &self.transaction
+    }
+
+    /// Returns the after-selection policy.
+    #[must_use]
+    pub const fn selection_update(&self) -> &SelectionUpdate {
+        &self.selection_update
+    }
+
+    /// Returns the primary text edit when the policy needs its coordinates.
+    #[must_use]
+    pub const fn primary_edit(&self) -> Option<&PrimaryEdit> {
+        self.primary_edit.as_ref()
+    }
+}
+
+/// What an intent resolves to before anything is committed.
+pub(crate) enum PlannedAction {
+    /// Commit a plan.
+    Commit(EditPlan),
+    /// The intent is a legitimate no-op.
+    NoChange,
+}
+
+/// Returns the greatest Unicode scalar boundary strictly before `offset`.
+pub(crate) fn previous_boundary(text: &str, offset: usize) -> Option<usize> {
+    let mut index = offset;
+    while index > 0 {
+        index -= 1;
+        if text.is_char_boundary(index) {
+            return Some(index);
+        }
+    }
+    None
+}
+
+/// Returns the smallest Unicode scalar boundary strictly after `offset`.
+pub(crate) fn next_boundary(text: &str, offset: usize) -> Option<usize> {
+    if offset >= text.len() {
+        return None;
+    }
+
+    let mut index = offset + 1;
+    while index < text.len() && !text.is_char_boundary(index) {
+        index += 1;
+    }
+    Some(index)
+}
+
+/// Returns the concatenated text of an inline node.
+pub(crate) fn concatenated(inline: &InlineContent) -> String {
+    inline
+        .runs()
+        .iter()
+        .map(|run| run.text().as_str())
+        .collect()
+}
+
+/// Builds the plan for inserting text at the current selection.
+pub(crate) fn plan_insert_text(
+    selection: TextSelection,
+    text: &str,
+) -> Result<PlannedAction, SessionError> {
+    if text.is_empty() && selection.is_collapsed() {
+        return Ok(PlannedAction::NoChange);
+    }
+
+    let node = selection.focus().node_id();
+    let range = ordered_range(selection)?;
+    let transaction = edit_transaction(TransactionStep::ReplaceText {
+        node,
+        range,
+        replacement: text.to_owned(),
+    });
+
+    Ok(PlannedAction::Commit(EditPlan::new(
+        transaction,
+        SelectionUpdate::CaretAfterReplacement,
+        Some(PrimaryEdit {
+            node,
+            range,
+            inserted_len: text.len(),
+        }),
+    )))
+}
+
+/// Builds the plan for Backspace.
+pub(crate) fn plan_backspace(
+    inline: &InlineContent,
+    selection: TextSelection,
+) -> Result<PlannedAction, SessionError> {
+    let node = selection.focus().node_id();
+    let range = if selection.is_collapsed() {
+        let focus = selection.focus().offset().as_usize();
+        let text = concatenated(inline);
+        match previous_boundary(&text, focus) {
+            Some(start) => TextRange::new(inline.offset_at(start)?, selection.focus().offset())
+                .map_err(SessionError::Core)?,
+            None => return Ok(PlannedAction::NoChange),
+        }
+    } else {
+        ordered_range(selection)?
+    };
+
+    Ok(PlannedAction::Commit(deletion_plan(node, range)))
+}
+
+/// Builds the plan for forward Delete.
+pub(crate) fn plan_delete(
+    inline: &InlineContent,
+    selection: TextSelection,
+) -> Result<PlannedAction, SessionError> {
+    let node = selection.focus().node_id();
+    let range = if selection.is_collapsed() {
+        let focus = selection.focus().offset().as_usize();
+        let text = concatenated(inline);
+        match next_boundary(&text, focus) {
+            Some(end) => TextRange::new(selection.focus().offset(), inline.offset_at(end)?)
+                .map_err(SessionError::Core)?,
+            None => return Ok(PlannedAction::NoChange),
+        }
+    } else {
+        ordered_range(selection)?
+    };
+
+    Ok(PlannedAction::Commit(deletion_plan(node, range)))
+}
+
+/// Builds the plan for toggling one mark over the selection.
+pub(crate) fn plan_toggle_mark(
+    inline: &InlineContent,
+    selection: TextSelection,
+    mark: &Mark,
+) -> Result<PlannedAction, SessionError> {
+    if selection.is_collapsed() {
+        return Ok(PlannedAction::NoChange);
+    }
+
+    let node = selection.focus().node_id();
+    let range = ordered_range(selection)?;
+    let step = if range_fully_marked(inline, range, mark.kind()) {
+        TransactionStep::RemoveMark {
+            node,
+            range,
+            mark_kind: mark.kind(),
+        }
+    } else {
+        TransactionStep::AddMark {
+            node,
+            range,
+            mark: mark.clone(),
+        }
+    };
+
+    Ok(PlannedAction::Commit(EditPlan::new(
+        edit_transaction(step),
+        SelectionUpdate::MapExisting,
+        None,
+    )))
+}
+
+/// Wraps a raw transaction with the map-existing selection policy.
+pub(crate) fn map_existing_plan(transaction: Transaction) -> EditPlan {
+    EditPlan::new(transaction, SelectionUpdate::MapExisting, None)
+}
+
+fn ordered_range(selection: TextSelection) -> Result<TextRange, SessionError> {
+    selection
+        .ordered_range()
+        .map_err(|_| SessionError::SelectionInvalid)
+}
+
+fn edit_transaction(step: TransactionStep) -> Transaction {
+    Transaction::new(TransactionOrigin::UserInput).with_step(step)
+}
+
+fn deletion_plan(node: NodeId, range: TextRange) -> EditPlan {
+    EditPlan::new(
+        edit_transaction(TransactionStep::ReplaceText {
+            node,
+            range,
+            replacement: String::new(),
+        }),
+        SelectionUpdate::CaretAtEditStart,
+        Some(PrimaryEdit {
+            node,
+            range,
+            inserted_len: 0,
+        }),
+    )
+}
+
+fn range_fully_marked(inline: &InlineContent, range: TextRange, kind: MarkKind) -> bool {
+    let start = range.start().as_usize();
+    let end = range.end().as_usize();
+
+    let mut cursor = 0usize;
+    for run in inline.runs() {
+        let run_start = cursor;
+        let run_end = run_start + run.len_bytes();
+        cursor = run_end;
+
+        let overlap_start = start.max(run_start);
+        let overlap_end = end.min(run_end);
+        if overlap_start < overlap_end && !run.marks().contains(kind) {
+            return false;
+        }
+    }
+
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boundaries_walk_unicode_scalars() {
+        // "a👍中": a=0..1, 👍=1..5, 中=5..8.
+        let text = "a👍中";
+
+        assert_eq!(previous_boundary(text, 0), None);
+        assert_eq!(previous_boundary(text, 1), Some(0));
+        assert_eq!(previous_boundary(text, 5), Some(1));
+        assert_eq!(previous_boundary(text, 8), Some(5));
+
+        assert_eq!(next_boundary(text, 0), Some(1));
+        assert_eq!(next_boundary(text, 1), Some(5));
+        assert_eq!(next_boundary(text, 5), Some(8));
+        assert_eq!(next_boundary(text, 8), None);
+    }
+}
