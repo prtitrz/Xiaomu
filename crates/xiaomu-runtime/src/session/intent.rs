@@ -6,7 +6,7 @@
 
 use xiaomu_core::document::{InlineContent, Mark, MarkKind, NodeId};
 use xiaomu_core::selection::TextSelection;
-use xiaomu_core::text::TextRange;
+use xiaomu_core::text::{TextOffset, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
 use super::SessionError;
@@ -46,6 +46,17 @@ pub enum EditIntent {
         /// Movement direction over the logical text.
         caret_move: CaretMove,
         /// Keep the anchor and move only the focus (Shift).
+        extend_selection: bool,
+    },
+    /// Place the caret focus at an absolute offset without producing a
+    /// transaction (hit-testing, programmatic moves).
+    ///
+    /// The offset must be a valid boundary of the focused node's inline
+    /// text; otherwise the intent fails with a typed error.
+    PlaceCaret {
+        /// Absolute target offset in the focused node's concatenated text.
+        offset: TextOffset,
+        /// Keep the anchor and move only the focus (Shift-click, drag).
         extend_selection: bool,
     },
     /// Toggle one mark over the whole selection.

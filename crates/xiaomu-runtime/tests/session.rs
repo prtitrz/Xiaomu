@@ -544,3 +544,55 @@ fn undo_and_redo_on_empty_history_are_no_ops() {
     );
     assert_eq!(session.history_depths(), (0, 0));
 }
+
+#[test]
+fn place_caret_positions_absolutely_and_extends() {
+    let (document, paragraph) = document_with("a👍中");
+    let mut session = session_with(&document, caret(&document, paragraph, 0));
+
+    assert_eq!(
+        session
+            .apply_intent(&EditIntent::PlaceCaret {
+                offset: offset_of(&document, paragraph, 5),
+                extend_selection: false,
+            })
+            .unwrap(),
+        SessionOutcome::SelectionChanged
+    );
+    assert_eq!(caret_offset(&session), 5);
+
+    // Extend keeps the anchor at the original position.
+    session
+        .apply_intent(&EditIntent::PlaceCaret {
+            offset: offset_of(&document, paragraph, 1),
+            extend_selection: true,
+        })
+        .unwrap();
+    let selection = session.selection();
+    assert_eq!(selection.anchor().offset().as_usize(), 5);
+    assert_eq!(selection.focus().offset().as_usize(), 1);
+
+    // Placing at the current focus is a no-op.
+    assert_eq!(
+        session
+            .apply_intent(&EditIntent::PlaceCaret {
+                offset: offset_of(&document, paragraph, 1),
+                extend_selection: true,
+            })
+            .unwrap(),
+        SessionOutcome::NoChange
+    );
+
+    // Off-boundary offsets are rejected with the session untouched.
+    const SCRATCH: &str = "00000000000000000000000000000000000000000000000000000000000000000000";
+    let mid_emoji = TextBuffer::from(SCRATCH).offset_at(2).unwrap();
+    let selection_before = session.selection();
+    assert!(matches!(
+        session.apply_intent(&EditIntent::PlaceCaret {
+            offset: mid_emoji,
+            extend_selection: false,
+        }),
+        Err(SessionError::Core(_))
+    ));
+    assert_eq!(session.selection(), selection_before);
+}

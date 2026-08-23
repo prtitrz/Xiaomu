@@ -15,11 +15,11 @@
 
 ## 当前状态
 
-当前切片：**P1.2 DocumentSession 已完成实现并通过本地检查，等待 PR CI 后合并**
+当前切片：**P1.3 GPUI 单块编辑基础已完成实现，本地 macOS 启动冒烟通过；Windows 实机 Gate 待执行，等待 PR CI 后合并**
 
-当前分支：`feat/p1-document-session`
+当前分支：`feat/p1-single-block-basics`
 
-前置状态：P0 已完成（PR #13）；P1.0 随 PR #14 合入；P1.1 GPUI 依赖已合入（PR #15）。
+前置状态：P0 已完成（PR #13）；P1.0 / P1.1 / P1.2 已合并（PR #14 / #15 / #16）。
 
 ## P1.0 Phase Contract 与阶段骨架
 
@@ -127,6 +127,51 @@ tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
 cargo deny check bans licenses sources 全绿
 ```
 
+## P1.3 GPUI 单块编辑基础
+
+- [x] App / window 装配（`editor::run_single_block_editor`，含关窗退出）
+- [x] 单 Paragraph block view（渲染 + caret / selection 绘制，marks 基础视觉映射）
+- [x] InputHandler 文本输入 + 命令键 → intent 管线
+- [x] Left / Right、Shift 选择、Paragraph Home / End、Backspace / Delete（含 SelectAll / Undo / Redo 绑定）
+- [x] 最小 hit-test（点击 / 拖拽 → boundary 校验的 offset）
+- [x] editor_harness 接入单段编辑器
+- [ ] Windows 实机键盘编辑闭环（Gate，待在 Windows 上执行手动清单）
+
+实现说明：
+
+```text
+block_view/ParagraphView 持有 DocumentSession，键 / 鼠标全部翻译为 runtime EditIntent，
+view 不直接修改文档；EntityInputHandler 的平台 UTF-16 range 一律经 input/utf16 转换
+（surrogate 中点解析到所在字符边界，始终为合法 Core 坐标）。
+ParagraphElement 在 paint 期注册 handle_input、shape_line 单行渲染、绘制 caret/selection，
+并保存 layout/bounds 供 hit-test（closest_index_for_x → InlineContent::offset_at 校验）。
+runtime 新增 PlaceCaret intent（绝对定位，hit-test 用）：选择类操作不产生 transaction、
+不进 history；replace_text_in_range 的显式范围 = 两次 PlaceCaret + 一次 InsertText，
+保持单条 undo 记录。
+Left/Right 在有选区时先折叠到选区起 / 终点（编辑器惯例）；SelectAll = PlaceCaret(0) + extend 到段尾。
+Undo/Redo 同时绑定 cmd-z / ctrl-z / cmd-shift-z / ctrl-shift-z / ctrl-y。
+P1.3 停损项：replace_and_mark_text_in_range 立即按普通输入提交（无 composition 状态，
+P1.4 落地状态机；当前 macOS IME 输入中文会逐字提交拼音字母，属已知限制）。
+marks 视觉映射：Bold/Italic → 字重 / 字形，Underline/Strike → 装饰线；Code/Link 留 P1.5。
+```
+
+完成证据：
+
+```text
+分支 feat/p1-single-block-basics：
+cargo fmt / clippy -D warnings / cargo test --workspace / 两个 guard 全绿
+（新增 input/utf16 5 个单元测试、runtime PlaceCaret 集成测试）
+本地 macOS 实机冒烟（人工执行 `cargo run -p xiaomu-editor-harness`）：
+窗口正常打开、进程稳定、关窗即退出（exit 0）；
+英文直接输入 / 方向键 / Shift 选择 / Home/End / Backspace / Delete / 撤销重做可用；
+开着中文 IME 时发现两个问题（归因 P1.3 停损项，无 composition 状态）：
+1. 连续输入拼音出现字符粘连（nihao → nnihhao 一类重复）；
+2. 候选词提交后中文出现，但拼音字母残留在文档中。
+两者均为 setMarkedText 路径被当作普通输入立即提交、且从不报告 marked range 所致，
+属 P1.4 CompositionState 的修复范围（见 Regression Log）。
+Windows 实机 Gate（键盘编辑闭环手动清单）待执行后补充证据。
+```
+
 ## P0 移交的 P1 前置依赖与归属
 
 P0.7 在 progress.md 记录了 7 项"进入 P1 前需要明确归属"的依赖，处置如下：
@@ -185,6 +230,15 @@ P0.7 在 progress.md 记录了 7 项"进入 P1 前需要明确归属"的依赖�
 - undo/redo 失败路径：history entry 原位放回（restore_undo / restore_redo），session document / selection 不受影响。
 - runtime 加入 `#![warn(missing_docs)]`，与 core 的 rustdoc 门禁一致。
 
+### 2026-08-22（P1.3）
+
+- runtime 新增 `PlaceCaret` intent（绝对 offset 定位，hit-test / 编程式移动用）：选择类操作不产生 transaction、不进 history；显式范围的文本替换用"两次 PlaceCaret + 一次 InsertText"保持单条 undo 记录。
+- UTF-16 转换集中在 `xiaomu-gpui::input::utf16`：surrogate 中点解析到所在字符边界，转换结果始终是合法 Core 坐标；平台 UTF-16 不泄漏出 adapter。
+- Left/Right 在非空选区时先折叠到选区起 / 终点（编辑器惯例），再按 scalar boundary 移动。
+- P1.3 停损：`replace_and_mark_text_in_range` 立即按普通输入提交（无 composition 状态）；macOS 上 IME 中文输入会逐字提交拼音字母，属已知限制，P1.4 用 CompositionState 状态机修正。
+- GPUI 官方 `examples/input.rs`（随 crates.io 包发布）作为 InputHandler / 自定义 Element 模式的参考实现。
+- 关窗退出：`on_window_closed` + `windows().is_empty()` 时 `quit()`（GPUI 默认关窗不退出）。
+
 ## P1 Phase Gate
 
 P1 只有在以下条件全部满足后才能完成：
@@ -205,4 +259,8 @@ P1 只有在以下条件全部满足后才能完成：
 
 ## Regression Log
 
-（暂无）
+- 2026-08-22（P1.3 实机）：macOS 开中文 IME 输入时拼音字符粘连、候选提交后拼音残留。
+  根因是 P1.3 停损实现把 `replace_and_mark_text_in_range`（setMarkedText）立即按普通输入提交，
+  且 `marked_text_range` 恒返回 None，平台无法跟踪 preedit 范围导致反复误替换。
+  非停损路径（英文直输 / 键盘命令）不受影响。修复属 P1.4 CompositionState 状态机，
+  修复时以本条为回归验收（连续拼音不粘连、提交后 preedit 清除）。

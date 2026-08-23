@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前 codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已完成 P0；`xiaomu-runtime` 已实现 P1.2 DocumentSession 编排层；`xiaomu-gpui` 已按 P1.1 从 crates.io 精确 pin 引入 GPUI `0.2.2`，adapter 实现按 P1 后续切片推进。
+当前 codec、testkit 和 example harness 的编辑功能处于 bootstrap 阶段。`xiaomu-core` 已完成 P0；`xiaomu-runtime` 已实现 P1.2 DocumentSession 编排层；`xiaomu-gpui` 已按 P1.1 从 crates.io 精确 pin 引入 GPUI `0.2.2`，并实现 P1.3 单块编辑基础（渲染 / 输入 / hit-test / harness）。
 
 ## Core 边界
 
@@ -294,7 +294,26 @@ undo 重放 `AppliedTransaction::inverse()`（ADR 0003）并直接恢复记录�
 
 GPUI platform type 不能泄漏到 Core 或 Runtime public contract。
 
-GPUI dependency 已按 P1.1 从 crates.io 以精确版本引入：workspace 依赖表 pin `gpui = "=0.2.2"`，升级只走单独 PR（`docs/planning.md` §17）。构建期行为：gpui 的 build script 在 macOS 上用 `xcrun metal` 预编译 Metal shader，本机构建需要 Xcode Metal Toolchain 组件（`xcodebuild -downloadComponent MetalToolchain`）；cargo-deny 的 license allow 列表为此新增 NCSA（经 `libfuzzer-sys` 由 `image → ravif → rav1e` 链带入，permissive 且 OSI 批准）。当前 xiaomu-gpui 只有编译级 smoke，不打开窗口。
+GPUI dependency 已按 P1.1 从 crates.io 以精确版本引入：workspace 依赖表 pin `gpui = "=0.2.2"`，升级只走单独 PR（`docs/planning.md` §17）。构建期行为：gpui 的 build script 在 macOS 上用 `xcrun metal` 预编译 Metal shader，本机构建需要 Xcode Metal Toolchain 组件（`xcodebuild -downloadComponent MetalToolchain`）；cargo-deny 的 license allow 列表为此新增 NCSA（经 `libfuzzer-sys` 由 `image → ravif → rav1e` 链带入，permissive 且 OSI 批准）。
+
+### GPUI Adapter（P1.3 单块编辑基础）
+
+`xiaomu-gpui` 当前结构：
+
+```text
+input/utf16.rs   UTF-16 code unit ↔ Core UTF-8 byte offset 转换
+                 （surrogate 中点解析到所在字符边界，始终是合法 Core 坐标）
+block_view/      ParagraphView：持有 DocumentSession，键/鼠标 → runtime EditIntent，
+                 实现 EntityInputHandler（平台 UTF-16 range 在此转换）
+                 ParagraphElement：shape_line 单行渲染、caret / selection 绘制、
+                 paint 期注册 handle_input、保存 layout 供 hit-test
+editor.rs        run_single_block_editor：窗口 / 键绑定 / 关窗退出装配（harness 使用）
+```
+
+- 所有编辑经 session intent 提交，view 不直接改文档；`replace_text_in_range` 的显式范围用两次 selection-only 的 `PlaceCaret` + 一次 `InsertText` 完成，保持单条 history entry。
+- 键位：Left / Right（有选区时先折叠到选区端点）、Shift 选择、Home / End（含 Shift）、Backspace / Delete、SelectAll、Undo / Redo（macOS / Windows 双绑定）；点击与拖拽经 hit-test（`closest_index_for_x` → boundary 校验）定位 caret。
+- 标记渲染：Bold / Italic 映射字重与字形，Underline / Strike 映射装饰线；Code / Link 的视觉差异化留给后续切片。
+- IME composition（P1.4）尚未落地：`replace_and_mark_text_in_range` 目前立即按普通输入提交，marked text 状态机随 P1.4 引入。
 
 ## Codec 边界
 

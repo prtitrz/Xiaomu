@@ -24,6 +24,7 @@ pub use outcome::{SessionError, SessionOutcome};
 use xiaomu_core::document::{InlineContent, NodeId, XiaomuDocument};
 use xiaomu_core::mapping::{ChangeMap, MappedPosition};
 use xiaomu_core::selection::{TextPoint, TextSelection};
+use xiaomu_core::text::TextOffset;
 use xiaomu_core::transaction::Transaction;
 
 use self::history::HistoryEntry;
@@ -95,6 +96,13 @@ impl DocumentSession {
         {
             return self.move_caret(*caret_move, *extend_selection);
         }
+        if let EditIntent::PlaceCaret {
+            offset,
+            extend_selection,
+        } = intent
+        {
+            return self.place_caret(*offset, *extend_selection);
+        }
 
         let inline = self.inline_of(self.selection.focus().node_id())?;
         let action = match intent {
@@ -104,7 +112,9 @@ impl DocumentSession {
             EditIntent::ToggleMark { mark } => {
                 intent::plan_toggle_mark(&inline, self.selection, mark)?
             }
-            EditIntent::MoveCaret { .. } => unreachable!("handled above"),
+            EditIntent::MoveCaret { .. } | EditIntent::PlaceCaret { .. } => {
+                unreachable!("handled above")
+            }
         };
 
         match action {
@@ -233,6 +243,31 @@ impl DocumentSession {
             return Ok(SessionOutcome::NoChange);
         };
         let offset = inline.offset_at(raw).map_err(SessionError::Core)?;
+        let moved = TextPoint::new(focus.node_id(), offset, focus.affinity());
+        let next = if extend_selection {
+            TextSelection::new(self.selection.anchor(), moved)
+        } else {
+            TextSelection::collapsed(moved)
+        };
+
+        if next == self.selection {
+            return Ok(SessionOutcome::NoChange);
+        }
+        self.selection = next;
+        self.notify_selection_changed();
+
+        Ok(SessionOutcome::SelectionChanged)
+    }
+
+    fn place_caret(
+        &mut self,
+        offset: TextOffset,
+        extend_selection: bool,
+    ) -> Result<SessionOutcome, SessionError> {
+        let inline = self.inline_of(self.selection.focus().node_id())?;
+        inline.validate_offset(offset).map_err(SessionError::Core)?;
+
+        let focus = self.selection.focus();
         let moved = TextPoint::new(focus.node_id(), offset, focus.affinity());
         let next = if extend_selection {
             TextSelection::new(self.selection.anchor(), moved)

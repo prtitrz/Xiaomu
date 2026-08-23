@@ -10,13 +10,15 @@
 //! coordinates (UTF-16 ranges, physical pixels) are converted to Core types at
 //! this boundary.
 //!
-//! The adapter is bootstrapping: P1.1 only pins the GPUI dependency
-//! (`=0.2.2`, see `docs/planning.md` §17) and proves it compiles and links
-//! without opening a window. Subsequent P1 slices build the single-block
-//! editing pipeline on top.
+//! Modules:
+//! - [`input`]: UTF-16 ↔ Core-offset conversion for the platform input path.
+//! - [`block_view`]: the single-paragraph view and its custom element
+//!   (rendering, caret/selection drawing, hit testing, `InputHandler`).
+//! - [`editor`]: application assembly for the single-block editor harness.
 
-/// Bootstrap marker kept intentionally small while the public API is designed.
-pub const CRATE_NAME: &str = "xiaomu-gpui";
+pub mod block_view;
+pub mod editor;
+pub mod input;
 
 /// Returns the pinned GPUI crates.io version this crate is built against.
 ///
@@ -36,11 +38,6 @@ mod tests {
     #[test]
     fn gpui_platform_layer_links() {
         assert_eq!(gpui::px(12.0), gpui::px(6.0) + gpui::px(6.0));
-
-        let color = gpui::Hsla::default();
-        assert_eq!((color.h, color.s, color.l, color.a), (0.0, 0.0, 0.0, 0.0));
-
         assert_eq!(gpui_version(), "0.2.2");
-        assert_eq!(CRATE_NAME, "xiaomu-gpui");
     }
 }
