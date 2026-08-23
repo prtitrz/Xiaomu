@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前 `xiaomu-runtime`、codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已完成 P0；`xiaomu-gpui` 已按 P1.1 从 crates.io 精确 pin 引入 GPUI `0.2.2`，adapter 实现按 P1 后续切片推进。
+当前 codec、testkit 和 example harness 仍处于 bootstrap 阶段。`xiaomu-core` 已完成 P0；`xiaomu-runtime` 已实现 P1.2 DocumentSession 编排层；`xiaomu-gpui` 已按 P1.1 从 crates.io 精确 pin 引入 GPUI `0.2.2`，adapter 实现按 P1 后续切片推进。
 
 ## Core 边界
 
@@ -176,7 +176,7 @@ TextSelection
 NodeSelection
 ```
 
-`TextPoint` 由 stable `NodeId`、`TextOffset` 和 `CursorAffinity` 组成。构造不触碰文档；使用时通过 `validate` 针对具体 snapshot 校验：节点必须存在、必须携带 inline content，offset 必须是该节点拼接文本的合法 UTF-8 scalar boundary（校验逻辑由 `InlineContent::validate_offset` 承担）。stale / deleted node 返回 `UnknownNode`，非 inline 目标返回 `InvalidSelection`。
+`TextPoint` 由 stable `NodeId`、`TextOffset` 和 `CursorAffinity` 组成。构造不触碰文档；使用时通过 `validate` 针对具体 snapshot 校验：节点必须存在、必须携带 inline content，offset 必须是该节点拼接文本的合法 UTF-8 scalar boundary（校验逻辑由 `InlineContent::validate_offset` 承担；`InlineContent::offset_at` 提供同样校验的 offset 构造，P1.2 为 runtime 层引入的最小扩展）。stale / deleted node 返回 `UnknownNode`，非 inline 目标返回 `InvalidSelection`。
 
 `NodeGap` 表示 parent child list 上的结构边界位置（`index` 为边界前的 child 数量），只对 Children-shaped node 有效。
 
@@ -266,7 +266,27 @@ SetNodeAttrs  逆 = 换回旧 attrs
 
 Runtime 不拥有 App Shell。Persistence、file lifecycle、networking、product configuration 和 window ownership 都属于 host responsibility。
 
-Runtime 保持 `#![forbid(unsafe_code)]`。
+Runtime 保持 `#![forbid(unsafe_code)]` 与 `#![warn(missing_docs)]`。
+
+### DocumentSession
+
+`runtime/session/` 实现编辑会话编排层（P1.2）：
+
+```text
+DocumentSession（snapshot + selection + history + notification seam）
+EditIntent（InsertText / Backspace / Delete / MoveCaret / ToggleMark）
+EditPlan（Core Transaction + runtime SelectionUpdate）
+SelectionUpdate（CaretAfterReplacement / CaretAtEditStart / MapExisting）
+HistoryStack（一笔 transaction 一个 entry，保存 redo/undo transaction 与 before/after selection）
+SessionOutcome（DocumentChanged / SelectionChanged / NoChange）
+DocumentChangeListener（frontend-neutral 通知 seam）
+```
+
+编辑流为 `intent → EditPlan → Transaction::apply_with_changes → resolve after-selection → 原子替换 snapshot / selection / history 并通知`。任何失败（Core 拒绝、selection 映射为 `Deleted`、新 selection 校验失败）都让 session 状态保持不变；P1 拒绝删除当前 inline node 的 transaction（`SelectionDeleted`），不做父级 fallback 收敛。
+
+intent-specific after-selection：InsertText 提交后 caret 落在 replacement 之后，Backspace / Delete 落在删除起点，ToggleMark 通过 ChangeMap 向外映射保持选区覆盖，纯 caret 移动不产生 transaction。合法空操作返回 `NoChange`：不调用 Core apply、不推进 revision、不发通知、不写 history；raw `apply` 无 no-op 检测，空 transaction 也会提交。
+
+undo 重放 `AppliedTransaction::inverse()`（ADR 0003）并直接恢复记录的 before / after selection；undo 后的新编辑清空 redo 栈。caret 移动按 Unicode scalar boundary，Home / End 到 paragraph 逻辑首尾。session 纯逻辑、无 GPUI 依赖，全部行为在无显示器环境测试。
 
 ## GPUI 边界
 

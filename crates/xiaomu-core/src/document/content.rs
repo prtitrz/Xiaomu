@@ -61,6 +61,18 @@ impl InlineContent {
         self.runs.iter().map(TextRun::len_bytes).sum()
     }
 
+    /// Returns a validated coordinate for `byte_index` in the concatenated
+    /// text of all runs.
+    ///
+    /// Mirrors [`crate::text::TextBuffer::offset_at`]: the index must be in
+    /// bounds and on a UTF-8 scalar boundary. This gives non-Core layers a
+    /// direct way to construct offsets against inline content without
+    /// reassembling the concatenated text themselves.
+    pub fn offset_at(&self, byte_index: usize) -> Result<TextOffset> {
+        self.validate_offset(TextOffset::from_validated_byte_index(byte_index))?;
+        Ok(TextOffset::from_validated_byte_index(byte_index))
+    }
+
     /// Validates that `offset` is a usable coordinate in the concatenated
     /// text of all runs.
     ///
@@ -140,5 +152,33 @@ impl NodeContent {
     #[must_use]
     pub const fn is_atomic(&self) -> bool {
         matches!(self, Self::Atomic)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::MarkSet;
+
+    fn inline(text: &str) -> InlineContent {
+        InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()]).unwrap()
+    }
+
+    #[test]
+    fn offset_at_validates_boundaries_and_bounds() {
+        let content = inline("a中");
+
+        assert_eq!(content.offset_at(0).unwrap().as_usize(), 0);
+        assert_eq!(content.offset_at(1).unwrap().as_usize(), 1);
+        assert_eq!(content.offset_at(4).unwrap().as_usize(), 4);
+        assert!(matches!(
+            content.offset_at(2),
+            Err(Error::InvalidTextBoundary { offset: 2 })
+        ));
+        assert!(matches!(
+            content.offset_at(5),
+            Err(Error::TextOutOfBounds { offset: 5, len: 4 })
+        ));
+        assert_eq!(InlineContent::empty().offset_at(0).unwrap().as_usize(), 0);
     }
 }
