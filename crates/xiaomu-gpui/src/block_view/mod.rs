@@ -16,8 +16,7 @@ use std::ops::Range;
 
 use gpui::{
     App, Bounds, Context, FocusHandle, Focusable, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, ShapedLine, Subscription, Window, actions, div,
-    prelude::*, px,
+    MouseUpEvent, Pixels, Point, ShapedLine, Subscription, Window, actions, div, prelude::*, px,
 };
 
 use xiaomu_core::document::{InlineContent, NodeId};
