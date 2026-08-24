@@ -138,13 +138,13 @@ impl EntityInputHandler for ParagraphView {
         range_utf16: Option<Range<usize>>,
         new_text: &str,
         new_selected_range: Option<Range<usize>>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         // Begin or continue composition; the preedit never touches the
         // canonical document.
         ime_debug!("mark: range={range_utf16:?} text={new_text:?} sel={new_selected_range:?}");
-        self.mark_text(range_utf16, new_text, new_selected_range, cx);
+        self.mark_text(range_utf16, new_text, new_selected_range, window, cx);
     }
 
     fn bounds_for_range(

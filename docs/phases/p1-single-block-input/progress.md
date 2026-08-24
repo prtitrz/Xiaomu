@@ -202,6 +202,23 @@ composing 期间键盘编辑动作被忽略（防止 canonical 编辑破坏 base
 block_view/mod.rs 超 source-size 700 行硬限，EntityInputHandler impl 拆分至 block_view/input_handler.rs。
 ```
 
+评审与实机调试补充（Windows，用户实测）：
+
+```text
+现象：preedit 状态机/查询/渲染数据全部正确（XIAOMU_IME_DEBUG 探针证实 prepaint/paint
+都拿到含拼音的 virtual projection），但屏幕冻结；切窗口后 IME commit 才追上。
+排查：GPUI_DISABLE_DIRECT_COMPOSITION=1 切换呈现路径后依旧 → 排除 DComp 路径。
+源码定位：gpui 0.2.2 Windows 平台唯一的帧驱动是 WM_PAINT（events.rs draw_window），
+WM_PAINT 是低优先级消息，会被密集键盘 / IME 消息流饿死；cx.notify() 只标 dirty。
+与上游 zed-industries/zed #61469（Windows presentation starvation）同因。
+修复：composing 期间每次 preedit 更新后调用 RedrawWindow(
+RDW_INVALIDATE | RDW_UPDATENOW) 强制同步走一帧（force_synchronous_redraw，
+仅 cfg(windows)，位于 xiaomu-gpui frontend 边界内）。
+附带决策：xiaomu-gpui 的 #![forbid(unsafe_code)] 放宽为 #![deny]，
+唯一 allow 块限定在 force_synchronous_redraw 内（Win32 RedrawWindow 必然 unsafe）；
+若上游修复落地后移除 workaround，应恢复 forbid。首次 begin 也补上了 cx.notify()。
+```
+
 完成证据：
 
 ```text

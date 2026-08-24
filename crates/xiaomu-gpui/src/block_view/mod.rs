@@ -455,6 +455,7 @@ impl ParagraphView {
         range_utf16: Option<Range<usize>>,
         new_text: &str,
         new_selected_range: Option<Range<usize>>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let canonical = self.canonical_text();
@@ -492,6 +493,12 @@ impl ParagraphView {
         // marked text would stay invisible while the IME session continues.
         // This must fire on the first mark too, not only on updates.
         cx.notify();
+
+        // Upstream GPUI Windows frame scheduling can starve `WM_PAINT` while
+        // the IME message stream is dense (see function docs); force the
+        // composition frame to compose and present synchronously.
+        #[cfg(windows)]
+        force_synchronous_redraw(window);
     }
 
     /// Builds the displayed text plus its styled segments.
@@ -636,5 +643,44 @@ impl Render for ParagraphView {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .child(ParagraphElement { view: cx.entity() })
+    }
+}
+
+/// Forces a synchronous redraw of the window.
+///
+/// Workaround for upstream GPUI Windows frame scheduling (zed-industries/zed
+/// issue #61469): `cx.notify()` only marks the view dirty, and the actual
+/// frame runs from the low-priority `WM_PAINT`, which can be starved by the
+/// dense keyboard / IME message stream while an IME composition is active —
+/// frames are built (`prepaint`/`paint` run) but never presented until the
+/// queue drains.
+///
+/// `RedrawWindow` with `RDW_INVALIDATE | RDW_UPDATENOW` sends `WM_PAINT`
+/// synchronously, so the composition frame is composed and presented before
+/// this call returns. This stays inside `xiaomu-gpui` (frontend boundary);
+/// revisit when the upstream fix lands in a pinned gpui release.
+#[cfg(windows)]
+fn force_synchronous_redraw(window: &mut Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Gdi::{
+        RDW_ALLCHILDREN, RDW_INVALIDATE, RDW_UPDATENOW, RedrawWindow,
+    };
+
+    if let Ok(handle) = window.window_handle()
+        && let RawWindowHandle::Win32(win32) = handle.as_raw()
+    {
+        // SAFETY: `hwnd` is the live window handle handed out by the window
+        // itself; `RedrawWindow` only requests a synchronous repaint of that
+        // window and touches no other state.
+        #[allow(unsafe_code)]
+        unsafe {
+            let _ = RedrawWindow(
+                Some(HWND(win32.hwnd.get() as *mut core::ffi::c_void)),
+                None,
+                None,
+                RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN,
+            );
+        }
     }
 }
