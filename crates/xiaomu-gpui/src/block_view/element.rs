@@ -72,14 +72,6 @@ impl Element for ParagraphElement {
     ) -> Self::PrepaintState {
         let view = self.view.read(cx);
         let session = view.session();
-        if std::env::var_os("XIAOMU_IME_DEBUG").is_some() && view.is_composing() {
-            let (text, segments) = view.display_content();
-            eprintln!(
-                "xiaomu-ime: prepaint composing text={text:?} segments={}",
-                segments.len()
-            );
-        }
-
         let style = window.text_style();
         let font = style.font();
         let font_size = style.font_size.to_pixels(window.rem_size());
@@ -188,12 +180,6 @@ impl Element for ParagraphElement {
         }
 
         let line = prepaint.line.take().unwrap();
-        if std::env::var_os("XIAOMU_IME_DEBUG").is_some() {
-            let composing = self.view.read(cx).is_composing();
-            if composing {
-                eprintln!("xiaomu-ime: PAINT composing");
-            }
-        }
         if let Err(error) = line.paint(bounds.origin, window.line_height(), window, cx) {
             eprintln!("xiaomu: line paint failed: {error}");
         }

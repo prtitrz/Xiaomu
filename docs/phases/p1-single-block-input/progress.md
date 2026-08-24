@@ -15,7 +15,7 @@
 
 ## 当前状态
 
-当前切片：**P1.4 IME composition 已完成实现并通过 fmt / clippy / test；Windows 实机 IME 矩阵待执行手动 Gate**
+当前切片：**P1.4 IME composition 已完成；自动 Gate 与 Windows Microsoft Pinyin 实机矩阵全通过**
 
 当前分支：`feat/p1-ime-composition`
 
@@ -180,7 +180,7 @@ Windows 实机 Gate（键盘编辑闭环手动清单）待执行后补充证据�
 - [x] begin / update / commit / cancel / focus-loss 状态转移测试
 - [x] marked text 瞬态渲染（下划线 preedit，不写 canonical document）
 - [x] commit 一次入历史 / cancel 恢复 composition 前状态
-- [ ] planning §8 Windows 矩阵实机执行（Microsoft Pinyin 连续 composition、候选窗、中文标点、中英混排、emoji / surrogate、combining marks、选区替换、焦点恢复）
+- [x] planning §8 Windows 矩阵实机执行（Microsoft Pinyin 连续 composition、候选窗、中文标点、中英混排、emoji / surrogate、combining marks、选区替换、焦点恢复）
 
 实现说明：
 
@@ -197,26 +197,45 @@ bounds_for_range / character_index_for_point）改答 virtual projection；
 composition 全程 document revision 不变（preedit 只存在于 adapter）。
 commit 路径：两次 PlaceCaret（base_range）+ InsertText = 单笔 transaction、单条 undo。
 cancel 路径：PlaceCaret 恢复 base_selection；焦点丢失经 window.on_focus_out 订阅取消。
+Windows IME 可在 focus-out 送达前先提交普通无下划线文本；该原生平台结果可接受，
+Gate 要求是最终不存在带下划线的僵尸 composition，且恢复焦点后可继续输入。
 composing 期间键盘编辑动作被忽略（防止 canonical 编辑破坏 base range），鼠标点击先 cancel。
 渲染：preedit 作为独立 underlined segment 参与排版，caret 定位到 preedit 内平台 selection 终点。
 block_view/mod.rs 超 source-size 700 行硬限，EntityInputHandler impl 拆分至 block_view/input_handler.rs。
 ```
 
-评审与实机调试补充（Windows，用户实测）：
+评审与实机调试补充（Windows，用户实测，已关闭）：
 
 ```text
-现象：preedit 状态机/查询/渲染数据全部正确（XIAOMU_IME_DEBUG 探针证实 prepaint/paint
+原现象：preedit 状态机/查询/渲染数据全部正确（临时探针证实 prepaint/paint
 都拿到含拼音的 virtual projection），但屏幕冻结；切窗口后 IME commit 才追上。
-排查：GPUI_DISABLE_DIRECT_COMPOSITION=1 切换呈现路径后依旧 → 排除 DComp 路径。
-源码定位：gpui 0.2.2 Windows 平台唯一的帧驱动是 WM_PAINT（events.rs draw_window），
-WM_PAINT 是低优先级消息，会被密集键盘 / IME 消息流饿死；cx.notify() 只标 dirty。
-与上游 zed-industries/zed #61469（Windows presentation starvation）同因。
-修复：composing 期间每次 preedit 更新后调用 RedrawWindow(
-RDW_INVALIDATE | RDW_UPDATENOW) 强制同步走一帧（force_synchronous_redraw，
-仅 cfg(windows)，位于 xiaomu-gpui frontend 边界内）。
-附带决策：xiaomu-gpui 的 #![forbid(unsafe_code)] 放宽为 #![deny]，
-唯一 allow 块限定在 force_synchronous_redraw 内（Win32 RedrawWindow 必然 unsafe）；
-若上游修复落地后移除 workaround，应恢复 forbid。首次 begin 也补上了 cx.notify()。
+排查：GPUI_DISABLE_DIRECT_COMPOSITION=1 切换呈现路径后依旧，DComp 不是充分解释。
+首次 begin 缺少 cx.notify() 是已确认并保留的晓木局部 bug 修复。
+gpui 0.2.2 的 dispatch_key_event 可在 dirty 时执行 draw 而不 present，与上游
+zed-industries/zed #61469 描述的 Windows presentation starvation 机制吻合，但不是
+本次 preedit 不可见的直接根因。
+失败实验：在 InputHandler/App update 尚未退出时同步调用 RedrawWindow(
+RDW_INVALIDATE | RDW_UPDATENOW)，日志仍显示 prepaint/paint 而屏幕不更新。该调用可能
+重入 GPUI request-frame，不能等同于回调外 watchdog；workaround 已撤回。
+unsafe 政策恢复为 xiaomu-gpui crate-wide #![forbid(unsafe_code)]。
+PresentMon 实机采集约 17.6 秒 / 1613 次 swap-chain present，包含 4.18s 等断档；
+该数据保留为 GPUI 调度风险证据，但当时没有与 IME 日志严格对齐，不能单独证明因果。
+随后在 gpui 0.2.2 Windows dispatch eager draw 后增加 present，实机现象完全不变，
+故该补丁实验撤回，不 vendor GPUI，继续使用精确 pin 的 crates.io 0.2.2。
+确定根因：collapsed composition 的 base_start == base_end；旧 projection mapper 对该
+边界同时使用 prefix/suffix 语义，使 suffix 与 preedit 获得相同排序坐标且 suffix 先拼接。
+结果是 preedit 被追加到整行末尾（长行已被 viewport 裁剪），caret 却按正确的 virtual
+offset 在原插入点移动。时间戳日志直接显示 canonical 中间插入点对应的 prepaint 文本
+仍以 `.n/.ni/.ni'hao` 结尾，闭合了这个矛盾。
+修复：projection 显式构造 prefix / preedit / suffix；suffix 的 display start 始终加上
+preedit 长度，不再用一个无 bias 的边界 mapper。新增 collapsed caret、跨 styled runs
+替换与 idle style 保真回归测试。
+修复后 Windows 实机复测通过：微软拼音在正文中间与末尾连续 composition 时，preedit
+逐键实时显示并带下划线，caret 跟随；候选“你好”提交后在原插入点整体替换。时间戳
+日志同步证明 prepaint 的 virtual text 为 prefix + preedit + suffix，不再追加到行末。
+扩展矩阵通过：选区替换与单笔 undo/redo、中文标点、中英混排、emoji / surrogate、
+combining marks 均正常；focus-out 若由 Windows IME 先提交则留下普通无下划线文本，
+不会残留 marked range，恢复焦点后可继续输入。临时日志与 PresentMon 脚本合并前删除。
 ```
 
 完成证据：
@@ -228,7 +247,9 @@ cargo clippy --workspace --all-targets -- -D warnings 全绿
 cargo test --workspace 全绿（新增 input/composition.rs 6 个状态机单元测试，19 个 test target）
 tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
 Windows 本机启动冒烟：harness 窗口正常打开、进程稳定（自动验证无窗口依赖部分全绿）。
-Windows Microsoft Pinyin 手动矩阵待执行后补充证据（回归验收：P1.3 Regression Log 两条——连续拼音不粘连、提交后 preedit 清除）。
+Windows Microsoft Pinyin 手动矩阵全通过（连续 composition、候选提交、中文标点、
+中英混排、emoji / surrogate、combining marks、选区替换、单笔 undo/redo、焦点恢复）。
+P1.4 自动 Gate 与实机 Gate 均满足，可以合并。
 ```
 
 ## P0 移交的 P1 前置依赖与归属

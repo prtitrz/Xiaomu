@@ -10,12 +10,3 @@ repository.workspace = true
 gpui.workspace = true
 xiaomu-core.workspace = true
 xiaomu-runtime.workspace = true
-
-# IME composition redraw workaround (see block_view/mod.rs); Windows only.
-# Versions are aligned with gpui 0.2.2 so the crates unify into one build.
-[target.'cfg(target_os = "windows")'.dependencies]
-raw-window-handle = "0.6"
-windows = { version = "0.61", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-] }

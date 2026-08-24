@@ -1,7 +1,4 @@
-// Unsafe is denied crate-wide; the single allowed block is the Windows IME
-// redraw workaround in block_view::force_synchronous_redraw (see its
-// documentation and the P1.4 progress notes).
-#![deny(unsafe_code)]
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 //! xiaomu-gpui: GPUI adapter for the Xiaomu native structured rich-text
