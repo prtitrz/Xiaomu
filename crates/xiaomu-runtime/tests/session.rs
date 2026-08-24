@@ -596,3 +596,48 @@ fn place_caret_positions_absolutely_and_extends() {
     ));
     assert_eq!(session.selection(), selection_before);
 }
+
+#[test]
+fn selected_text_extracts_plain_text_across_runs() {
+    let bold = MarkSet::new([Mark::Bold]).unwrap();
+    let code = MarkSet::new([Mark::Code]).unwrap();
+    // "ab" + "你👍" + "c": boundaries at 2, 5 and 9 bytes.
+    let (document, paragraph) =
+        marked_document(&[("ab", bold), ("你👍", code), ("c", MarkSet::empty())]);
+
+    let mut session = session_with(&document, caret(&document, paragraph, 0));
+    assert_eq!(session.selected_text(), None, "collapsed selection");
+
+    session
+        .apply_intent(&EditIntent::PlaceCaret {
+            offset: offset_of(&document, paragraph, 1),
+            extend_selection: false,
+        })
+        .unwrap();
+    // "ab"(0..2) + "你👍"(2..9) + "c"(9..10): 1..9 = b + 你👍.
+    session
+        .apply_intent(&EditIntent::PlaceCaret {
+            offset: offset_of(&document, paragraph, 9),
+            extend_selection: true,
+        })
+        .unwrap();
+    assert_eq!(session.selected_text().as_deref(), Some("b你👍"));
+}
+
+#[test]
+fn selected_text_covers_full_selection_regardless_of_anchor_order() {
+    let italic = MarkSet::new([Mark::Italic]).unwrap();
+    let (document, paragraph) = marked_document(&[("中文x", MarkSet::empty()), ("yz", italic)]);
+
+    let mut session = session_with(&document, range_of(&document, paragraph, 0, 9));
+    // Anchor/focus order must not matter; the logical range wins.
+    assert_eq!(session.selected_text().as_deref(), Some("中文xyz"));
+
+    session
+        .apply_intent(&EditIntent::PlaceCaret {
+            offset: offset_of(&document, paragraph, 8),
+            extend_selection: false,
+        })
+        .unwrap();
+    assert_eq!(session.selected_text(), None);
+}

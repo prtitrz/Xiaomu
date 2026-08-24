@@ -288,6 +288,8 @@ intent-specific after-selection：InsertText 提交后 caret 落在 replacement 
 
 undo 重放 `AppliedTransaction::inverse()`（ADR 0003）并直接恢复记录的 before / after selection；undo 后的新编辑清空 redo 栈。caret 移动按 Unicode scalar boundary，Home / End 到 paragraph 逻辑首尾。session 纯逻辑、无 GPUI 依赖，全部行为在无显示器环境测试。
 
+`runtime/clipboard.rs` 提供 frontend-neutral 纯文本 clipboard seam：`TextClipboard` trait（write_text / read_text，非文本剪贴板内容读为 `None`）与 `normalize_paste_text`（粘贴文本中的行断符折叠为空格——paragraph inline 文本不能包含换行；多 block 粘贴语义随后续 document-level 编辑引入）。平台绑定在 GPUI adapter 实现，编辑层只见该 trait。
+
 ## GPUI 边界
 
 `xiaomu-gpui` 是第一个 Native Frontend 实现。GPUI-specific input、focus、layout、paint、hit testing、clipboard integration 和 virtualization 都属于这一层。
@@ -296,24 +298,27 @@ GPUI platform type 不能泄漏到 Core 或 Runtime public contract。
 
 GPUI dependency 已按 P1.1 从 crates.io 以精确版本引入：workspace 依赖表 pin `gpui = "=0.2.2"`，升级只走单独 PR（`docs/planning.md` §17）。构建期行为：gpui 的 build script 在 macOS 上用 `xcrun metal` 预编译 Metal shader，本机构建需要 Xcode Metal Toolchain 组件（`xcodebuild -downloadComponent MetalToolchain`）；cargo-deny 的 license allow 列表为此新增 NCSA（经 `libfuzzer-sys` 由 `image → ravif → rav1e` 链带入，permissive 且 OSI 批准）。
 
-### GPUI Adapter（P1.3 单块编辑基础）
+### GPUI Adapter（P1.3–P1.5 单块编辑）
 
 `xiaomu-gpui` 当前结构：
 
 ```text
-input/utf16.rs   UTF-16 code unit ↔ Core UTF-8 byte offset 转换
-                 （surrogate 中点解析到所在字符边界，始终是合法 Core 坐标）
-block_view/      ParagraphView：持有 DocumentSession，键/鼠标 → runtime EditIntent，
-                 实现 EntityInputHandler（平台 UTF-16 range 在此转换）
-                 ParagraphElement：shape_line 单行渲染、caret / selection 绘制、
-                 paint 期注册 handle_input、保存 layout 供 hit-test
-editor.rs        run_single_block_editor：窗口 / 键绑定 / 关窗退出装配（harness 使用）
+input/utf16.rs              UTF-16 code unit ↔ Core UTF-8 byte offset 转换
+                            （surrogate 中点解析到所在字符边界，始终是合法 Core 坐标）
+input/composition.rs        IME CompositionState 纯状态机（preedit 只存在于 adapter）
+input/platform_clipboard.rs runtime TextClipboard seam 的 GPUI 平台绑定
+block_view/                 ParagraphView：持有 DocumentSession，键/鼠标 → runtime EditIntent，
+                            实现 EntityInputHandler（平台 UTF-16 range 在此转换）
+                            ParagraphElement：shape_line 单行渲染、caret / selection 绘制、
+                            paint 期注册 handle_input、保存 layout 供 hit-test
+editor.rs                   run_single_block_editor：窗口 / 键绑定 / 关窗退出装配（harness 使用）
 ```
 
 - 所有编辑经 session intent 提交，view 不直接改文档；`replace_text_in_range` 的显式范围用两次 selection-only 的 `PlaceCaret` + 一次 `InsertText` 完成，保持单条 history entry。
-- 键位：Left / Right（有选区时先折叠到选区端点）、Shift 选择、Home / End（含 Shift）、Backspace / Delete、SelectAll、Undo / Redo（macOS / Windows 双绑定）；点击与拖拽经 hit-test（`closest_index_for_x` → boundary 校验）定位 caret。
-- 标记渲染：Bold / Italic 映射字重与字形，Underline / Strike 映射装饰线；Code / Link 的视觉差异化留给后续切片。
-- IME composition（P1.4）尚未落地：`replace_and_mark_text_in_range` 目前立即按普通输入提交，marked text 状态机随 P1.4 引入。
+- 键位：Left / Right（有选区时先折叠到选区端点）、Shift 选择、Home / End（含 Shift）、Backspace / Delete、SelectAll、Undo / Redo、Copy / Cut / Paste 与 Bold / Italic / Code / Underline / Strike 切换（macOS / Windows 双绑定）；点击与拖拽经 hit-test（`closest_index_for_x` → boundary 校验）定位 caret。
+- clipboard：copy / cut 取 session 选区纯文本经 `TextClipboard` 写出；paste 读入后经 `normalize_paste_text` 归一化再走 InsertText intent（一笔 undo entry）；cut = copy + Delete，同为单笔。空剪贴板文本不清除选区。
+- 标记渲染：Bold / Italic 映射字重与字形，Underline / Strike 映射装饰线，Code 映射半透明背景色块；Link 需要属性编辑 UI，留待后续切片。
+- IME composition（P1.4）：CompositionState 维护 base selection / preedit / virtual projection，composition 全程 document revision 不变，commit 组装为单笔 InsertText intent 入 history，cancel 恢复 base selection。
 
 ## Codec 边界
 

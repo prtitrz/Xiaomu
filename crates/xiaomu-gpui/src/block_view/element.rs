@@ -99,7 +99,7 @@ impl Element for ParagraphElement {
                     len: segment.text.len(),
                     font,
                     color,
-                    background_color: None,
+                    background_color: segment.code.then_some(rgba(0x00000012).into()),
                     underline,
                     strikethrough: segment.strike.then_some(StrikethroughStyle {
                         color: Some(color),

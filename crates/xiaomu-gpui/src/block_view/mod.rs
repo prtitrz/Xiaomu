@@ -9,6 +9,7 @@
 //! a virtual projection (canonical prefix + preedit + suffix); see
 //! [`crate::input::composition`].
 
+mod actions;
 mod element;
 mod input_handler;
 #[cfg(test)]
@@ -55,6 +56,22 @@ actions!(
         SelectEnd,
         /// Select the whole paragraph.
         SelectAll,
+        /// Copy the selected plain text to the clipboard.
+        ClipboardCopy,
+        /// Cut the selected plain text to the clipboard and delete it.
+        ClipboardCut,
+        /// Paste clipboard text at the caret / over the selection.
+        ClipboardPaste,
+        /// Toggle bold over the selection.
+        ToggleBold,
+        /// Toggle italic over the selection.
+        ToggleItalic,
+        /// Toggle inline-code over the selection.
+        ToggleCode,
+        /// Toggle underline over the selection.
+        ToggleUnderline,
+        /// Toggle strikethrough over the selection.
+        ToggleStrike,
         /// Undo the newest history entry.
         Undo,
         /// Redo the newest undone entry.
@@ -73,6 +90,7 @@ pub(crate) struct DisplaySegment {
     pub(super) italic: bool,
     pub(super) underline: bool,
     pub(super) strike: bool,
+    pub(super) code: bool,
 }
 
 fn project_display_content(
@@ -98,6 +116,7 @@ fn project_display_content(
             marks.contains(xiaomu_core::document::MarkKind::Italic),
             marks.contains(xiaomu_core::document::MarkKind::Underline),
             marks.contains(xiaomu_core::document::MarkKind::Strike),
+            marks.contains(xiaomu_core::document::MarkKind::Code),
         );
         let mut push_piece = |start: usize, end: usize, display_start: usize| {
             if start < end {
@@ -108,6 +127,7 @@ fn project_display_content(
                     italic: style.1,
                     underline: style.2,
                     strike: style.3,
+                    code: style.4,
                 });
             }
         };
@@ -128,6 +148,7 @@ fn project_display_content(
             italic: false,
             underline: true,
             strike: false,
+            code: false,
         });
     }
 
@@ -627,6 +648,14 @@ impl Render for ParagraphView {
             .on_action(cx.listener(Self::select_home))
             .on_action(cx.listener(Self::select_end))
             .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::cut))
+            .on_action(cx.listener(Self::paste))
+            .on_action(cx.listener(Self::toggle_bold))
+            .on_action(cx.listener(Self::toggle_italic))
+            .on_action(cx.listener(Self::toggle_code))
+            .on_action(cx.listener(Self::toggle_underline))
+            .on_action(cx.listener(Self::toggle_strike))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
