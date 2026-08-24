@@ -4,21 +4,28 @@
 //! editing flows through runtime intents; the view never mutates the
 //! document directly. Platform UTF-16 ranges are converted at this boundary
 //! (see [`crate::input::utf16`]).
+//!
+//! While IME composition is active, all input-handler queries answer against
+//! a virtual projection (canonical prefix + preedit + suffix); see
+//! [`crate::input::composition`].
 
 mod element;
+mod input_handler;
+#[cfg(test)]
+mod tests;
 
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, Context, EntityInputHandler, FocusHandle, Focusable, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, ShapedLine, UTF16Selection, Window, actions, div,
-    prelude::*, px,
+    App, Bounds, Context, FocusHandle, Focusable, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, ShapedLine, Subscription, Window, actions, div, prelude::*, px,
 };
 
 use xiaomu_core::document::{InlineContent, NodeId};
 use xiaomu_core::text::{TextOffset, TextRange};
 use xiaomu_runtime::session::{CaretMove, DocumentSession, EditIntent};
 
+use crate::input::composition::CompositionState;
 use crate::input::utf16;
 
 pub use element::ParagraphElement;
@@ -55,6 +62,85 @@ actions!(
     ]
 );
 
+/// One styled span of the displayed (possibly virtual) text.
+///
+/// Byte offsets are relative to the displayed text so the element can shape
+/// it without knowing about composition internals.
+pub(crate) struct DisplaySegment {
+    pub(super) start: usize,
+    pub(super) text: String,
+    pub(super) bold: bool,
+    pub(super) italic: bool,
+    pub(super) underline: bool,
+    pub(super) strike: bool,
+}
+
+fn project_display_content(
+    inline: &InlineContent,
+    composition: Option<(Range<usize>, &str)>,
+) -> (String, Vec<DisplaySegment>) {
+    let (base_start, base_end, preedit) = composition
+        .as_ref()
+        .map(|(range, text)| (range.start, range.end, *text))
+        .unwrap_or((usize::MAX, usize::MAX, ""));
+    let replaced_len = base_end.saturating_sub(base_start);
+
+    let mut segments = Vec::new();
+    let mut cursor = 0usize;
+    for run in inline.runs() {
+        let run_start = cursor;
+        let run_end = run_start + run.len_bytes();
+        cursor = run_end;
+
+        let marks = run.marks();
+        let style = (
+            marks.contains(xiaomu_core::document::MarkKind::Bold),
+            marks.contains(xiaomu_core::document::MarkKind::Italic),
+            marks.contains(xiaomu_core::document::MarkKind::Underline),
+            marks.contains(xiaomu_core::document::MarkKind::Strike),
+        );
+        let mut push_piece = |start: usize, end: usize, display_start: usize| {
+            if start < end {
+                segments.push(DisplaySegment {
+                    start: display_start,
+                    text: run.text().as_str()[start - run_start..end - run_start].to_owned(),
+                    bold: style.0,
+                    italic: style.1,
+                    underline: style.2,
+                    strike: style.3,
+                });
+            }
+        };
+
+        let prefix_end = run_end.min(base_start);
+        push_piece(run_start, prefix_end, run_start);
+
+        let suffix_start = run_start.max(base_end);
+        let suffix_display_start = suffix_start.saturating_sub(replaced_len) + preedit.len();
+        push_piece(suffix_start, run_end, suffix_display_start);
+    }
+
+    if let Some((range, text)) = composition {
+        segments.push(DisplaySegment {
+            start: range.start,
+            text: text.to_owned(),
+            bold: false,
+            italic: false,
+            underline: true,
+            strike: false,
+        });
+    }
+
+    segments.sort_by_key(|segment| segment.start);
+    let mut text = String::new();
+    for segment in &mut segments {
+        segment.start = text.len();
+        text.push_str(&segment.text);
+    }
+
+    (text, segments)
+}
+
 /// A single-paragraph editor view over one [`DocumentSession`].
 pub struct ParagraphView {
     session: DocumentSession,
@@ -63,6 +149,8 @@ pub struct ParagraphView {
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
+    composition: Option<CompositionState>,
+    focus_out_subscription: Option<Subscription>,
 }
 
 impl ParagraphView {
@@ -79,6 +167,8 @@ impl ParagraphView {
             last_layout: None,
             last_bounds: None,
             is_selecting: false,
+            composition: None,
+            focus_out_subscription: None,
         }
     }
 
@@ -94,6 +184,21 @@ impl ParagraphView {
         self.node
     }
 
+    /// Returns whether an IME composition is currently active.
+    #[must_use]
+    pub(crate) const fn is_composing(&self) -> bool {
+        self.composition.is_some()
+    }
+
+    /// Returns the virtual caret position while composing, in displayed-text
+    /// byte offsets.
+    #[must_use]
+    pub(crate) fn composing_caret_byte(&self) -> Option<usize> {
+        self.composition
+            .as_ref()
+            .map(CompositionState::caret_virtual_byte)
+    }
+
     fn inline(&self) -> Option<InlineContent> {
         self.session
             .document()
@@ -103,7 +208,8 @@ impl ParagraphView {
             .cloned()
     }
 
-    fn text(&self) -> String {
+    /// Returns the canonical concatenated text of the inline node.
+    fn canonical_text(&self) -> String {
         self.inline()
             .map(|inline| {
                 inline
@@ -115,6 +221,7 @@ impl ParagraphView {
             .unwrap_or_default()
     }
 
+    /// Returns the end offset of the inline content.
     fn end_offset(&self) -> Option<TextOffset> {
         self.inline().map(|inline| {
             let len = inline.len_bytes();
@@ -127,6 +234,88 @@ impl ParagraphView {
             eprintln!("xiaomu: intent rejected: {error}");
         }
         cx.notify();
+    }
+
+    /// Editing actions are suspended while composing: every canonical edit
+    /// would invalidate the captured base range. Platforms route those keys
+    /// through the IME instead; anything that still arrives here is dropped.
+    fn apply_intent_when_idle(&mut self, intent: EditIntent, cx: &mut Context<Self>) {
+        if self.is_composing() {
+            eprintln!("xiaomu: editing action ignored during composition");
+            return;
+        }
+        self.apply_intent(intent, cx);
+    }
+
+    /// Ends the composition without committing, restoring the base
+    /// selection through selection-only intents.
+    fn cancel_composition(&mut self, cx: &mut Context<Self>) {
+        let Some(state) = self.composition.take() else {
+            return;
+        };
+
+        let selection = state.base_selection();
+        let anchor = selection.anchor().offset();
+        let focus = selection.focus().offset();
+        self.apply_intent(
+            EditIntent::PlaceCaret {
+                offset: anchor,
+                extend_selection: false,
+            },
+            cx,
+        );
+        self.apply_intent(
+            EditIntent::PlaceCaret {
+                offset: focus,
+                extend_selection: true,
+            },
+            cx,
+        );
+    }
+
+    /// Commits `text` over the composition's base range as exactly one
+    /// transaction (one undo unit).
+    fn commit_composition(&mut self, text: &str, cx: &mut Context<Self>) {
+        let Some(state) = self.composition.take() else {
+            return;
+        };
+
+        let range = state.base_range();
+        let Ok(start) = self
+            .inline()
+            .map(|inline| inline.offset_at(range.start))
+            .unwrap_or_else(|| Ok(TextOffset::ZERO))
+        else {
+            return;
+        };
+        let Ok(end) = self
+            .inline()
+            .map(|inline| inline.offset_at(range.end))
+            .unwrap_or_else(|| Ok(TextOffset::ZERO))
+        else {
+            return;
+        };
+
+        self.apply_intent(
+            EditIntent::PlaceCaret {
+                offset: start,
+                extend_selection: false,
+            },
+            cx,
+        );
+        self.apply_intent(
+            EditIntent::PlaceCaret {
+                offset: end,
+                extend_selection: true,
+            },
+            cx,
+        );
+        self.apply_intent(
+            EditIntent::InsertText {
+                text: text.to_owned(),
+            },
+            cx,
+        );
     }
 
     fn ordered_range(&self) -> Option<TextRange> {
@@ -147,7 +336,7 @@ impl ParagraphView {
         } else {
             return;
         };
-        self.apply_intent(intent, cx);
+        self.apply_intent_when_idle(intent, cx);
     }
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
@@ -164,11 +353,11 @@ impl ParagraphView {
         } else {
             return;
         };
-        self.apply_intent(intent, cx);
+        self.apply_intent_when_idle(intent, cx);
     }
 
     fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent(
+        self.apply_intent_when_idle(
             EditIntent::MoveCaret {
                 caret_move: CaretMove::Backward,
                 extend_selection: true,
@@ -178,7 +367,7 @@ impl ParagraphView {
     }
 
     fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent(
+        self.apply_intent_when_idle(
             EditIntent::MoveCaret {
                 caret_move: CaretMove::Forward,
                 extend_selection: true,
@@ -188,7 +377,7 @@ impl ParagraphView {
     }
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent(
+        self.apply_intent_when_idle(
             EditIntent::MoveCaret {
                 caret_move: CaretMove::ToStart,
                 extend_selection: false,
@@ -198,7 +387,7 @@ impl ParagraphView {
     }
 
     fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent(
+        self.apply_intent_when_idle(
             EditIntent::MoveCaret {
                 caret_move: CaretMove::ToEnd,
                 extend_selection: false,
@@ -208,7 +397,7 @@ impl ParagraphView {
     }
 
     fn select_home(&mut self, _: &SelectHome, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent(
+        self.apply_intent_when_idle(
             EditIntent::MoveCaret {
                 caret_move: CaretMove::ToStart,
                 extend_selection: true,
@@ -218,7 +407,7 @@ impl ParagraphView {
     }
 
     fn select_end(&mut self, _: &SelectEnd, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent(
+        self.apply_intent_when_idle(
             EditIntent::MoveCaret {
                 caret_move: CaretMove::ToEnd,
                 extend_selection: true,
@@ -231,14 +420,14 @@ impl ParagraphView {
         let Some(end) = self.end_offset() else {
             return;
         };
-        self.apply_intent(
+        self.apply_intent_when_idle(
             EditIntent::PlaceCaret {
                 offset: TextOffset::ZERO,
                 extend_selection: false,
             },
             cx,
         );
-        self.apply_intent(
+        self.apply_intent_when_idle(
             EditIntent::PlaceCaret {
                 offset: end,
                 extend_selection: true,
@@ -248,14 +437,18 @@ impl ParagraphView {
     }
 
     fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent(EditIntent::Backspace, cx);
+        self.apply_intent_when_idle(EditIntent::Backspace, cx);
     }
 
     fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent(EditIntent::Delete, cx);
+        self.apply_intent_when_idle(EditIntent::Delete, cx);
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_composing() {
+            eprintln!("xiaomu: editing action ignored during composition");
+            return;
+        }
         if let Err(error) = self.session.undo() {
             eprintln!("xiaomu: undo rejected: {error}");
         }
@@ -263,6 +456,10 @@ impl ParagraphView {
     }
 
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_composing() {
+            eprintln!("xiaomu: editing action ignored during composition");
+            return;
+        }
         if let Err(error) = self.session.redo() {
             eprintln!("xiaomu: redo rejected: {error}");
         }
@@ -271,6 +468,8 @@ impl ParagraphView {
 
     fn on_mouse_down(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.is_selecting = true;
+        // Clicking cancels an ongoing composition before repositioning.
+        self.cancel_composition(cx);
         if let Some(offset) = self.index_for_mouse_position(event.position) {
             self.apply_intent(
                 EditIntent::PlaceCaret {
@@ -306,7 +505,7 @@ impl ParagraphView {
         let layout = self.last_layout.as_ref()?;
         let inline = self.inline()?;
 
-        let text = self.text();
+        let text = self.canonical_text();
         let raw = if position.y < bounds.top() {
             0
         } else if position.y > bounds.bottom() {
@@ -317,6 +516,74 @@ impl ParagraphView {
 
         inline.offset_at(raw).ok()
     }
+
+    /// Begins or updates the IME composition with a new preedit string.
+    fn mark_text(
+        &mut self,
+        range_utf16: Option<Range<usize>>,
+        new_text: &str,
+        new_selected_range: Option<Range<usize>>,
+        cx: &mut Context<Self>,
+    ) {
+        let canonical = self.canonical_text();
+
+        if self.composition.is_none() {
+            let (start, end) = match range_utf16 {
+                Some(range) => (
+                    utf16::utf8_offset(&canonical, range.start),
+                    utf16::utf8_offset(&canonical, range.end),
+                ),
+                None => match self.ordered_range() {
+                    Some(range) => (range.start().as_usize(), range.end().as_usize()),
+                    None => return,
+                },
+            };
+
+            let Some(inline) = self.inline() else {
+                return;
+            };
+            let (Ok(start), Ok(end)) = (inline.offset_at(start), inline.offset_at(end)) else {
+                return;
+            };
+
+            self.composition = Some(CompositionState::begin(
+                self.session.selection(),
+                start.as_usize()..end.as_usize(),
+                new_text,
+                new_selected_range,
+            ));
+        } else if let Some(state) = self.composition.as_mut() {
+            *state = state.update(new_text, new_selected_range);
+        }
+
+        // The preedit is a view transient: without an explicit repaint the
+        // marked text would stay invisible while the IME session continues.
+        // This must fire on the first mark too, not only on updates.
+        cx.notify();
+    }
+
+    /// Builds the displayed text plus its styled segments.
+    ///
+    /// Without an active composition this is the canonical content itself;
+    /// while composing, the preedit is spliced in as an underlined segment
+    /// and the replaced canonical span disappears until commit.
+    pub(crate) fn display_content(&self) -> (String, Vec<DisplaySegment>) {
+        let Some(inline) = self.inline() else {
+            return (String::new(), Vec::new());
+        };
+        let composition = self
+            .composition
+            .as_ref()
+            .map(|state| (state.base_range(), state.preedit()));
+        project_display_content(&inline, composition)
+    }
+
+    /// Cancels the composition if one is active; used on focus loss.
+    pub(crate) fn cancel_if_composing(&mut self, cx: &mut Context<Self>) {
+        if self.is_composing() {
+            self.cancel_composition(cx);
+        }
+    }
 }
 
 impl Focusable for ParagraphView {
@@ -326,7 +593,19 @@ impl Focusable for ParagraphView {
 }
 
 impl Render for ParagraphView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.focus_out_subscription.is_none() {
+            let entity = cx.entity().downgrade();
+            self.focus_out_subscription =
+                Some(
+                    window.on_focus_out(&self.focus_handle, cx, move |_, _, cx| {
+                        if let Some(view) = entity.upgrade() {
+                            view.update(cx, |view, cx| view.cancel_if_composing(cx));
+                        }
+                    }),
+                );
+        }
+
         div()
             .key_context("XiaomuParagraph")
             .track_focus(&self.focus_handle(cx))
@@ -355,144 +634,5 @@ impl Render for ParagraphView {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .child(ParagraphElement { view: cx.entity() })
-    }
-}
-
-impl EntityInputHandler for ParagraphView {
-    fn text_for_range(
-        &mut self,
-        range_utf16: Range<usize>,
-        adjusted_range: &mut Option<Range<usize>>,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<String> {
-        let text = self.text();
-        let start = utf16::utf8_offset(&text, range_utf16.start);
-        let end = utf16::utf8_offset(&text, range_utf16.end);
-        adjusted_range.replace(utf16::utf16_offset(&text, start)..utf16::utf16_offset(&text, end));
-        Some(text.get(start..end)?.to_owned())
-    }
-
-    fn selected_text_range(
-        &mut self,
-        _ignore_disabled_input: bool,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<UTF16Selection> {
-        let selection = self.session.selection();
-        let anchor = selection.anchor().offset().as_usize();
-        let focus = selection.focus().offset().as_usize();
-        let text = self.text();
-        let (start, end) = (anchor.min(focus), anchor.max(focus));
-        Some(UTF16Selection {
-            range: utf16::utf16_offset(&text, start)..utf16::utf16_offset(&text, end),
-            // The platform sees the focus (cursor) as the selection head.
-            reversed: focus < anchor,
-        })
-    }
-
-    fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
-        // IME composition state lands in P1.4; P1.3 has no marked text.
-        None
-    }
-
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {}
-
-    fn replace_text_in_range(
-        &mut self,
-        replacement_range: Option<Range<usize>>,
-        text: &str,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(range_utf16) = replacement_range {
-            // Select the explicit range with selection-only intents (no
-            // history entries), then insert over it as one transaction.
-            let full_text = self.text();
-            let start = utf16::utf8_offset(&full_text, range_utf16.start);
-            let end = utf16::utf8_offset(&full_text, range_utf16.end);
-            let Some(inline) = self.inline() else {
-                return;
-            };
-            let (Ok(start), Ok(end)) = (inline.offset_at(start), inline.offset_at(end)) else {
-                return;
-            };
-            self.apply_intent(
-                EditIntent::PlaceCaret {
-                    offset: start,
-                    extend_selection: false,
-                },
-                cx,
-            );
-            self.apply_intent(
-                EditIntent::PlaceCaret {
-                    offset: end,
-                    extend_selection: true,
-                },
-                cx,
-            );
-        }
-        self.apply_intent(
-            EditIntent::InsertText {
-                text: text.to_owned(),
-            },
-            cx,
-        );
-    }
-
-    fn replace_and_mark_text_in_range(
-        &mut self,
-        range_utf16: Option<Range<usize>>,
-        new_text: &str,
-        _new_selected_range: Option<Range<usize>>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        // P1.3 stopgap: no composition state yet, so preedit text commits
-        // immediately as plain input. Full marked-text semantics land in
-        // P1.4 together with the composition state machine.
-        self.replace_text_in_range(range_utf16, new_text, window, cx);
-    }
-
-    fn bounds_for_range(
-        &mut self,
-        range_utf16: Range<usize>,
-        element_bounds: Bounds<Pixels>,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<Bounds<Pixels>> {
-        let layout = self.last_layout.as_ref()?;
-        let text = self.text();
-        let start = utf16::utf8_offset(&text, range_utf16.start);
-        let end = utf16::utf8_offset(&text, range_utf16.end);
-        Some(Bounds::from_corners(
-            gpui::point(
-                element_bounds.left() + layout.x_for_index(start),
-                element_bounds.top(),
-            ),
-            gpui::point(
-                element_bounds.left() + layout.x_for_index(end),
-                element_bounds.bottom(),
-            ),
-        ))
-    }
-
-    fn character_index_for_point(
-        &mut self,
-        point: Point<Pixels>,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<usize> {
-        let bounds = self.last_bounds?;
-        let layout = self.last_layout.as_ref()?;
-        let text = self.text();
-        let raw = if point.y < bounds.top() {
-            0
-        } else if point.y > bounds.bottom() {
-            text.len()
-        } else {
-            layout.closest_index_for_x(point.x - bounds.left())
-        };
-        Some(utf16::utf16_offset(&text, raw))
     }
 }

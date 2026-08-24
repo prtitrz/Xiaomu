@@ -15,11 +15,11 @@
 
 ## 当前状态
 
-当前切片：**P1.3 GPUI 单块编辑基础已完成实现，本地 macOS 启动冒烟通过；Windows 实机 Gate 待执行，等待 PR CI 后合并**
+当前切片：**P1.4 IME composition 已完成；自动 Gate 与 Windows Microsoft Pinyin 实机矩阵全通过**
 
-当前分支：`feat/p1-single-block-basics`
+当前分支：`feat/p1-ime-composition`
 
-前置状态：P0 已完成（PR #13）；P1.0 / P1.1 / P1.2 已合并（PR #14 / #15 / #16）。
+前置状态：P0 已完成（PR #13）；P1.0 / P1.1 / P1.2 / P1.3 已合并（PR #14–#17）。
 
 ## P1.0 Phase Contract 与阶段骨架
 
@@ -135,7 +135,7 @@ cargo deny check bans licenses sources 全绿
 - [x] Left / Right、Shift 选择、Paragraph Home / End、Backspace / Delete（含 SelectAll / Undo / Redo 绑定）
 - [x] 最小 hit-test（点击 / 拖拽 → boundary 校验的 offset）
 - [x] editor_harness 接入单段编辑器
-- [ ] Windows 实机键盘编辑闭环（Gate，待在 Windows 上执行手动清单）
+- [x] Windows 实机键盘编辑闭环（英文直输 / 方向键 / 选择 / Home/End / Backspace/Delete / undo-redo 可用；中文 IME 表现与 macOS 相同的已知停损限制，归因同一条，修复属 P1.4）
 
 实现说明：
 
@@ -170,6 +170,86 @@ cargo fmt / clippy -D warnings / cargo test --workspace / 两个 guard 全绿
 两者均为 setMarkedText 路径被当作普通输入立即提交、且从不报告 marked range 所致，
 属 P1.4 CompositionState 的修复范围（见 Regression Log）。
 Windows 实机 Gate（键盘编辑闭环手动清单）待执行后补充证据。
+```
+
+## P1.4 IME Composition
+
+- [x] UTF-16 range → TextOffset 转换层（P1.3 已建，本切片接入全部查询路径）
+- [x] `CompositionState` + virtual text projection（`input/composition.rs` 纯状态机）
+- [x] selected / marked / text / bounds 查询与连续 preedit update
+- [x] begin / update / commit / cancel / focus-loss 状态转移测试
+- [x] marked text 瞬态渲染（下划线 preedit，不写 canonical document）
+- [x] commit 一次入历史 / cancel 恢复 composition 前状态
+- [x] planning §8 Windows 矩阵实机执行（Microsoft Pinyin 连续 composition、候选窗、中文标点、中英混排、emoji / surrogate、combining marks、选区替换、焦点恢复）
+
+实现说明：
+
+```text
+CompositionState（纯逻辑，无窗口依赖）：base_selection + base_range + preedit +
+preedit_selected_utf16；project() 生成 virtual projection。
+平台 callback 映射（针对 pin 的 gpui 0.2.2 核对 crates.io 源码）：
+  macOS   setMarkedText → begin_or_update；insertText → commit；unmarkText → cancel/idle no-op
+  Windows GCS_COMPSTR → begin_or_update；GCS_RESULTSTR → commit（非空）；
+          WM_IME_COMPOSITION lparam==0 → 以空文本 replace_text_in_range 到达 → 按 cancel 处理
+空 commit 即 cancel：真实 IME 结果串永不为空，且空插入会误删 base 选区。
+InputHandler 全部查询（text_for_range / selected_text_range / marked_text_range /
+bounds_for_range / character_index_for_point）改答 virtual projection；
+composition 全程 document revision 不变（preedit 只存在于 adapter）。
+commit 路径：两次 PlaceCaret（base_range）+ InsertText = 单笔 transaction、单条 undo。
+cancel 路径：PlaceCaret 恢复 base_selection；焦点丢失经 window.on_focus_out 订阅取消。
+Windows IME 可在 focus-out 送达前先提交普通无下划线文本；该原生平台结果可接受，
+Gate 要求是最终不存在带下划线的僵尸 composition，且恢复焦点后可继续输入。
+composing 期间键盘编辑动作被忽略（防止 canonical 编辑破坏 base range），鼠标点击先 cancel。
+渲染：preedit 作为独立 underlined segment 参与排版，caret 定位到 preedit 内平台 selection 终点。
+block_view/mod.rs 超 source-size 700 行硬限，EntityInputHandler impl 拆分至 block_view/input_handler.rs。
+```
+
+评审与实机调试补充（Windows，用户实测，已关闭）：
+
+```text
+原现象：preedit 状态机/查询/渲染数据全部正确（临时探针证实 prepaint/paint
+都拿到含拼音的 virtual projection），但屏幕冻结；切窗口后 IME commit 才追上。
+排查：GPUI_DISABLE_DIRECT_COMPOSITION=1 切换呈现路径后依旧，DComp 不是充分解释。
+首次 begin 缺少 cx.notify() 是已确认并保留的晓木局部 bug 修复。
+gpui 0.2.2 的 dispatch_key_event 可在 dirty 时执行 draw 而不 present，与上游
+zed-industries/zed #61469 描述的 Windows presentation starvation 机制吻合，但不是
+本次 preedit 不可见的直接根因。
+失败实验：在 InputHandler/App update 尚未退出时同步调用 RedrawWindow(
+RDW_INVALIDATE | RDW_UPDATENOW)，日志仍显示 prepaint/paint 而屏幕不更新。该调用可能
+重入 GPUI request-frame，不能等同于回调外 watchdog；workaround 已撤回。
+unsafe 政策恢复为 xiaomu-gpui crate-wide #![forbid(unsafe_code)]。
+PresentMon 实机采集约 17.6 秒 / 1613 次 swap-chain present，包含 4.18s 等断档；
+该数据保留为 GPUI 调度风险证据，但当时没有与 IME 日志严格对齐，不能单独证明因果。
+随后在 gpui 0.2.2 Windows dispatch eager draw 后增加 present，实机现象完全不变，
+故该补丁实验撤回，不 vendor GPUI，继续使用精确 pin 的 crates.io 0.2.2。
+确定根因：collapsed composition 的 base_start == base_end；旧 projection mapper 对该
+边界同时使用 prefix/suffix 语义，使 suffix 与 preedit 获得相同排序坐标且 suffix 先拼接。
+结果是 preedit 被追加到整行末尾（长行已被 viewport 裁剪），caret 却按正确的 virtual
+offset 在原插入点移动。时间戳日志直接显示 canonical 中间插入点对应的 prepaint 文本
+仍以 `.n/.ni/.ni'hao` 结尾，闭合了这个矛盾。
+修复：projection 显式构造 prefix / preedit / suffix；suffix 的 display start 始终加上
+preedit 长度，不再用一个无 bias 的边界 mapper。新增 collapsed caret、跨 styled runs
+替换与 idle style 保真回归测试。
+修复后 Windows 实机复测通过：微软拼音在正文中间与末尾连续 composition 时，preedit
+逐键实时显示并带下划线，caret 跟随；候选“你好”提交后在原插入点整体替换。时间戳
+日志同步证明 prepaint 的 virtual text 为 prefix + preedit + suffix，不再追加到行末。
+扩展矩阵通过：选区替换与单笔 undo/redo、中文标点、中英混排、emoji / surrogate、
+combining marks 均正常；focus-out 若由 Windows IME 先提交则留下普通无下划线文本，
+不会残留 marked range，恢复焦点后可继续输入。临时日志与 PresentMon 脚本合并前删除。
+```
+
+完成证据：
+
+```text
+分支 feat/p1-ime-composition：
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿
+cargo test --workspace 全绿（新增 input/composition.rs 6 个状态机单元测试，19 个 test target）
+tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
+Windows 本机启动冒烟：harness 窗口正常打开、进程稳定（自动验证无窗口依赖部分全绿）。
+Windows Microsoft Pinyin 手动矩阵全通过（连续 composition、候选提交、中文标点、
+中英混排、emoji / surrogate、combining marks、选区替换、单笔 undo/redo、焦点恢复）。
+P1.4 自动 Gate 与实机 Gate 均满足，可以合并。
 ```
 
 ## P0 移交的 P1 前置依赖与归属
