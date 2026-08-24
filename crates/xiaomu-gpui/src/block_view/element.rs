@@ -188,6 +188,12 @@ impl Element for ParagraphElement {
         }
 
         let line = prepaint.line.take().unwrap();
+        if std::env::var_os("XIAOMU_IME_DEBUG").is_some() {
+            let composing = self.view.read(cx).is_composing();
+            if composing {
+                eprintln!("xiaomu-ime: PAINT composing");
+            }
+        }
         if let Err(error) = line.paint(bounds.origin, window.line_height(), window, cx) {
             eprintln!("xiaomu: line paint failed: {error}");
         }

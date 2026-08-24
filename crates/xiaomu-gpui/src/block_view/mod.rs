@@ -484,15 +484,13 @@ impl ParagraphView {
                 new_text,
                 new_selected_range,
             ));
-            return;
-        }
-
-        if let Some(state) = self.composition.as_mut() {
+        } else if let Some(state) = self.composition.as_mut() {
             *state = state.update(new_text, new_selected_range);
         }
 
         // The preedit is a view transient: without an explicit repaint the
         // marked text would stay invisible while the IME session continues.
+        // This must fire on the first mark too, not only on updates.
         cx.notify();
     }
 
