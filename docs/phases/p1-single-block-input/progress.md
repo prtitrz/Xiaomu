@@ -15,7 +15,7 @@
 
 ## 当前状态
 
-当前切片：**P1.5 Copy/Paste 与基础 marks 开发中（自动验证全绿，实机 Gate 待执行）**
+当前切片：**P1.5 Copy/Paste 与基础 marks 已完成；Windows 实机 Gate 全通过**
 
 当前分支：`feat/p1-clipboard-marks`
 
@@ -262,7 +262,8 @@ P1.4 自动 Gate 与实机 Gate 均满足，可以合并。
 - [x] Copy / Cut / Paste 动作 + macOS / Windows 双键位绑定
 - [x] Bold / Italic / Code / Underline / Strike 切换键位（复用 ToggleMark intent）
 - [x] Code mark 视觉映射（半透明背景色块）；Link 留待后续（需属性编辑 UI）
-- [ ] Windows 实机 Gate：中英文复制粘贴 + mark 切换 + undo/redo 闭环
+- [x] Windows 实机 Gate：中英文复制粘贴 + mark 切换 + undo/redo 闭环
+- [x] 实机回归修复：Esc 取消 composition 后键盘编辑被锁死（见 Regression Log）
 
 实现说明：
 
@@ -290,10 +291,17 @@ cargo fmt --all -- --check 全绿
 cargo clippy --workspace --all-targets -- -D warnings 全绿
 cargo test --workspace 全绿（新增 clipboard 归一化 2 个单元测试 +
 session selected_text 2 个集成测试，19 个 test target）
-tools/check_source_size.py ok（block_view/mod.rs 667 行，review 区间提示）
+tools/check_source_size.py ok（block_view/mod.rs 544 行，review 区间提示）
 tools/check_dependency_boundaries.py ok
-Windows 本机启动冒烟：harness 窗口正常打开、进程稳定。
-Windows 实机手动矩阵执行后补充证据。
+```
+
+实机验证（Windows，用户实测，已关闭）：
+
+```text
+中英文复制粘贴闭环正常；mark 切换（含 undo/redo 单元语义）正常。
+实测中发现并当场修复一个 P1.4 回归（Esc 取消 composition 后方向键失效，
+根因与修复见 Regression Log），修复后 Esc 无需点击即可继续键盘编辑、
+重新输入拼音从头组词、光标回到输入前位置。P1.5 自动 Gate 与实机 Gate 均满足，可以合并。
 ```
 
 ## P0 移交的 P1 前置依赖与归属
