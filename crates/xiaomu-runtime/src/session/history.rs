@@ -5,6 +5,10 @@ use xiaomu_core::transaction::Transaction;
 
 /// One undo unit: the redo/undo transaction pair plus the selections
 /// recorded in both snapshot coordinate spaces.
+///
+/// `undo` is the exact inverse of the committed transaction. `redo` is
+/// `inverse(undo)` computed against the post-commit snapshot, so allocated
+/// node identities are restored rather than minted again.
 pub(crate) struct HistoryEntry {
     pub(crate) redo: Transaction,
     pub(crate) undo: Transaction,

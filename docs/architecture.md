@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前 codec、testkit 和 example harness 的编辑功能处于 bootstrap 阶段。P0（Core contract）、P1（单 block 原生输入）已完成，P2（document tree / 结构编辑）进行中：Core 已有 SplitNode / JoinNodes 结构 step；`xiaomu-runtime` 的 session selection 已升级为跨 block `DocumentSelection`；`xiaomu-gpui` 以精确 pin 的 crates.io GPUI `0.2.2` 实现单 Paragraph 编辑闭环（渲染 / 输入 / hit-test / IME composition / copy-paste / 基础 marks / harness）。
+当前 codec、testkit 和 example harness 的编辑功能处于 bootstrap 阶段。P0（Core contract）、P1（单 block 原生输入）已完成，P2（document tree / 结构编辑）进行中：Core 已有 SplitNode / JoinNodes / SetNodeKind 结构 step；`xiaomu-runtime` 的 session 已升级为跨 block `DocumentSelection`，并编排 SplitBlock / JoinWithPrevious / TurnInto 结构命令；`xiaomu-gpui` 以精确 pin 的 crates.io GPUI `0.2.2` 实现单 Paragraph 编辑闭环（渲染 / 输入 / hit-test / IME composition / copy-paste / 基础 marks / harness）。
 
 ## Core 边界
 
@@ -145,7 +145,7 @@ root NodeId
 NodeStore
 ```
 
-当前公开 API 只允许查询和重新校验，不提供直接 canonical mutation 入口。P0.4 会在 Transaction contract 确定后正式建立唯一公开 mutation path。
+当前公开 API 只允许查询和重新校验，不提供直接 canonical mutation 入口。查询包括 `node` / `store` / `parent_of`（root 与未知身份返回 `None`）。唯一公开 mutation path 是 `Transaction::apply`。
 
 完整 snapshot validation 已覆盖：
 
@@ -199,6 +199,7 @@ TransactionStep：
     RemoveNode
     RestoreSubtree
     SetNodeAttrs
+    SetNodeKind
     AddMark
     RemoveMark
     SplitNode
@@ -209,7 +210,7 @@ TransactionStep：
 
 文本与 mark steps 由 piece-based inline 编辑实现：runs 在 range 边界切分、编辑后重建并重新规范化。replacement 继承 `range.start` 所在 run 的 marks；AddMark 在 range 内替换同 kind 冲突 mark；结果不保留空 run，相邻同 mark run 自动合并。
 
-InsertNode 由 snapshot 内部 allocator 分配新 NodeId；RemoveNode 连同整个子树移除；root 不可移除。`RestoreSubtree` 是 `RemoveNode` 的精确逆 step：以原 NodeId 与 payload 整体回插先前移除的子树，要求所有 id 当前不存在，映射数据记为携带子树根的 `NodeInserted`。它不是通用的 copy / move 原语——调用方无法铸造 NodeId，payload 只能来自同一文档 lineage 的历史 snapshot，且 id 冲突时原子失败。`NodeStore` 的 replace / insert / remove 原语均为 `pub(crate)`，公开 API 不存在 direct canonical mutation escape hatch。
+InsertNode 由 snapshot 内部 allocator 分配新 NodeId；RemoveNode 连同整个子树移除；root 不可移除。`SetNodeKind` 保留 NodeId、attrs 与 content，只替换 kind；新 kind 必须接受现有 content shape，parent 必须仍允许该 child，root 不能改 kind。`RestoreSubtree` 是 `RemoveNode` 的精确逆 step：以原 NodeId 与 payload 整体回插先前移除的子树，要求所有 id 当前不存在，映射数据记为携带子树根的 `NodeInserted`。它不是通用的 copy / move 原语——调用方无法铸造 NodeId，payload 只能来自同一文档 lineage 的历史 snapshot，且 id 冲突时原子失败。`NodeStore` 的 replace / insert / remove 原语均为 `pub(crate)`，公开 API 不存在 direct canonical mutation escape hatch。
 
 metadata seam 使用 `BTreeMap<String, String>`，不携带宿主专用类型。
 
@@ -239,7 +240,7 @@ removed subtree：目标位于被删子树内的 position / selection 显式 Del
 
 长期 mapping 决策（显式 bias、显式 Deleted 结果）见 `docs/adr/0002-position-mapping-policy.md`。
 
-`ChangeMap` 没有公开构造入口。映射是纯坐标算术，不校验 snapshot；映射结果与任何 stale 坐标一样需要针对目标 snapshot 重新校验。属性与 mark steps 不移动 position，不产生 step map 条目。`NodeInserted` 的 step map 携带新分配的 `NodeId`，插入后的结构定位不需要重新猜测 identity。
+`ChangeMap` 没有公开构造入口。映射是纯坐标算术，不校验 snapshot；映射结果与任何 stale 坐标一样需要针对目标 snapshot 重新校验。属性、kind 与 mark steps 不移动 position，不产生 step map 条目。`NodeInserted` 的 step map 携带新分配的 `NodeId`，插入后的结构定位不需要重新猜测 identity。
 
 结构编辑（P2.1）引入两个额外 step map 变体：`NodeSplit`（inline 节点在文本 offset 处拆分，tail 文本进入新分配的兄弟节点；split 点之前的 offset 留在原节点，之后的 offset 平移进 tail，恰好落在 split 点的 offset 由 MapBias 解析；父级 child list 行为同 `NodeInserted`）与 `NodeJoined`（相邻 inline 兄弟合并，被吸收节点连同子树离开文档；其内 offset 平移到存活节点的接缝之后，child list 与删除语义一致）。
 
@@ -256,6 +257,7 @@ RemoveMark    逆 = 按旧 piece 恢复被移除的 mark
 InsertNode    逆 = RemoveNode（新分配的节点）
 RemoveNode    逆 = RestoreSubtree（原 NodeId 与 payload 整体回插）
 SetNodeAttrs  逆 = 换回旧 attrs
+SetNodeKind   逆 = 换回旧 kind
 SplitNode     逆 = JoinNodes（tail 兄弟并回头部，run 归一化精确还原）
 JoinNodes     逆 = 删除追加文本的 ReplaceText + RestoreSubtree（原 NodeId 整体回插）
 ```
@@ -281,21 +283,32 @@ Runtime 保持 `#![forbid(unsafe_code)]` 与 `#![warn(missing_docs)]`。
 ```text
 DocumentSession（snapshot + selection + history + notification seam）
 DocumentSelection / DocumentPosition（跨 block selection：端点为 TextPoint 或 NodeGap）
-EditIntent（InsertText / Backspace / Delete / MoveCaret / PlaceCaret / ToggleMark）
+EditIntent（InsertText / Backspace / Delete / MoveCaret / PlaceCaret / ToggleMark /
+            SplitBlock / JoinWithPrevious / TurnInto）
 EditPlan（Core Transaction + runtime SelectionUpdate）
-SelectionUpdate（CaretAfterReplacement / CaretAtEditStart / MapExisting）
+SelectionUpdate（CaretAfterReplacement / CaretAtEditStart / MapExisting /
+                 CaretAtSplitTail / CaretAtJoinSeam）
 HistoryStack（一笔 transaction 一个 entry，保存 redo/undo transaction 与 before/after selection）
 SessionOutcome（DocumentChanged / SelectionChanged / NoChange）
 DocumentChangeListener（frontend-neutral 通知 seam）
 ```
 
-编辑流为 `intent → EditPlan → Transaction::apply_with_changes → resolve after-selection → 原子替换 snapshot / selection / history 并通知`。任何失败（Core 拒绝、selection 映射为 `Deleted`、新 selection 校验失败）都让 session 状态保持不变；映射到 `Deleted` 的 selection 返回 `SelectionDeleted`，不做父级 fallback 收敛（结构命令的显式 fallback policy 属后续切片）。
+编辑流为 `intent → EditPlan → Transaction::apply_with_changes → resolve after-selection → 原子替换 snapshot / selection / history 并通知`。任何失败（Core 拒绝、selection 映射为 `Deleted`、新 selection 校验失败）都让 session 状态保持不变。raw apply 与 mark 编辑在端点被删时仍返回 `SelectionDeleted`；结构命令使用显式 after-selection policy，不再依赖"Deleted 即失败"：
 
-P2.2 的 selection 形态：session 持有 `DocumentSelection`，两端点可落在不同 block（`TextPoint`）或 child 边界（`NodeGap`），任何公开读取点都针对当前 snapshot 校验。跨 block 排序由 snapshot 上的 pre-order slot 分配解析（节点与 gap 各占单调槽位，文本位置以 byte offset 为子键）。单 inline node 内的 selection 可经 `text_selection()` 投影回 Core `TextSelection`（P1 单块前端继续使用）；内容编辑 intent 目前仍要求选区整体位于一个 inline node 内，gap 端点上的 caret 移动返回 `NoChange`，结构命令与跨块导航属后续切片。
+```text
+SplitBlock        → CaretAtSplitTail（caret 落在新 tail 兄弟起点）
+JoinWithPrevious  → CaretAtJoinSeam（caret 落在存活节点的接缝 offset）
+TurnInto          → MapExisting（kind 变更不移动 position，identity 保留）
+fallback 失败     → 收敛后的位置无法合法化才原子失败
+```
 
-intent-specific after-selection：InsertText 提交后 caret 落在 replacement 之后，Backspace / Delete 落在删除起点，ToggleMark 与 raw apply 经 ChangeMap 向外映射（`DocumentSelection::map_through` 对非折叠选区 head/tail 分别取 Start / End bias，任一端点被删则整体失败）。合法空操作返回 `NoChange`：不调用 Core apply、不推进 revision、不发通知、不写 history；raw `apply` 无 no-op 检测，空 transaction 也会提交。
+`SetNodeKind` 是 TurnInto 的 Core 原语：保留 NodeId / attrs / content，只替换 kind；content shape 必须与新 kind 兼容，parent 必须仍允许该 child，root 不能改 kind。Paragraph ↔ Heading ↔ CodeBlock 属于同 shape 转换；把 inline 节点变成 Quote 等 container 会因 shape 不兼容被拒绝，wrapping 留给后续 list 切片。
 
-undo 重放 `AppliedTransaction::inverse()`（ADR 0003）并直接恢复记录的 before / after selection；undo 后的新编辑清空 redo 栈。caret 移动按 Unicode scalar boundary，Home / End 到 paragraph 逻辑首尾。session 纯逻辑、无 GPUI 依赖，全部行为在无显示器环境测试。
+P2.2 的 selection 形态：session 持有 `DocumentSelection`，两端点可落在不同 block（`TextPoint`）或 child 边界（`NodeGap`），任何公开读取点都针对当前 snapshot 校验。跨 block 排序由 snapshot 上的 pre-order slot 分配解析（节点与 gap 各占单调槽位，文本位置以 byte offset 为子键）。单 inline node 内的 selection 可经 `text_selection()` 投影回 Core `TextSelection`（P1 单块前端继续使用）。内容编辑与 P2.3 结构命令仍要求选区整体位于一个 inline node 内；gap 端点上的 caret 移动返回 `NoChange`，跨块导航属后续切片。
+
+intent-specific after-selection：InsertText 提交后 caret 落在 replacement 之后，Backspace / Delete 落在删除起点，ToggleMark、TurnInto 与 raw apply 经 ChangeMap 向外映射（`DocumentSelection::map_through` 对非折叠选区 head/tail 分别取 Start / End bias，任一端点被删则整体失败）。Backspace 在块首且存在前一兄弟时解释为 JoinWithPrevious；SplitBlock 对非折叠选区先删除再拆分，同属一笔 history。合法空操作返回 `NoChange`：不调用 Core apply、不推进 revision、不发通知、不写 history；raw `apply` 无 no-op 检测，空 transaction 也会提交。
+
+undo 重放 `AppliedTransaction::inverse()`（ADR 0003）并直接恢复记录的 before_selection；redo 重放 `inverse(inverse(T))` 而不是原始 steps，因此像 SplitNode 这样会分配 NodeId 的命令在 redo 时通过 RestoreSubtree 复用原 identity，after_selection 仍然合法。undo 后的新编辑清空 redo 栈。caret 移动按 Unicode scalar boundary，Home / End 到 paragraph 逻辑首尾。session 纯逻辑、无 GPUI 依赖，全部行为在无显示器环境测试。
 
 `runtime/clipboard.rs` 提供 frontend-neutral 纯文本 clipboard seam：`TextClipboard` trait（write_text / read_text，非文本剪贴板内容读为 `None`）与 `normalize_paste_text`（粘贴文本中的行断符折叠为空格——paragraph inline 文本不能包含换行；多 block 粘贴语义随后续 document-level 编辑引入）。平台绑定在 GPUI adapter 实现，编辑层只见该 trait。
 

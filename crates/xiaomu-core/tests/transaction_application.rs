@@ -315,6 +315,52 @@ fn set_node_attrs_replaces_whole_set() {
 }
 
 #[test]
+fn set_node_kind_keeps_identity_and_content() {
+    let (document, [first, _]) = fixture();
+    let heading = NodeKind::Heading(HeadingLevel::new(2).unwrap());
+
+    let next = Transaction::new(TransactionOrigin::UserInput)
+        .with_step(TransactionStep::SetNodeKind {
+            node: first,
+            kind: heading.clone(),
+        })
+        .apply(&document)
+        .unwrap();
+
+    assert_eq!(next.node(first).unwrap().kind(), &heading);
+    assert_eq!(text_of(&next, first), "你好世界");
+    assert_eq!(next.node_count(), document.node_count());
+}
+
+#[test]
+fn set_node_kind_rejects_incompatible_shape_and_the_root() {
+    let (document, [first, _]) = fixture();
+
+    let to_quote =
+        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::SetNodeKind {
+            node: first,
+            kind: NodeKind::Quote,
+        });
+    assert_eq!(
+        to_quote.apply(&document).unwrap_err(),
+        Error::InvalidNodeContent
+    );
+
+    let on_root =
+        Transaction::new(TransactionOrigin::System).with_step(TransactionStep::SetNodeKind {
+            node: document.root(),
+            kind: NodeKind::Quote,
+        });
+    assert_eq!(
+        on_root.apply(&document).unwrap_err(),
+        Error::InvalidRootNode
+    );
+
+    assert_eq!(document.node(first).unwrap().kind(), &NodeKind::Paragraph);
+    assert!(document.validate().is_ok());
+}
+
+#[test]
 fn add_and_remove_mark_split_ranges_deterministically() {
     let (document, [first, _]) = fixture();
 

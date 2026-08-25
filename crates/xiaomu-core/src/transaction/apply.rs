@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, VecDeque};
 
 use crate::document::{
     InlineContent, Node, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStore, TextRun,
-    XiaomuDocument,
+    XiaomuDocument, allows_child,
 };
 use crate::mapping::{ChangeMap, StepMap};
 use crate::text::{TextOffset, TextRange};
@@ -68,9 +68,9 @@ impl ApplyContext {
     /// Applies one step and returns its mapping data together with the
     /// inverse steps that undo it.
     ///
-    /// Attribute and mark steps never move positions and return no mapping
-    /// data. Every step kind produces inverse steps so whole transactions
-    /// stay exactly invertible.
+    /// Attribute, kind, and mark steps never move positions and return no
+    /// mapping data. Every step kind produces inverse steps so whole
+    /// transactions stay exactly invertible.
     fn apply_step(
         &mut self,
         step: &TransactionStep,
@@ -98,6 +98,7 @@ impl ApplyContext {
             TransactionStep::SetNodeAttrs { node, attrs } => {
                 self.apply_set_node_attrs(*node, attrs)
             }
+            TransactionStep::SetNodeKind { node, kind } => self.apply_set_node_kind(*node, kind),
             TransactionStep::AddMark { node, range, mark } => {
                 self.apply_mark_change(*node, *range, MarkChange::Add(mark.clone()))
             }
@@ -183,6 +184,38 @@ impl ApplyContext {
         let inverse = vec![TransactionStep::SetNodeAttrs {
             node,
             attrs: previous,
+        }];
+        Ok((None, inverse))
+    }
+
+    fn apply_set_node_kind(
+        &mut self,
+        node: NodeId,
+        kind: &NodeKind,
+    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+        let current = self.store.get(node).ok_or(Error::UnknownNode)?;
+        if current.id() == self.root {
+            return Err(Error::InvalidRootNode);
+        }
+
+        let parent = self.find_parent(node)?;
+        let parent_kind = self.store.get(parent).ok_or(Error::UnknownNode)?.kind();
+        if !allows_child(parent_kind, kind) {
+            return Err(Error::InvalidChildKind);
+        }
+
+        let previous = current.kind().clone();
+        let rewritten = Node::new(
+            current.id(),
+            kind.clone(),
+            current.attrs().clone(),
+            current.content().clone(),
+        )?;
+        self.store = self.store.replace_node(rewritten)?;
+
+        let inverse = vec![TransactionStep::SetNodeKind {
+            node,
+            kind: previous,
         }];
         Ok((None, inverse))
     }

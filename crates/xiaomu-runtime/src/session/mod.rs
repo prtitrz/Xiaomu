@@ -16,6 +16,7 @@ mod intent;
 mod listener;
 mod outcome;
 mod selection;
+mod structure;
 
 pub use history::HistoryStack;
 pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
@@ -25,8 +26,8 @@ pub use selection::DocumentPosition;
 pub use selection::DocumentSelection;
 
 use xiaomu_core::document::{InlineContent, NodeId, XiaomuDocument};
-use xiaomu_core::mapping::ChangeMap;
-use xiaomu_core::selection::{TextPoint, TextSelection};
+use xiaomu_core::mapping::{ChangeMap, StepMap};
+use xiaomu_core::selection::{CursorAffinity, TextPoint, TextSelection};
 use xiaomu_core::text::TextOffset;
 use xiaomu_core::transaction::Transaction;
 
@@ -129,8 +130,9 @@ impl DocumentSession {
 
     /// Applies one typed editing intent.
     ///
-    /// Legal empty operations (Backspace at the paragraph start, caret moves
-    /// at the boundary, toggling a mark with a collapsed selection) return
+    /// Legal empty operations (Backspace at the start of the first block,
+    /// caret moves at the boundary, toggling a mark with a collapsed
+    /// selection, TurnInto the kind already present) return
     /// [`SessionOutcome::NoChange`] without calling Core, advancing the
     /// revision, notifying listeners, or writing history.
     pub fn apply_intent(&mut self, intent: &EditIntent) -> Result<SessionOutcome, SessionError> {
@@ -149,9 +151,8 @@ impl DocumentSession {
             return self.place_caret(*offset, *extend_selection);
         }
 
-        // Content-editing intents still act inside one inline node; the
-        // cross-block selection forms gain structural intents in later
-        // slices.
+        // Content and structural intents still act from a single inline
+        // node; cross-block forms gain dedicated commands in later slices.
         let focus = self.text_focus()?;
         let inline = self.inline_of(focus.node_id())?;
         let selection = self
@@ -160,9 +161,22 @@ impl DocumentSession {
             .ok_or(SessionError::SelectionInvalid)?;
         let action = match intent {
             EditIntent::InsertText { text } => intent::plan_insert_text(selection, text)?,
-            EditIntent::Backspace => intent::plan_backspace(&inline, selection)?,
+            EditIntent::Backspace => {
+                if selection.is_collapsed() && focus.offset().as_usize() == 0 {
+                    structure::plan_join_with_previous(&self.document, focus.node_id())?
+                } else {
+                    intent::plan_backspace(&inline, selection)?
+                }
+            }
             EditIntent::Delete => intent::plan_delete(&inline, selection)?,
             EditIntent::ToggleMark { mark } => intent::plan_toggle_mark(&inline, selection, mark)?,
+            EditIntent::SplitBlock => structure::plan_split_block(selection)?,
+            EditIntent::JoinWithPrevious => {
+                structure::plan_join_with_previous(&self.document, focus.node_id())?
+            }
+            EditIntent::TurnInto { kind } => {
+                structure::plan_turn_into(&self.document, focus.node_id(), kind)?
+            }
             EditIntent::MoveCaret { .. } | EditIntent::PlaceCaret { .. } => {
                 unreachable!("handled above")
             }
@@ -241,10 +255,19 @@ impl DocumentSession {
             &self.document,
             applied.document(),
         )?;
+        let undo = applied.inverse().clone();
+        // Redo must reproduce the post-commit identities, not mint new ones.
+        // `inverse(inverse(T))` restores allocated NodeIds (SplitNode tail)
+        // via RestoreSubtree; replaying the original SplitNode would not.
+        let redo = undo
+            .apply_with_changes(applied.document())
+            .map_err(SessionError::Core)?
+            .inverse()
+            .clone();
 
         self.history.record(HistoryEntry {
-            redo: plan.transaction().clone(),
-            undo: applied.inverse().clone(),
+            redo,
+            undo,
             before_selection,
             after_selection,
         });
@@ -393,26 +416,7 @@ fn resolve_selection(
                 }
                 _ => edit.range().start().as_usize(),
             };
-
-            let inline = document
-                .node(edit.node())
-                .ok_or(SessionError::Core(xiaomu_core::Error::UnknownNode))?
-                .content()
-                .as_inline()
-                .ok_or(SessionError::SelectionInvalid)?;
-            let offset = inline.offset_at(raw).map_err(SessionError::Core)?;
-            let selection = DocumentSelection::collapsed(TextPoint::new(
-                edit.node(),
-                offset,
-                match before.focus() {
-                    DocumentPosition::Text(point) => point.affinity(),
-                    DocumentPosition::Gap(_) => xiaomu_core::selection::CursorAffinity::Before,
-                },
-            ));
-            selection
-                .validate(document)
-                .map_err(|_| SessionError::SelectionInvalid)?;
-            Ok(selection)
+            collapsed_caret(document, edit.node(), raw, affinity_of(before))
         }
         SelectionUpdate::MapExisting => {
             let mapped = before.map_through(changes, before_document)?;
@@ -421,5 +425,58 @@ fn resolve_selection(
                 .map_err(|_| SessionError::SelectionInvalid)?;
             Ok(mapped)
         }
+        SelectionUpdate::CaretAtSplitTail => {
+            let inserted = changes
+                .steps()
+                .iter()
+                .rev()
+                .find_map(|step| match step {
+                    StepMap::NodeSplit { inserted, .. } => Some(*inserted),
+                    _ => None,
+                })
+                .ok_or(SessionError::SelectionInvalid)?;
+            collapsed_caret(document, inserted, 0, affinity_of(before))
+        }
+        SelectionUpdate::CaretAtJoinSeam => {
+            let (first, first_len) = changes
+                .steps()
+                .iter()
+                .rev()
+                .find_map(|step| match step {
+                    StepMap::NodeJoined {
+                        first, first_len, ..
+                    } => Some((*first, *first_len)),
+                    _ => None,
+                })
+                .ok_or(SessionError::SelectionInvalid)?;
+            collapsed_caret(document, first, first_len, affinity_of(before))
+        }
     }
+}
+
+fn affinity_of(selection: DocumentSelection) -> CursorAffinity {
+    match selection.focus() {
+        DocumentPosition::Text(point) => point.affinity(),
+        DocumentPosition::Gap(_) => CursorAffinity::Before,
+    }
+}
+
+fn collapsed_caret(
+    document: &XiaomuDocument,
+    node: NodeId,
+    raw: usize,
+    affinity: CursorAffinity,
+) -> Result<DocumentSelection, SessionError> {
+    let inline = document
+        .node(node)
+        .ok_or(SessionError::Core(xiaomu_core::Error::UnknownNode))?
+        .content()
+        .as_inline()
+        .ok_or(SessionError::SelectionInvalid)?;
+    let offset = inline.offset_at(raw).map_err(SessionError::Core)?;
+    let selection = DocumentSelection::collapsed(TextPoint::new(node, offset, affinity));
+    selection
+        .validate(document)
+        .map_err(|_| SessionError::SelectionInvalid)?;
+    Ok(selection)
 }

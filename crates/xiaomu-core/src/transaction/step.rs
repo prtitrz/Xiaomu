@@ -52,6 +52,18 @@ pub enum TransactionStep {
         /// Complete replacement attribute set.
         attrs: NodeAttrs,
     },
+    /// Replaces the semantic kind of `node`, keeping its identity, attributes,
+    /// and content.
+    ///
+    /// The new kind must accept the node's existing content shape, and the
+    /// parent must still allow the node as a child. The document root cannot
+    /// change kind. Positions do not move.
+    SetNodeKind {
+        /// Node whose kind is replaced.
+        node: NodeId,
+        /// Replacement semantic kind.
+        kind: crate::document::NodeKind,
+    },
     /// Applies `mark` to `[range.start, range.end)` of one inline node.
     ///
     /// A conflicting mark of the same kind inside the range is replaced.

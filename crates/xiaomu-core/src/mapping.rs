@@ -301,7 +301,7 @@ impl ChangeMap {
 
     /// Returns per-step mapping data in application order.
     ///
-    /// Attribute and mark steps never move positions and produce no entries.
+    /// Attribute, kind, and mark steps never move positions and produce no entries.
     #[must_use]
     pub fn steps(&self) -> &[StepMap] {
         &self.steps
