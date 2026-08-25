@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前 codec、testkit 和 example harness 的编辑功能处于 bootstrap 阶段。`xiaomu-core` 已完成 P0；`xiaomu-runtime` 已实现 P1.2 DocumentSession 编排层；`xiaomu-gpui` 已按 P1.1 从 crates.io 精确 pin 引入 GPUI `0.2.2`，并实现 P1.3 单块编辑基础（渲染 / 输入 / hit-test / harness）。
+当前 codec、testkit 和 example harness 的编辑功能处于 bootstrap 阶段。P0（Core contract）与 P1（单 block 原生输入）已完成：`xiaomu-runtime` 提供 DocumentSession 编排与纯文本 clipboard seam；`xiaomu-gpui` 以精确 pin 的 crates.io GPUI `0.2.2` 实现单 Paragraph 编辑闭环（渲染 / 输入 / hit-test / IME composition / copy-paste / 基础 marks / harness）。
 
 ## Core 边界
 
