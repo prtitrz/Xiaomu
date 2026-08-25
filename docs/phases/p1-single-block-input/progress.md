@@ -392,6 +392,10 @@ P1 只有在以下条件全部满足后才能完成：
 
 ## Regression Log
 
+- 2026-08-24（P1.5 实机，Windows）：拼音 composition 中按 Esc 取消后，preedit 正确消失，但方向键 / 键盘编辑失效，需再点击一次才恢复。
+  根因：微软拼音的取消以空串 GCS_COMPSTR 到达 marked-text 路径（gpui 0.2.2 events.rs L674），旧实现把它当作普通 preedit update，CompositionState 残留为 composing 状态，所有编辑动作被 composing 停损分支吞掉；点击因 on_mouse_down 显式 cancel 才恢复。
+  修复：新增 resolve_preedit_update 决策——活跃 composition 收到空 marked text 一律视为取消并恢复 base selection；空 payload 也不能启动新 composition。决策逻辑为纯函数并有单元测试；实机验收：Esc 后无需点击即可继续键盘编辑与再次输入。
+
 - 2026-08-22（P1.3 实机）：macOS 开中文 IME 输入时拼音字符粘连、候选提交后拼音残留。
   根因是 P1.3 停损实现把 `replace_and_mark_text_in_range`（setMarkedText）立即按普通输入提交，
   且 `marked_text_range` 恒返回 None，平台无法跟踪 preedit 范围导致反复误替换。

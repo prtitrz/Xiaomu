@@ -11,6 +11,7 @@
 
 mod actions;
 mod element;
+mod ime;
 mod input_handler;
 #[cfg(test)]
 mod tests;
@@ -27,7 +28,6 @@ use xiaomu_core::text::{TextOffset, TextRange};
 use xiaomu_runtime::session::{CaretMove, DocumentSession, EditIntent};
 
 use crate::input::composition::CompositionState;
-use crate::input::utf16;
 
 pub use element::ParagraphElement;
 
@@ -268,77 +268,6 @@ impl ParagraphView {
         self.apply_intent(intent, cx);
     }
 
-    /// Ends the composition without committing, restoring the base
-    /// selection through selection-only intents.
-    fn cancel_composition(&mut self, cx: &mut Context<Self>) {
-        let Some(state) = self.composition.take() else {
-            return;
-        };
-
-        let selection = state.base_selection();
-        let anchor = selection.anchor().offset();
-        let focus = selection.focus().offset();
-        self.apply_intent(
-            EditIntent::PlaceCaret {
-                offset: anchor,
-                extend_selection: false,
-            },
-            cx,
-        );
-        self.apply_intent(
-            EditIntent::PlaceCaret {
-                offset: focus,
-                extend_selection: true,
-            },
-            cx,
-        );
-    }
-
-    /// Commits `text` over the composition's base range as exactly one
-    /// transaction (one undo unit).
-    fn commit_composition(&mut self, text: &str, cx: &mut Context<Self>) {
-        let Some(state) = self.composition.take() else {
-            return;
-        };
-
-        let range = state.base_range();
-        let Ok(start) = self
-            .inline()
-            .map(|inline| inline.offset_at(range.start))
-            .unwrap_or_else(|| Ok(TextOffset::ZERO))
-        else {
-            return;
-        };
-        let Ok(end) = self
-            .inline()
-            .map(|inline| inline.offset_at(range.end))
-            .unwrap_or_else(|| Ok(TextOffset::ZERO))
-        else {
-            return;
-        };
-
-        self.apply_intent(
-            EditIntent::PlaceCaret {
-                offset: start,
-                extend_selection: false,
-            },
-            cx,
-        );
-        self.apply_intent(
-            EditIntent::PlaceCaret {
-                offset: end,
-                extend_selection: true,
-            },
-            cx,
-        );
-        self.apply_intent(
-            EditIntent::InsertText {
-                text: text.to_owned(),
-            },
-            cx,
-        );
-    }
-
     fn ordered_range(&self) -> Option<TextRange> {
         self.session.selection().ordered_range().ok()
     }
@@ -538,51 +467,6 @@ impl ParagraphView {
         inline.offset_at(raw).ok()
     }
 
-    /// Begins or updates the IME composition with a new preedit string.
-    fn mark_text(
-        &mut self,
-        range_utf16: Option<Range<usize>>,
-        new_text: &str,
-        new_selected_range: Option<Range<usize>>,
-        cx: &mut Context<Self>,
-    ) {
-        let canonical = self.canonical_text();
-
-        if self.composition.is_none() {
-            let (start, end) = match range_utf16 {
-                Some(range) => (
-                    utf16::utf8_offset(&canonical, range.start),
-                    utf16::utf8_offset(&canonical, range.end),
-                ),
-                None => match self.ordered_range() {
-                    Some(range) => (range.start().as_usize(), range.end().as_usize()),
-                    None => return,
-                },
-            };
-
-            let Some(inline) = self.inline() else {
-                return;
-            };
-            let (Ok(start), Ok(end)) = (inline.offset_at(start), inline.offset_at(end)) else {
-                return;
-            };
-
-            self.composition = Some(CompositionState::begin(
-                self.session.selection(),
-                start.as_usize()..end.as_usize(),
-                new_text,
-                new_selected_range,
-            ));
-        } else if let Some(state) = self.composition.as_mut() {
-            *state = state.update(new_text, new_selected_range);
-        }
-
-        // The preedit is a view transient: without an explicit repaint the
-        // marked text would stay invisible while the IME session continues.
-        // This must fire on the first mark too, not only on updates.
-        cx.notify();
-    }
-
     /// Builds the displayed text plus its styled segments.
     ///
     /// Without an active composition this is the canonical content itself;
@@ -597,13 +481,6 @@ impl ParagraphView {
             .as_ref()
             .map(|state| (state.base_range(), state.preedit()));
         project_display_content(&inline, composition)
-    }
-
-    /// Cancels the composition if one is active; used on focus loss.
-    pub(crate) fn cancel_if_composing(&mut self, cx: &mut Context<Self>) {
-        if self.is_composing() {
-            self.cancel_composition(cx);
-        }
     }
 }
 

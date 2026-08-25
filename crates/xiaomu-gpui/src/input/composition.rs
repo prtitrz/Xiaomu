@@ -11,10 +11,12 @@
 //! `platform/windows/events.rs`):
 //!
 //! ```text
-//! macOS   setMarkedText        → begin_or_update
+//! macOS   setMarkedText(text)  → begin_or_update; empty text = cancel
 //! macOS   insertText           → commit (non-empty) / cancel (empty)
 //! macOS   unmarkText           → cancel if still composing, else no-op
 //! Windows GCS_COMPSTR          → begin_or_update (caret range inside preedit)
+//! Windows GCS_COMPSTR ""       → cancel (composition ended without a result,
+//!                                e.g. Esc on Microsoft Pinyin)
 //! Windows GCS_RESULTSTR        → commit (non-empty)
 //! Windows WM_IME_COMPOSITION lparam == 0
 //!                              → cancel disguised as replace_text_in_range("")
@@ -41,6 +43,33 @@ pub(crate) struct CompositionState {
     preedit: String,
     /// Selected range inside the preedit, in UTF-16 code units.
     preedit_selected_utf16: core::ops::Range<usize>,
+}
+
+/// How a marked-text (preedit) callback resolves against an active
+/// composition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PreeditUpdate {
+    /// Keep composing with the new preedit.
+    Continue,
+    /// The composition ended without committing (empty marked text);
+    /// the view must restore the base selection.
+    Cancelled,
+}
+
+/// Resolves a `replace_and_mark_text_in_range` payload received while a
+/// composition is active.
+///
+/// An empty marked string ends the composition: Microsoft Pinyin reports an
+/// Esc cancellation exactly as `GCS_COMPSTR` with an empty string, and
+/// macOS `setMarkedText("")` likewise removes the marking. Keeping an empty
+/// preedit alive here would strand the adapter in composing state, blocking
+/// all keyboard editing until the next click.
+pub(crate) fn resolve_preedit_update(new_text: &str) -> PreeditUpdate {
+    if new_text.is_empty() {
+        PreeditUpdate::Cancelled
+    } else {
+        PreeditUpdate::Continue
+    }
 }
 
 /// Returns the UTF-16 code-unit length of `text`.
@@ -74,8 +103,8 @@ impl CompositionState {
 
     /// Replaces the preedit text, keeping the base untouched.
     ///
-    /// An empty preedit keeps the composition alive: platforms clear the
-    /// marked string mid-session without ending it.
+    /// Callers resolve empty payloads through [`resolve_preedit_update`] and
+    /// never call `update` with an empty string.
     pub(crate) fn update(
         &self,
         preedit: &str,
@@ -231,11 +260,15 @@ mod tests {
         let state = state.update("nihao", None);
         assert_eq!(state.project(CANONICAL), "你好nihaoworld");
         assert_eq!(state.base_selection(), &selection(6));
+    }
 
-        // Empty preedit keeps composing (platforms clear mid-session).
-        let state = state.update("", None);
-        assert_eq!(state.project(CANONICAL), CANONICAL);
-        assert_eq!(state.marked_range_virtual_utf16(CANONICAL), 2..2);
+    #[test]
+    fn empty_preedit_payloads_end_the_composition() {
+        // Continuous pinyin stays alive...
+        assert_eq!(resolve_preedit_update("ni'hao"), PreeditUpdate::Continue);
+        // ...while an empty marked string is a cancellation on every pinned
+        // platform (Esc on Microsoft Pinyin, setMarkedText("") on macOS).
+        assert_eq!(resolve_preedit_update(""), PreeditUpdate::Cancelled);
     }
 
     #[test]
