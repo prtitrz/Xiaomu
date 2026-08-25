@@ -10,6 +10,7 @@ use xiaomu_core::document::{
 use xiaomu_core::selection::{CursorAffinity, TextPoint, TextSelection};
 use xiaomu_core::text::{TextBuffer, TextOffset};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
+use xiaomu_runtime::session::DocumentSelection;
 use xiaomu_runtime::session::{
     CaretMove, DocumentChangeListener, DocumentSession, EditIntent, SessionError, SessionOutcome,
 };
@@ -76,7 +77,7 @@ fn document_with(text: &str) -> (XiaomuDocument, NodeId) {
 }
 
 fn session_with(document: &XiaomuDocument, selection: TextSelection) -> DocumentSession {
-    DocumentSession::new(document.clone(), selection).unwrap()
+    DocumentSession::new(document.clone(), DocumentSelection::text(selection)).unwrap()
 }
 
 fn text_of(session: &DocumentSession, node: NodeId) -> String {
@@ -107,7 +108,12 @@ fn move_caret(caret_move: CaretMove, extend_selection: bool) -> EditIntent {
 }
 
 fn caret_offset(session: &DocumentSession) -> usize {
-    session.selection().focus().offset().as_usize()
+    session
+        .text_selection()
+        .expect("single-block selection")
+        .focus()
+        .offset()
+        .as_usize()
 }
 
 /// Shared counters so tests can keep reading listener state after handing a
@@ -125,13 +131,13 @@ struct Counters {
 }
 
 impl DocumentChangeListener for ListenerHandle {
-    fn document_changed(&mut self, document: &XiaomuDocument, _selection: TextSelection) {
+    fn document_changed(&mut self, document: &XiaomuDocument, _selection: DocumentSelection) {
         let mut state = self.state.borrow_mut();
         state.document_changes += 1;
         state.last_revision = Some(document.revision().as_u64());
     }
 
-    fn selection_changed(&mut self, _selection: TextSelection) {
+    fn selection_changed(&mut self, _selection: DocumentSelection) {
         self.state.borrow_mut().selection_changes += 1;
     }
 }
@@ -336,7 +342,7 @@ fn caret_moves_walk_scalar_boundaries_and_respect_extend() {
     session
         .apply_intent(&move_caret(CaretMove::Backward, true))
         .unwrap();
-    let selection = session.selection();
+    let selection = session.text_selection().expect("single-block selection");
     assert_eq!(selection.anchor().offset().as_usize(), 8);
     assert_eq!(selection.focus().offset().as_usize(), 5);
 
@@ -371,7 +377,7 @@ fn toggle_mark_adds_then_removes_and_preserves_selection() {
     assert_eq!(runs.len(), 3);
     assert!(runs[1].marks().contains(MarkKind::Bold));
     // MapExisting keeps the selection covering the same text.
-    assert_eq!(session.selection(), selection);
+    assert_eq!(session.selection(), DocumentSelection::text(selection));
 
     // Fully marked now: the same intent removes the mark again and the
     // store round-trips to the original snapshot.
@@ -379,7 +385,7 @@ fn toggle_mark_adds_then_removes_and_preserves_selection() {
         .apply_intent(&EditIntent::ToggleMark { mark: Mark::Bold })
         .unwrap();
     assert_eq!(session.document().store(), document.store());
-    assert_eq!(session.selection(), selection);
+    assert_eq!(session.selection(), DocumentSelection::text(selection));
     assert_eq!(session.history_depths(), (2, 0));
 }
 
@@ -524,7 +530,7 @@ fn new_rejects_selections_invalid_for_the_snapshot() {
         CursorAffinity::Before,
     ));
 
-    let error = match DocumentSession::new(document, selection) {
+    let error = match DocumentSession::new(document, DocumentSelection::text(selection)) {
         Err(error) => error,
         Ok(_) => panic!("selection beyond the text must be rejected"),
     };
@@ -568,7 +574,7 @@ fn place_caret_positions_absolutely_and_extends() {
             extend_selection: true,
         })
         .unwrap();
-    let selection = session.selection();
+    let selection = session.text_selection().expect("single-block selection");
     assert_eq!(selection.anchor().offset().as_usize(), 5);
     assert_eq!(selection.focus().offset().as_usize(), 1);
 

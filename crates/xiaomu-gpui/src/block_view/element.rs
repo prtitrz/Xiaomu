@@ -110,13 +110,21 @@ impl Element for ParagraphElement {
             .collect();
         // The caret sits at the composition caret while composing, and at
         // the canonical selection focus otherwise.
-        let caret_byte = view
-            .composing_caret_byte()
-            .unwrap_or_else(|| session.selection().focus().offset().as_usize());
+        let caret_byte = view.composing_caret_byte().unwrap_or_else(|| {
+            let selection = session
+                .text_selection()
+                .expect("single-block session selection");
+            selection.focus().offset().as_usize()
+        });
         let anchor_byte = if view.is_composing() {
             caret_byte
         } else {
-            session.selection().anchor().offset().as_usize()
+            session
+                .text_selection()
+                .expect("single-block session selection")
+                .anchor()
+                .offset()
+                .as_usize()
         };
         let line = window.text_system().shape_line(
             SharedString::new(display_text.as_ref()),

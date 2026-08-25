@@ -15,14 +15,17 @@ mod history;
 mod intent;
 mod listener;
 mod outcome;
+mod selection;
 
 pub use history::HistoryStack;
 pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
 pub use listener::DocumentChangeListener;
 pub use outcome::{SessionError, SessionOutcome};
+pub use selection::DocumentPosition;
+pub use selection::DocumentSelection;
 
 use xiaomu_core::document::{InlineContent, NodeId, XiaomuDocument};
-use xiaomu_core::mapping::{ChangeMap, MappedPosition};
+use xiaomu_core::mapping::ChangeMap;
 use xiaomu_core::selection::{TextPoint, TextSelection};
 use xiaomu_core::text::TextOffset;
 use xiaomu_core::transaction::Transaction;
@@ -38,7 +41,7 @@ use self::intent::PlannedAction;
 /// validation, the session keeps its previous state unchanged.
 pub struct DocumentSession {
     document: XiaomuDocument,
-    selection: TextSelection,
+    selection: DocumentSelection,
     history: HistoryStack,
     listeners: Vec<Box<dyn DocumentChangeListener>>,
 }
@@ -47,7 +50,10 @@ impl DocumentSession {
     /// Creates a session over `document` with an initial selection.
     ///
     /// The selection must be valid for the snapshot.
-    pub fn new(document: XiaomuDocument, selection: TextSelection) -> Result<Self, SessionError> {
+    pub fn new(
+        document: XiaomuDocument,
+        selection: DocumentSelection,
+    ) -> Result<Self, SessionError> {
         selection
             .validate(&document)
             .map_err(|_| SessionError::SelectionInvalid)?;
@@ -67,8 +73,16 @@ impl DocumentSession {
 
     /// Returns the selection; always valid for the current snapshot.
     #[must_use]
-    pub const fn selection(&self) -> TextSelection {
+    pub const fn selection(&self) -> DocumentSelection {
         self.selection
+    }
+
+    /// Returns the single-block Core selection when the whole selection
+    /// lives inside one inline node; `None` for gap or cross-block
+    /// selections (P1 single-block frontends use this).
+    #[must_use]
+    pub fn text_selection(&self) -> Option<TextSelection> {
+        self.selection.as_single_node()
     }
 
     /// Returns the selected text as plain text, or `None` for a collapsed
@@ -76,11 +90,12 @@ impl DocumentSession {
     /// participate (plain-text clipboard, P1 scope).
     #[must_use]
     pub fn selected_text(&self) -> Option<String> {
-        if self.selection.is_collapsed() {
+        let selection = self.text_selection()?;
+        if selection.is_collapsed() {
             return None;
         }
-        let range = self.selection.ordered_range().ok()?;
-        let inline = self.inline_of(self.selection.focus().node_id()).ok()?;
+        let range = selection.ordered_range().ok()?;
+        let inline = self.inline_of(selection.focus().node_id()).ok()?;
 
         let mut selected = String::new();
         let mut cursor = 0usize;
@@ -134,14 +149,20 @@ impl DocumentSession {
             return self.place_caret(*offset, *extend_selection);
         }
 
-        let inline = self.inline_of(self.selection.focus().node_id())?;
+        // Content-editing intents still act inside one inline node; the
+        // cross-block selection forms gain structural intents in later
+        // slices.
+        let focus = self.text_focus()?;
+        let inline = self.inline_of(focus.node_id())?;
+        let selection = self
+            .selection
+            .as_single_node()
+            .ok_or(SessionError::SelectionInvalid)?;
         let action = match intent {
-            EditIntent::InsertText { text } => intent::plan_insert_text(self.selection, text)?,
-            EditIntent::Backspace => intent::plan_backspace(&inline, self.selection)?,
-            EditIntent::Delete => intent::plan_delete(&inline, self.selection)?,
-            EditIntent::ToggleMark { mark } => {
-                intent::plan_toggle_mark(&inline, self.selection, mark)?
-            }
+            EditIntent::InsertText { text } => intent::plan_insert_text(selection, text)?,
+            EditIntent::Backspace => intent::plan_backspace(&inline, selection)?,
+            EditIntent::Delete => intent::plan_delete(&inline, selection)?,
+            EditIntent::ToggleMark { mark } => intent::plan_toggle_mark(&inline, selection, mark)?,
             EditIntent::MoveCaret { .. } | EditIntent::PlaceCaret { .. } => {
                 unreachable!("handled above")
             }
@@ -159,7 +180,7 @@ impl DocumentSession {
     /// Unlike intents, raw applies have no no-op detection: even an empty
     /// transaction commits, advances the revision, and is recorded in
     /// history. The previous selection is mapped through the change map; a
-    /// transaction that deletes the selection's node fails atomically.
+    /// transaction that deletes a selection endpoint fails atomically.
     pub fn apply(&mut self, transaction: &Transaction) -> Result<SessionOutcome, SessionError> {
         self.commit(intent::map_existing_plan(transaction.clone()))
     }
@@ -217,6 +238,7 @@ impl DocumentSession {
             &plan,
             applied.changes(),
             before_selection,
+            &self.document,
             applied.document(),
         )?;
 
@@ -236,7 +258,7 @@ impl DocumentSession {
     fn apply_history_transaction(
         &mut self,
         transaction: &Transaction,
-        selection: TextSelection,
+        selection: DocumentSelection,
     ) -> Result<(), SessionError> {
         let applied = transaction
             .apply_with_changes(&self.document)
@@ -257,10 +279,13 @@ impl DocumentSession {
         caret_move: CaretMove,
         extend_selection: bool,
     ) -> Result<SessionOutcome, SessionError> {
-        let inline = self.inline_of(self.selection.focus().node_id())?;
+        // Cross-block caret movement arrives with the multi-block frontend;
+        // at a gap endpoint there is nothing to move within yet.
+        let Some(focus) = self.text_focus().ok() else {
+            return Ok(SessionOutcome::NoChange);
+        };
+        let inline = self.inline_of(focus.node_id())?;
         let text = intent::concatenated(&inline);
-
-        let focus = self.selection.focus();
         let current = focus.offset().as_usize();
         let target = match caret_move {
             CaretMove::Backward => intent::previous_boundary(&text, current),
@@ -275,9 +300,9 @@ impl DocumentSession {
         let offset = inline.offset_at(raw).map_err(SessionError::Core)?;
         let moved = TextPoint::new(focus.node_id(), offset, focus.affinity());
         let next = if extend_selection {
-            TextSelection::new(self.selection.anchor(), moved)
+            DocumentSelection::new(self.selection.anchor(), moved)
         } else {
-            TextSelection::collapsed(moved)
+            DocumentSelection::collapsed(moved)
         };
 
         if next == self.selection {
@@ -294,15 +319,19 @@ impl DocumentSession {
         offset: TextOffset,
         extend_selection: bool,
     ) -> Result<SessionOutcome, SessionError> {
-        let inline = self.inline_of(self.selection.focus().node_id())?;
+        // Hit-testing against the block tree lands on one block's text; gap
+        // endpoints have no in-node coordinates to place into.
+        let Some(focus) = self.text_focus().ok() else {
+            return Ok(SessionOutcome::NoChange);
+        };
+        let inline = self.inline_of(focus.node_id())?;
         inline.validate_offset(offset).map_err(SessionError::Core)?;
 
-        let focus = self.selection.focus();
         let moved = TextPoint::new(focus.node_id(), offset, focus.affinity());
         let next = if extend_selection {
-            TextSelection::new(self.selection.anchor(), moved)
+            DocumentSelection::new(self.selection.anchor(), moved)
         } else {
-            TextSelection::collapsed(moved)
+            DocumentSelection::collapsed(moved)
         };
 
         if next == self.selection {
@@ -324,6 +353,15 @@ impl DocumentSession {
             .ok_or(SessionError::SelectionInvalid)
     }
 
+    /// Returns the focused text position when the focus endpoint carries
+    /// text coordinates; content-editing intents cannot act on a gap.
+    fn text_focus(&self) -> Result<TextPoint, SessionError> {
+        match self.selection.focus() {
+            DocumentPosition::Text(point) => Ok(point),
+            DocumentPosition::Gap(_) => Err(SessionError::SelectionInvalid),
+        }
+    }
+
     fn notify_document_changed(&mut self) {
         for listener in &mut self.listeners {
             listener.document_changed(&self.document, self.selection);
@@ -342,9 +380,10 @@ impl DocumentSession {
 fn resolve_selection(
     plan: &EditPlan,
     changes: &ChangeMap,
-    before: TextSelection,
+    before: DocumentSelection,
+    before_document: &XiaomuDocument,
     document: &XiaomuDocument,
-) -> Result<TextSelection, SessionError> {
+) -> Result<DocumentSelection, SessionError> {
     match plan.selection_update() {
         SelectionUpdate::CaretAfterReplacement | SelectionUpdate::CaretAtEditStart => {
             let edit = plan.primary_edit().ok_or(SessionError::SelectionInvalid)?;
@@ -362,24 +401,25 @@ fn resolve_selection(
                 .as_inline()
                 .ok_or(SessionError::SelectionInvalid)?;
             let offset = inline.offset_at(raw).map_err(SessionError::Core)?;
-            let selection = TextSelection::collapsed(TextPoint::new(
+            let selection = DocumentSelection::collapsed(TextPoint::new(
                 edit.node(),
                 offset,
-                before.focus().affinity(),
+                match before.focus() {
+                    DocumentPosition::Text(point) => point.affinity(),
+                    DocumentPosition::Gap(_) => xiaomu_core::selection::CursorAffinity::Before,
+                },
             ));
             selection
                 .validate(document)
                 .map_err(|_| SessionError::SelectionInvalid)?;
             Ok(selection)
         }
-        SelectionUpdate::MapExisting => match changes.map_text_selection(before) {
-            MappedPosition::Mapped(mapped) => {
-                mapped
-                    .validate(document)
-                    .map_err(|_| SessionError::SelectionInvalid)?;
-                Ok(mapped)
-            }
-            MappedPosition::Deleted => Err(SessionError::SelectionDeleted),
-        },
+        SelectionUpdate::MapExisting => {
+            let mapped = before.map_through(changes, before_document)?;
+            mapped
+                .validate(document)
+                .map_err(|_| SessionError::SelectionInvalid)?;
+            Ok(mapped)
+        }
     }
 }

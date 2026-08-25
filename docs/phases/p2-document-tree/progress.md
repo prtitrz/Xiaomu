@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P2.1 Core 结构 steps 已完成**
+当前切片：**P2.2 DocumentSelection 与 session 升级已完成**
 
-前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0 已合入（PR #21）。
+前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0 / P2.1 已合入（PR #21–#22）。
 
 ## P2.0 Phase Contract 与阶段骨架
 
@@ -68,6 +68,35 @@ cargo fmt --all -- --check 全绿
 cargo clippy --workspace --all-targets -- -D warnings 全绿
 cargo test --workspace --all-targets 全绿（新增 split/join 应用与 round-trip 测试，
 随机不变量生成器扩展 SplitNode/JoinNodes，mapping 单测迁至 tests/step_mapping.rs）
+tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
+```
+
+## P2.2 Runtime DocumentSelection 与 session 升级
+
+- [x] `DocumentSelection` / `DocumentPosition` 数据结构：端点为 TextPoint 或 NodeGap，validate / ordered / map_through / as_single_node 语义完整并有单测
+- [x] 跨块排序：snapshot pre-order slot 分配（节点与 gap 各占单调槽位），ordered() 解析 head/tail
+- [x] session selection 读写点切换到 document-level 校验；`text_selection()` 投影回单块 Core 选区供 P1 前端使用
+- [x] MapExisting 升级为 `map_through`：非折叠选区 head/tail 分别取 Start / End bias，任一端点被删整体失败，anchor/focus 方向保留
+- [x] gap 端点行为定义：内容编辑 intent 返回 `SelectionInvalid`；caret 移动返回 `NoChange`（跨块导航属 P2.5）
+- [x] P1 全部行为回归通过（session.rs 19 个集成测试未改断言语义即通过）
+
+实现说明：
+
+```text
+Core selection 类型不动；DocumentSelection 是 runtime 层超集。
+listener seam 与 HistoryEntry 的 before/after selection 同步升级为 DocumentSelection。
+gpui 单块视图全部经 text_selection() 投影读取；editor 入口用
+DocumentSelection::text 包装既有 TextSelection 参数，公开 API 无破坏性变更。
+```
+
+完成证据：
+
+```text
+分支 feat/p2-document-selection：
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿
+cargo test --workspace --all-targets 全绿（新增 selection.rs 7 个单元测试，
+P1 回归 session.rs 19 个测试不改断言通过）
 tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
 ```
 

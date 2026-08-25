@@ -1,8 +1,8 @@
 //! Frontend-neutral change notification seam.
 
 use xiaomu_core::document::XiaomuDocument;
-use xiaomu_core::selection::TextSelection;
 
+use super::selection::DocumentSelection;
 /// Receives change notifications from a
 /// [`DocumentSession`](super::DocumentSession).
 ///
@@ -14,8 +14,8 @@ pub trait DocumentChangeListener {
     ///
     /// `document` is the new snapshot and `selection` the selection that the
     /// session resolved for it.
-    fn document_changed(&mut self, _document: &XiaomuDocument, _selection: TextSelection) {}
+    fn document_changed(&mut self, _document: &XiaomuDocument, _selection: DocumentSelection) {}
 
     /// The selection moved without touching the document.
-    fn selection_changed(&mut self, _selection: TextSelection) {}
+    fn selection_changed(&mut self, _selection: DocumentSelection) {}
 }

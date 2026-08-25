@@ -46,7 +46,7 @@ impl EntityInputHandler for ParagraphView {
             });
         }
 
-        let selection = self.session.selection();
+        let selection = self.session.text_selection()?;
         let anchor = selection.anchor().offset().as_usize();
         let focus = selection.focus().offset().as_usize();
         let (start, end) = (anchor.min(focus), anchor.max(focus));
