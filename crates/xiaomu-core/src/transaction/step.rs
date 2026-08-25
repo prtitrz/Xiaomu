@@ -1,7 +1,7 @@
 //! Typed transaction steps.
 
 use crate::document::{Mark, MarkKind, Node, NodeAttrs, NodeContent, NodeId};
-use crate::text::TextRange;
+use crate::text::{TextOffset, TextRange};
 
 /// One typed canonical mutation inside a [`Transaction`](super::Transaction).
 ///
@@ -102,5 +102,35 @@ pub enum TransactionStep {
         range: TextRange,
         /// Semantic kind of the marks to remove.
         mark_kind: MarkKind,
+    },
+    /// Splits one inline-bearing node at `at` in its concatenated text.
+    ///
+    /// The original node keeps its identity and the text before `at`; a
+    /// freshly allocated sibling with the same kind and attributes receives
+    /// the text from `at` onward and enters the parent's child list directly
+    /// after it. Splitting inside a run gives both halves that run's marks;
+    /// splitting exactly at a run boundary leaves each whole run on one
+    /// side. Either resulting half may be empty.
+    SplitNode {
+        /// Inline-bearing node being split; must not be the document root.
+        node: NodeId,
+        /// UTF-8 byte offset of the split point; a validated boundary of
+        /// the node's concatenated text (zero through total length
+        /// inclusive).
+        at: TextOffset,
+    },
+    /// Merges two adjacent inline-bearing siblings into one.
+    ///
+    /// `second` must be the child immediately following `first`. The merged
+    /// node keeps `first`'s identity, kind, and attributes; its inline
+    /// content is the normalized concatenation of both contents. `second`
+    /// leaves the document together with its whole subtree, so undo can
+    /// restore it with its exact identity via
+    /// [`TransactionStep::RestoreSubtree`].
+    JoinNodes {
+        /// Surviving sibling whose child position stays put.
+        first: NodeId,
+        /// Sibling immediately after `first` that is absorbed into it.
+        second: NodeId,
     },
 }

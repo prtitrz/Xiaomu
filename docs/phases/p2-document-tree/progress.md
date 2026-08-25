@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P2.0 Phase contract**
+当前切片：**P2.1 Core 结构 steps 已完成**
 
-前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）。
+前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0 已合入（PR #21）。
 
 ## P2.0 Phase Contract 与阶段骨架
 
@@ -37,6 +37,38 @@ uv run python tools/check_source_size.py 全绿
 uv run python tools/check_dependency_boundaries.py 全绿
 cargo fmt / clippy -D warnings / cargo test 全绿
 本 PR 的远端 CI Success 即 P2.0 Gate 证据。
+```
+
+## P2.1 Core 结构 steps
+
+- [x] SplitNode step：构造校验（inline 节点、scalar boundary offset）+ application + 新兄弟分配
+- [x] JoinNodes step：相邻 inline 兄弟合并，内容归一化拼接，被吸收子树移除
+- [x] StepMap::NodeSplit / NodeJoined 映射数据（text point / node gap / node selection）
+- [x] inverse 精确还原（SplitNode ↔ JoinNodes；JoinNodes 逆 = 删除追加文本 + RestoreSubtree）
+- [x] 随机不变量测试扩展到新 step（valid 序列 + 整链 undo 还原初始 store）
+- [x] mapping 单测迁出 production source（src/mapping.rs tests → tests/step_mapping.rs，source-size guard）
+
+实现说明：
+
+```text
+SplitNode 只作用于 inline-bearing 节点；offset 经 InlineContent::validate_offset 校验。
+run 内拆分时两半继承该 run 的 marks；恰好落在 run 边界则各 run 完整归属一侧；
+任一半允许为空。tail 兄弟复用原节点的 kind 与 attrs，由 snapshot 内部 allocator 分配 id。
+JoinNodes 要求 second 是 first 的紧邻后继兄弟；合并结果保留 first 的 identity/kind/attrs，
+内容按 piece 顺序归一化拼接（跨 first/second 边界的同 marks run 会重新合并，
+undo 时 JoinNodes 逆可精确还原该切分）。
+映射语义见 architecture.md Transaction/Mapping 小节；split 点 offset 由 MapBias 解析。
+```
+
+完成证据：
+
+```text
+分支 feat/p2-core-structural-steps：
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿
+cargo test --workspace --all-targets 全绿（新增 split/join 应用与 round-trip 测试，
+随机不变量生成器扩展 SplitNode/JoinNodes，mapping 单测迁至 tests/step_mapping.rs）
+tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
 ```
 
 ## P1 移交的 P2 前置依赖与归属

@@ -335,6 +335,91 @@ fn chained_undo_restores_the_initial_snapshot() {
     );
 }
 
+#[test]
+fn split_node_inverse_joins_back_to_the_exact_store() {
+    let (document, paragraph) = marked_fixture();
+
+    // Split inside the bold run, at a run boundary, and at the very end.
+    for at in [3usize, 6, 12] {
+        let transaction =
+            Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::SplitNode {
+                node: paragraph,
+                at: offset_at(at),
+            });
+        assert_round_trips(&document, transaction);
+    }
+}
+
+#[test]
+fn join_nodes_inverse_restores_the_absorbed_identity() {
+    let mut builder = NodeStoreBuilder::new();
+    let first = builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            inline(&[("你好", bold())]),
+        )
+        .unwrap();
+    let second = builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            inline(&[("世界", link("https://x.example"))]),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([first, second]),
+        )
+        .unwrap();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+    let join = Transaction::new(TransactionOrigin::UserInput)
+        .with_step(TransactionStep::JoinNodes { first, second });
+    let applied = join.apply_with_changes(&document).unwrap();
+    let joined_text: String = applied
+        .document()
+        .node(first)
+        .unwrap()
+        .content()
+        .as_inline()
+        .unwrap()
+        .runs()
+        .iter()
+        .map(|run| run.text().as_str())
+        .collect();
+    // Both runs keep their marks; normalization must not bleed bold into
+    // the link-marked run.
+    assert_eq!(joined_text, "你好世界");
+    assert!(applied.document().node(second).is_none());
+
+    // The inverse restores the exact store, including `second`'s identity.
+    let undone = applied.inverse().apply(applied.document()).unwrap();
+    assert_eq!(undone.store(), document.store());
+    assert_eq!(undone.root(), document.root());
+    assert_eq!(undone.node(second), document.node(second));
+}
+
+#[test]
+fn split_then_join_chain_round_trips_in_one_transaction() {
+    let (document, paragraph) = marked_fixture();
+
+    // Two splits and a join inside one transaction; inverse groups are
+    // recorded per step so the whole chain still restores exactly.
+    let transaction = Transaction::new(TransactionOrigin::UserInput)
+        .with_step(TransactionStep::SplitNode {
+            node: paragraph,
+            at: offset_at(3),
+        })
+        .with_step(TransactionStep::SplitNode {
+            node: paragraph,
+            at: offset_at(3),
+        });
+    assert_round_trips(&document, transaction);
+}
+
 /// Deterministic xorshift generator; keeps the suite dependency-free.
 struct Rng(u64);
 
@@ -451,6 +536,30 @@ fn random_kind_and_content(rng: &mut Rng) -> (NodeKind, NodeContent) {
     }
 }
 
+fn adjacent_inline_pairs(document: &XiaomuDocument) -> Vec<(NodeId, NodeId)> {
+    let mut pairs = Vec::new();
+    for container in container_targets(document) {
+        let children = document
+            .node(container)
+            .unwrap()
+            .content()
+            .as_children()
+            .unwrap();
+        for pair in children.windows(2) {
+            let both_inline = [pair[0], pair[1]].iter().all(|id| {
+                document
+                    .node(*id)
+                    .map(|node| node.content().as_inline().is_some())
+                    .unwrap_or(false)
+            });
+            if both_inline {
+                pairs.push((pair[0], pair[1]));
+            }
+        }
+    }
+    pairs
+}
+
 fn random_step(rng: &mut Rng, document: &XiaomuDocument) -> TransactionStep {
     let inlines = inline_targets(document);
     if inlines.is_empty() {
@@ -463,7 +572,7 @@ fn random_step(rng: &mut Rng, document: &XiaomuDocument) -> TransactionStep {
             content: random_inline(rng),
         };
     }
-    match rng.below(8) {
+    match rng.below(10) {
         0..=2 => {
             // ReplaceText on a random inline node with a boundary-valid range.
             let node = inlines[rng.below(inlines.len())];
@@ -539,6 +648,32 @@ fn random_step(rng: &mut Rng, document: &XiaomuDocument) -> TransactionStep {
                 TransactionStep::RemoveNode {
                     node: candidates[rng.below(candidates.len())],
                 }
+            }
+        }
+        7 => {
+            // SplitNode on a random inline node at a run-boundary offset.
+            let node = inlines[rng.below(inlines.len())];
+            let content = document.node(node).unwrap().content().as_inline().unwrap();
+            let bounds = boundaries(content);
+            TransactionStep::SplitNode {
+                node,
+                at: offset_at(bounds[rng.below(bounds.len())]),
+            }
+        }
+        8 => {
+            // JoinNodes on a random adjacent pair of inline siblings.
+            let pairs = adjacent_inline_pairs(document);
+            if pairs.is_empty() {
+                TransactionStep::InsertNode {
+                    parent: document.root(),
+                    index: 0,
+                    kind: NodeKind::Paragraph,
+                    attrs: NodeAttrs::empty(),
+                    content: NodeContent::empty_inline(),
+                }
+            } else {
+                let (first, second) = pairs[rng.below(pairs.len())];
+                TransactionStep::JoinNodes { first, second }
             }
         }
         _ => {
