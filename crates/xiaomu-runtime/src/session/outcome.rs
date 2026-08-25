@@ -26,8 +26,9 @@ pub enum SessionError {
     Core(xiaomu_core::Error),
     /// The resolved selection maps to a node deleted by the transaction.
     ///
-    /// P1 has no structural editing fallback: transactions that delete the
-    /// selection's inline node are rejected instead of clamping somewhere.
+    /// Raw applies and mark edits still fail atomically when an endpoint
+    /// disappears. Structural intents use an explicit after-selection
+    /// policy (join seam / new-block start) instead of this error.
     SelectionDeleted,
     /// The resolved selection is not valid for the new snapshot.
     SelectionInvalid,

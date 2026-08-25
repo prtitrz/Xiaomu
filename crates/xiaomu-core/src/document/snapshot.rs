@@ -1,6 +1,6 @@
 //! Immutable canonical document snapshot and full-tree validation.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::{Error, Result};
 
@@ -80,6 +80,33 @@ impl XiaomuDocument {
     #[must_use]
     pub fn node(&self, id: NodeId) -> Option<&Node> {
         self.store.get(id)
+    }
+
+    /// Returns the parent of `id` in this snapshot.
+    ///
+    /// The document root has no parent. Unknown identities also yield
+    /// `None`; callers that need to distinguish a missing node should query
+    /// [`Self::node`] first.
+    #[must_use]
+    pub fn parent_of(&self, id: NodeId) -> Option<NodeId> {
+        if id == self.root {
+            return None;
+        }
+
+        let mut queue = VecDeque::from([self.root]);
+        while let Some(current) = queue.pop_front() {
+            let Some(children) = self
+                .node(current)
+                .and_then(|node| node.content().as_children())
+            else {
+                continue;
+            };
+            if children.contains(&id) {
+                return Some(current);
+            }
+            queue.extend(children.iter().copied());
+        }
+        None
     }
 
     /// Returns the read-only node store.

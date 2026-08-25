@@ -4,7 +4,7 @@
 //! transaction contract: the same Core steps can serve many commands, and
 //! only the session knows which after-selection a command promises.
 
-use xiaomu_core::document::{InlineContent, Mark, MarkKind, NodeId};
+use xiaomu_core::document::{InlineContent, Mark, MarkKind, NodeId, NodeKind};
 use xiaomu_core::selection::TextSelection;
 use xiaomu_core::text::{TextOffset, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
@@ -26,8 +26,10 @@ pub enum CaretMove {
 
 /// A typed editing intent.
 ///
-/// P1 keeps all text editing inside one inline node; structural intents
-/// (split, join, move) belong to later phases.
+/// Text intents act inside one inline node. Structural intents
+/// ([`EditIntent::SplitBlock`], [`EditIntent::JoinWithPrevious`],
+/// [`EditIntent::TurnInto`]) still require a single-node text selection in
+/// this phase; cross-block structural commands belong to later slices.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EditIntent {
@@ -38,6 +40,9 @@ pub enum EditIntent {
         text: String,
     },
     /// Delete one Unicode scalar before the caret, or the whole selection.
+    ///
+    /// A collapsed caret at the start of an inline block joins that block
+    /// with its previous sibling when one exists; otherwise it is a no-op.
     Backspace,
     /// Delete one Unicode scalar after the caret, or the whole selection.
     Delete,
@@ -67,6 +72,27 @@ pub enum EditIntent {
         /// whole selection is removed instead.
         mark: Mark,
     },
+    /// Split the focused inline block at the caret.
+    ///
+    /// A non-collapsed selection is deleted first in the same transaction.
+    /// The new sibling keeps the original kind and attributes; a split
+    /// inside a run gives both halves that run's marks. After commit the
+    /// caret sits at the start of the new (tail) block.
+    SplitBlock,
+    /// Merge the focused inline block into its immediately preceding sibling.
+    ///
+    /// No previous sibling is a no-op. After commit the caret sits at the
+    /// join seam (the end of the surviving block's original text).
+    JoinWithPrevious,
+    /// Change the focused inline block's kind, keeping its identity and
+    /// content.
+    ///
+    /// The same kind is a no-op. Shape-incompatible kinds (for example
+    /// turning a paragraph into a quote container) are rejected by Core.
+    TurnInto {
+        /// Replacement semantic kind.
+        kind: NodeKind,
+    },
 }
 
 /// How the session derives the selection after a plan commits.
@@ -79,8 +105,12 @@ pub enum SelectionUpdate {
     /// (Backspace / Delete).
     CaretAtEditStart,
     /// Map the previous selection through the change map with outward bias
-    /// (mark edits and non-intent applies).
+    /// (mark edits, kind changes, and non-intent applies).
     MapExisting,
+    /// After a split: caret at the start of the newly inserted tail sibling.
+    CaretAtSplitTail,
+    /// After a join: caret at the join seam of the surviving node.
+    CaretAtJoinSeam,
 }
 
 /// The coordinates of the primary text edit of a plan.

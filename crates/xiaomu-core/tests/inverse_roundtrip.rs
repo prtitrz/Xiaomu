@@ -255,6 +255,18 @@ fn attrs_and_mark_inverses_restore_exact_state() {
 }
 
 #[test]
+fn set_node_kind_inverse_restores_the_original_kind() {
+    let (document, paragraph) = marked_fixture();
+    let heading = NodeKind::Heading(HeadingLevel::new(3).unwrap());
+    let transaction =
+        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::SetNodeKind {
+            node: paragraph,
+            kind: heading,
+        });
+    assert_round_trips(&document, transaction);
+}
+
+#[test]
 fn multi_step_inverse_round_trips_one_transaction() {
     let mut builder = NodeStoreBuilder::new();
     let first = builder
@@ -679,16 +691,29 @@ fn random_step(rng: &mut Rng, document: &XiaomuDocument) -> TransactionStep {
         _ => {
             let ids: Vec<NodeId> = document.store().iter().map(|node| node.id()).collect();
             let node = ids[rng.below(ids.len())];
-            let mut values = BTreeMap::new();
-            if rng.below(2) == 0 {
-                values.insert(
-                    format!("key{}", rng.below(4)),
-                    AttrValue::String(format!("v{}", rng.below(100))),
-                );
-            }
-            TransactionStep::SetNodeAttrs {
-                node,
-                attrs: NodeAttrs::new(values).unwrap(),
+            let is_inline = document
+                .node(node)
+                .and_then(|n| n.content().as_inline())
+                .is_some();
+            if rng.below(2) == 0 && node != document.root() && is_inline {
+                let kind = match rng.below(3) {
+                    0 => NodeKind::Paragraph,
+                    1 => NodeKind::Heading(HeadingLevel::new(1 + rng.below(6) as u8).unwrap()),
+                    _ => NodeKind::CodeBlock,
+                };
+                TransactionStep::SetNodeKind { node, kind }
+            } else {
+                let mut values = BTreeMap::new();
+                if rng.below(2) == 0 {
+                    values.insert(
+                        format!("key{}", rng.below(4)),
+                        AttrValue::String(format!("v{}", rng.below(100))),
+                    );
+                }
+                TransactionStep::SetNodeAttrs {
+                    node,
+                    attrs: NodeAttrs::new(values).unwrap(),
+                }
             }
         }
     }

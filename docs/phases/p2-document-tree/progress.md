@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P2.2 DocumentSelection 与 session 升级已完成**
+当前切片：**P2.3 结构命令编排已完成**
 
-前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0 / P2.1 已合入（PR #21–#22）。
+前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0 / P2.1 / P2.2 已合入（PR #21–#23）。
 
 ## P2.0 Phase Contract 与阶段骨架
 
@@ -100,6 +100,33 @@ P1 回归 session.rs 19 个测试不改断言通过）
 tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
 ```
 
+## P2.3 结构命令编排
+
+- [x] 结构 EditIntent：`SplitBlock` / `JoinWithPrevious` / `TurnInto { kind }`
+- [x] AfterSelectionPolicy：`CaretAtSplitTail`（新块起点）/ `CaretAtJoinSeam`（接缝 offset）；TurnInto 走 `MapExisting`
+- [x] Enter 命令流 = `SplitBlock`（非折叠选区先删除再拆分，一笔 history）；split 后新块继承被拆 run 的 marks（Core SplitNode 语义）
+- [x] Backspace-at-start 解释为 `JoinWithPrevious`；第一块块首仍为 NoChange（P1 回归）
+- [x] Core `SetNodeKind`：保留 NodeId / attrs / content，校验 shape 与 parent/child kind；root 不可改 kind
+- [x] undo / redo 对 split / join / turn-into 还原 store、identity 与 recorded selection
+
+实现说明：
+
+```text
+TurnInto 只做同 shape 转换（Paragraph ↔ Heading ↔ CodeBlock）。把 inline 节点
+变成 Quote 等 container 由 Core 以 InvalidNodeContent 拒绝；wrapping / list
+留给 P2.4。JoinNodes 保留 first 的 kind，因此 heading 后的 paragraph 在块首
+Backspace 会并入 heading。
+```
+
+完成证据：
+
+```text
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets
+tools/check_source_size.py 与 tools/check_dependency_boundaries.py
+```
+
 ## P1 移交的 P2 前置依赖与归属
 
 P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置如下：
@@ -137,13 +164,21 @@ P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置
 - GPUI multi-block 采用"保留单块 view 能力 + 外层容器/焦点路由"的渐进替换，不重写渲染路径；所有 block 永远 mounted 只是过渡形态，公开 API 不得固化该假设（planning §10.1）。
 - IME composition 在 P2 停损为单块内启动；跨块 preedit 不做。
 
+### 2026-08-26（P2.3）
+
+- TurnInto 通过新的 Core `SetNodeKind` 保持 NodeId，而不是 RemoveNode + InsertNode。kind 变更不移动 position，after-selection 走 MapExisting。
+- P2.3 的 TurnInto 只覆盖同 shape 的 inline kind（Paragraph / Heading / CodeBlock）；Quote wrapping 与 list 闭环留给 P2.4。
+- Backspace 在块首且存在前一兄弟时由 session 解释为 JoinWithPrevious，前端不必另发结构 intent；显式 `JoinWithPrevious` 在没有前一兄弟时同样是 NoChange。
+- Enter 对应 `SplitBlock` intent。GPUI 按键绑定仍属 P2.5；本切片只保证 session 语义与纯逻辑测试。
+- Session history 的 redo 存 `inverse(inverse(T))`，不重放原始 SplitNode。否则 redo 会重新分配 tail NodeId，录下的 after-selection 与 JoinNodes inverse 都会指向已消失的 identity。
+
 ## P2 Phase Gate
 
 P2 只有在以下条件全部满足后才能完成：
 
-- [ ] SplitNode / JoinNodes 以 Core step 落地，mapping + inverse 满足随机不变量
-- [ ] DocumentSelection 成为 session 的 selection 形态，公开读取点全部校验
-- [ ] 结构命令 after-selection fallback 显式且可测试
+- [x] SplitNode / JoinNodes 以 Core step 落地，mapping + inverse 满足随机不变量
+- [x] DocumentSelection 成为 session 的 selection 形态，公开读取点全部校验
+- [x] 结构命令 after-selection fallback 显式且可测试
 - [ ] list 日常编辑闭环 undo 可还原
 - [ ] multi-block 渲染 + 跨块导航 + 跨块 selection 实机可用
 - [ ] minimal host-contract harness 完成 load / listen / persist 闭环

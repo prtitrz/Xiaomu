@@ -248,3 +248,44 @@ fn a_node_cannot_have_multiple_parents() {
         Error::MultipleNodeParents
     );
 }
+
+#[test]
+fn parent_of_walks_the_tree_and_treats_the_root_as_parentless() {
+    let mut builder = NodeStoreBuilder::new();
+    let inner = builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            NodeContent::empty_inline(),
+        )
+        .unwrap();
+    let quote = builder
+        .insert(
+            NodeKind::Quote,
+            NodeAttrs::empty(),
+            NodeContent::children([inner]),
+        )
+        .unwrap();
+    let sibling = builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            NodeContent::empty_inline(),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([quote, sibling]),
+        )
+        .unwrap();
+    let missing = builder.peek_next_id();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+    assert_eq!(document.parent_of(root), None);
+    assert_eq!(document.parent_of(quote), Some(root));
+    assert_eq!(document.parent_of(sibling), Some(root));
+    assert_eq!(document.parent_of(inner), Some(quote));
+    assert_eq!(document.parent_of(missing), None);
+}
