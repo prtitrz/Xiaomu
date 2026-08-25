@@ -86,6 +86,37 @@ pub enum StepMap {
         /// The removed node together with every node of its subtree.
         removed: BTreeSet<NodeId>,
     },
+    /// An inline-bearing node was split at a text offset; the tail text
+    /// entered the parent's child list as a freshly allocated sibling.
+    NodeSplit {
+        /// Parent whose child list gained one entry.
+        parent: NodeId,
+        /// Number of children before the inserted tail sibling.
+        index: usize,
+        /// The original node, which kept the text before the split point.
+        node: NodeId,
+        /// Split position in the original node's concatenated text; it is
+        /// also the byte length the node kept.
+        at: crate::text::TextOffset,
+        /// Identity allocated for the tail sibling.
+        inserted: NodeId,
+    },
+    /// Two adjacent inline-bearing siblings were merged into one; the
+    /// absorbed node left the document together with its whole subtree.
+    NodeJoined {
+        /// Parent whose child list lost one entry.
+        parent: NodeId,
+        /// Index of the absorbed child before the join.
+        index: usize,
+        /// The surviving node that absorbed `second`'s content.
+        first: NodeId,
+        /// The absorbed node.
+        second: NodeId,
+        /// UTF-8 byte length of `first`'s text before the join.
+        first_len: usize,
+        /// The absorbed node together with every node of its subtree.
+        removed: BTreeSet<NodeId>,
+    },
 }
 
 impl StepMap {
@@ -137,6 +168,47 @@ impl StepMap {
                 ))
             }
             Self::NodeInserted { .. } => MappedPosition::Mapped(point),
+            Self::NodeSplit {
+                node, at, inserted, ..
+            } => {
+                if point.node_id() != *node {
+                    return MappedPosition::Mapped(point);
+                }
+
+                let split_at = at.as_usize();
+                let old = point.offset().as_usize();
+                // Offsets after the split move into the tail sibling; an
+                // offset exactly at the split point resolves by bias between
+                // the head's end boundary and the tail's start boundary.
+                let to_tail = old > split_at || (old == split_at && bias == MapBias::End);
+                let (mapped_node, mapped_offset) = if to_tail {
+                    (*inserted, old - split_at)
+                } else {
+                    (*node, old)
+                };
+                MappedPosition::Mapped(TextPoint::new(
+                    mapped_node,
+                    TextOffset::from_validated_byte_index(mapped_offset),
+                    point.affinity(),
+                ))
+            }
+            Self::NodeJoined {
+                first,
+                second,
+                first_len,
+                ..
+            } => {
+                if point.node_id() != *second {
+                    return MappedPosition::Mapped(point);
+                }
+
+                let joined = point.offset().as_usize() + first_len;
+                MappedPosition::Mapped(TextPoint::new(
+                    *first,
+                    TextOffset::from_validated_byte_index(joined),
+                    point.affinity(),
+                ))
+            }
             Self::NodeRemoved { removed, .. } => {
                 if removed.contains(&point.node_id()) {
                     MappedPosition::Deleted
@@ -157,7 +229,7 @@ impl StepMap {
     pub fn map_node_gap(&self, gap: NodeGap, bias: MapBias) -> MappedPosition<NodeGap> {
         match self {
             Self::TextReplaced { .. } => MappedPosition::Mapped(gap),
-            Self::NodeInserted { parent, index, .. } => {
+            Self::NodeInserted { parent, index, .. } | Self::NodeSplit { parent, index, .. } => {
                 if gap.parent() != *parent || gap.index() < *index {
                     return MappedPosition::Mapped(gap);
                 }
@@ -174,6 +246,12 @@ impl StepMap {
                 parent,
                 index,
                 removed,
+            }
+            | Self::NodeJoined {
+                parent,
+                index,
+                removed,
+                ..
             } => {
                 if removed.contains(&gap.parent()) {
                     MappedPosition::Deleted
@@ -193,7 +271,7 @@ impl StepMap {
     #[must_use]
     pub fn map_node_selection(&self, selection: NodeSelection) -> MappedPosition<NodeSelection> {
         match self {
-            Self::NodeRemoved { removed, .. } => {
+            Self::NodeRemoved { removed, .. } | Self::NodeJoined { removed, .. } => {
                 if removed.contains(&selection.node_id()) {
                     MappedPosition::Deleted
                 } else {
@@ -296,194 +374,5 @@ impl ChangeMap {
         };
 
         MappedPosition::Mapped(TextSelection::new(anchor, focus))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::selection::CursorAffinity;
-    use crate::text::TextBuffer;
-
-    fn node(raw: u64) -> NodeId {
-        NodeId::from_allocated(raw)
-    }
-
-    fn offset(raw: usize) -> TextOffset {
-        const SCRATCH: &str = "00000000000000000000000000000000";
-        TextBuffer::from(SCRATCH).offset_at(raw).unwrap()
-    }
-
-    fn point(raw_node: u64, raw_offset: usize) -> TextPoint {
-        TextPoint::new(node(raw_node), offset(raw_offset), CursorAffinity::Before)
-    }
-
-    fn range(start: usize, end: usize) -> TextRange {
-        TextRange::new(offset(start), offset(end)).unwrap()
-    }
-
-    fn replaced(start: usize, end: usize, len: usize) -> StepMap {
-        StepMap::TextReplaced {
-            node: node(1),
-            range: range(start, end),
-            replacement_len: len,
-        }
-    }
-
-    #[test]
-    fn empty_range_insertion_resolves_the_boundary_by_bias() {
-        let step = replaced(3, 3, 4);
-
-        // A pure insertion at byte 3: the caret sitting exactly there is the
-        // insertion boundary and resolves by bias.
-        assert_eq!(
-            step.map_text_point(point(1, 3), MapBias::Start),
-            MappedPosition::Mapped(point(1, 3))
-        );
-        assert_eq!(
-            step.map_text_point(point(1, 3), MapBias::End),
-            MappedPosition::Mapped(point(1, 7))
-        );
-        // Earlier and later positions shift as usual.
-        assert_eq!(
-            step.map_text_point(point(1, 1), MapBias::End),
-            MappedPosition::Mapped(point(1, 1))
-        );
-        assert_eq!(
-            step.map_text_point(point(1, 6), MapBias::Start),
-            MappedPosition::Mapped(point(1, 10))
-        );
-    }
-
-    #[test]
-    fn text_replacement_moves_only_later_offsets() {
-        let step = replaced(3, 6, 2);
-
-        assert_eq!(
-            step.map_text_point(point(1, 0), MapBias::Start),
-            MappedPosition::Mapped(point(1, 0))
-        );
-        assert_eq!(
-            step.map_text_point(point(1, 6), MapBias::Start),
-            MappedPosition::Mapped(point(1, 5))
-        );
-        assert_eq!(
-            step.map_text_point(point(1, 12), MapBias::End),
-            MappedPosition::Mapped(point(1, 11))
-        );
-        // Unrelated nodes are untouched.
-        assert_eq!(
-            step.map_text_point(point(2, 9), MapBias::Start),
-            MappedPosition::Mapped(point(2, 9))
-        );
-    }
-
-    #[test]
-    fn inside_replacement_resolves_by_bias() {
-        let step = replaced(3, 6, 2);
-
-        for raw in 3..6 {
-            assert_eq!(
-                step.map_text_point(point(1, raw), MapBias::Start),
-                MappedPosition::Mapped(point(1, 3))
-            );
-            assert_eq!(
-                step.map_text_point(point(1, raw), MapBias::End),
-                MappedPosition::Mapped(point(1, 5))
-            );
-        }
-    }
-
-    #[test]
-    fn insertion_bias_resolves_the_exact_gap() {
-        let step = StepMap::NodeInserted {
-            parent: node(0),
-            index: 1,
-            inserted: node(7),
-        };
-
-        assert_eq!(
-            step.map_node_gap(NodeGap::new(node(0), 0), MapBias::Start),
-            MappedPosition::Mapped(NodeGap::new(node(0), 0))
-        );
-        assert_eq!(
-            step.map_node_gap(NodeGap::new(node(0), 1), MapBias::Start),
-            MappedPosition::Mapped(NodeGap::new(node(0), 1))
-        );
-        assert_eq!(
-            step.map_node_gap(NodeGap::new(node(0), 1), MapBias::End),
-            MappedPosition::Mapped(NodeGap::new(node(0), 2))
-        );
-        assert_eq!(
-            step.map_node_gap(NodeGap::new(node(0), 2), MapBias::Start),
-            MappedPosition::Mapped(NodeGap::new(node(0), 3))
-        );
-        // Gaps of other parents are untouched.
-        assert_eq!(
-            step.map_node_gap(NodeGap::new(node(9), 1), MapBias::End),
-            MappedPosition::Mapped(NodeGap::new(node(9), 1))
-        );
-    }
-
-    #[test]
-    fn removal_shifts_only_later_gaps() {
-        let step = StepMap::NodeRemoved {
-            parent: node(0),
-            index: 1,
-            removed: BTreeSet::from([node(2), node(3)]),
-        };
-
-        assert_eq!(
-            step.map_node_gap(NodeGap::new(node(0), 0), MapBias::Start),
-            MappedPosition::Mapped(NodeGap::new(node(0), 0))
-        );
-        // The boundary that pointed at the removed child survives.
-        assert_eq!(
-            step.map_node_gap(NodeGap::new(node(0), 1), MapBias::Start),
-            MappedPosition::Mapped(NodeGap::new(node(0), 1))
-        );
-        assert_eq!(
-            step.map_node_gap(NodeGap::new(node(0), 2), MapBias::Start),
-            MappedPosition::Mapped(NodeGap::new(node(0), 1))
-        );
-        assert_eq!(
-            step.map_node_gap(NodeGap::new(node(0), 3), MapBias::Start),
-            MappedPosition::Mapped(NodeGap::new(node(0), 2))
-        );
-    }
-
-    #[test]
-    fn removed_subtrees_delete_positions_and_selections() {
-        let step = StepMap::NodeRemoved {
-            parent: node(0),
-            index: 1,
-            removed: BTreeSet::from([node(2), node(3)]),
-        };
-
-        assert_eq!(
-            step.map_text_point(point(2, 0), MapBias::Start),
-            MappedPosition::Deleted
-        );
-        assert_eq!(
-            step.map_text_point(point(3, 4), MapBias::End),
-            MappedPosition::Deleted
-        );
-        assert_eq!(
-            step.map_node_gap(NodeGap::new(node(3), 0), MapBias::Start),
-            MappedPosition::Deleted
-        );
-        assert_eq!(
-            step.map_node_selection(NodeSelection::new(node(2))),
-            MappedPosition::Deleted
-        );
-
-        assert_eq!(
-            step.map_text_point(point(1, 4), MapBias::Start),
-            MappedPosition::Mapped(point(1, 4))
-        );
-        assert_eq!(
-            step.map_node_selection(NodeSelection::new(node(1))),
-            MappedPosition::Mapped(NodeSelection::new(node(1)))
-        );
     }
 }

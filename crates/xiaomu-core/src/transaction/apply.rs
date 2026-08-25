@@ -8,10 +8,11 @@
 use std::collections::{BTreeSet, VecDeque};
 
 use crate::document::{
-    InlineContent, Node, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStore, XiaomuDocument,
+    InlineContent, Node, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStore, TextRun,
+    XiaomuDocument,
 };
 use crate::mapping::{ChangeMap, StepMap};
-use crate::text::TextRange;
+use crate::text::{TextOffset, TextRange};
 use crate::{Error, Result};
 
 use super::inline;
@@ -105,6 +106,8 @@ impl ApplyContext {
                 range,
                 mark_kind,
             } => self.apply_mark_change(*node, *range, MarkChange::Remove(*mark_kind)),
+            TransactionStep::SplitNode { node, at } => self.apply_split_node(*node, *at),
+            TransactionStep::JoinNodes { first, second } => self.apply_join_nodes(*first, *second),
         }
     }
 
@@ -297,6 +300,170 @@ impl ApplyContext {
             root: node,
             nodes: payloads,
         }];
+        Ok((Some(step_map), inverse))
+    }
+
+    /// Splits an inline-bearing node at `at`; the text from `at` onward
+    /// moves into a freshly allocated sibling inserted right after it.
+    fn apply_split_node(
+        &mut self,
+        node: NodeId,
+        at: TextOffset,
+    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+        let content = self.inline_content(node)?;
+        content.validate_offset(at)?;
+
+        let split_at = at.as_usize();
+        let mut head_runs = Vec::new();
+        let mut tail_runs = Vec::new();
+        let mut cursor = 0usize;
+        for run in content.runs() {
+            let run_start = cursor;
+            let run_end = run_start + run.len_bytes();
+            cursor = run_end;
+
+            let marks = run.marks().clone();
+            let text = run.text().as_str();
+            if run_end <= split_at {
+                head_runs.push(TextRun::new(text.to_owned(), marks)?);
+            } else if run_start >= split_at {
+                tail_runs.push(TextRun::new(text.to_owned(), marks)?);
+            } else {
+                // Splitting inside a run keeps both halves on that run's
+                // marks; both slices are non-empty by construction.
+                head_runs.push(TextRun::new(
+                    text[..split_at - run_start].to_owned(),
+                    marks.clone(),
+                )?);
+                tail_runs.push(TextRun::new(
+                    text[split_at - run_start..].to_owned(),
+                    marks,
+                )?);
+            }
+        }
+
+        let parent = self.find_parent(node)?;
+        let mut children = self.children(parent)?;
+        let index = children
+            .iter()
+            .position(|child| *child == node)
+            .ok_or(Error::InvalidTransaction)?;
+        let kind = self
+            .store
+            .get(node)
+            .ok_or(Error::UnknownNode)?
+            .kind()
+            .clone();
+        let attrs = self.attrs_of(node)?;
+
+        let tail_id = self.allocate_node(
+            kind,
+            attrs.clone(),
+            NodeContent::Inline(InlineContent::new(tail_runs)?),
+        )?;
+        self.rewrite_node(
+            node,
+            attrs,
+            NodeContent::Inline(InlineContent::new(head_runs)?),
+        )?;
+        children.insert(index + 1, tail_id);
+        self.rewrite_node(
+            parent,
+            self.attrs_of(parent)?,
+            NodeContent::children(children),
+        )?;
+
+        let step_map = StepMap::NodeSplit {
+            parent,
+            index: index + 1,
+            node,
+            at,
+            inserted: tail_id,
+        };
+        // Joining the two siblings back re-merges the runs normalization
+        // had to cut apart, so the store becomes exactly equal again.
+        let inverse = vec![TransactionStep::JoinNodes {
+            first: node,
+            second: tail_id,
+        }];
+        Ok((Some(step_map), inverse))
+    }
+
+    /// Merges `second` into its immediately preceding sibling `first`.
+    fn apply_join_nodes(
+        &mut self,
+        first: NodeId,
+        second: NodeId,
+    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+        // Unknown identities surface as `UnknownNode`; structural problems
+        // (same node, non-siblings) surface as `InvalidTransaction`.
+        let first_content = self.inline_content(first)?;
+        let second_content = self.inline_content(second)?;
+        if first == second || self.store.get(first).is_none() {
+            return Err(Error::InvalidTransaction);
+        }
+        let parent = self.find_parent(first)?;
+        let mut children = self.children(parent)?;
+        let first_index = children
+            .iter()
+            .position(|child| *child == first)
+            .ok_or(Error::InvalidTransaction)?;
+        if children.get(first_index + 1) != Some(&second) {
+            return Err(Error::InvalidTransaction);
+        }
+
+        let first_len = first_content.len_bytes();
+        let merged_runs = first_content
+            .runs()
+            .iter()
+            .cloned()
+            .chain(second_content.runs().iter().cloned());
+        let merged_len = InlineContent::new(merged_runs.clone())?.len_bytes();
+        self.rewrite_node(
+            first,
+            self.attrs_of(first)?,
+            NodeContent::Inline(InlineContent::new(merged_runs)?),
+        )?;
+
+        let subtree = self.collect_subtree(second);
+        let payloads: Vec<Node> = subtree
+            .iter()
+            .filter_map(|id| self.store.get(*id).cloned())
+            .collect();
+        children.remove(first_index + 1);
+        self.rewrite_node(
+            parent,
+            self.attrs_of(parent)?,
+            NodeContent::children(children),
+        )?;
+        self.store = self.store.without_nodes(&subtree);
+
+        let step_map = StepMap::NodeJoined {
+            parent,
+            index: first_index + 1,
+            first,
+            second,
+            first_len,
+            removed: subtree,
+        };
+        let inverse = vec![
+            // Deleting the appended span leaves exactly the original runs
+            // of `first`, which were normalized before the join.
+            TransactionStep::ReplaceText {
+                node: first,
+                range: TextRange::new(
+                    TextOffset::from_validated_byte_index(first_len),
+                    TextOffset::from_validated_byte_index(merged_len),
+                )?,
+                replacement: String::new(),
+            },
+            TransactionStep::RestoreSubtree {
+                parent,
+                index: first_index + 1,
+                root: second,
+                nodes: payloads,
+            },
+        ];
         Ok((Some(step_map), inverse))
     }
 

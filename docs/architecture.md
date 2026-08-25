@@ -201,6 +201,8 @@ TransactionStep：
     SetNodeAttrs
     AddMark
     RemoveMark
+    SplitNode
+    JoinNodes
 ```
 
 `Transaction::apply_with_changes(&XiaomuDocument) -> Result<AppliedTransaction>` 是原子的：steps 顺序应用在内部中间 store 上，最终状态经过 full-tree validation 才返回新 snapshot 和 mapping 数据；任一 step 失败则整体失败且原 snapshot 不变。`Transaction::apply` 是只要新 snapshot 的便捷入口。每次 apply 推进 `DocumentRevision`。
@@ -239,6 +241,8 @@ removed subtree：目标位于被删子树内的 position / selection 显式 Del
 
 `ChangeMap` 没有公开构造入口。映射是纯坐标算术，不校验 snapshot；映射结果与任何 stale 坐标一样需要针对目标 snapshot 重新校验。属性与 mark steps 不移动 position，不产生 step map 条目。`NodeInserted` 的 step map 携带新分配的 `NodeId`，插入后的结构定位不需要重新猜测 identity。
 
+结构编辑（P2.1）引入两个额外 step map 变体：`NodeSplit`（inline 节点在文本 offset 处拆分，tail 文本进入新分配的兄弟节点；split 点之前的 offset 留在原节点，之后的 offset 平移进 tail，恰好落在 split 点的 offset 由 MapBias 解析；父级 child list 行为同 `NodeInserted`）与 `NodeJoined`（相邻 inline 兄弟合并，被吸收节点连同子树离开文档；其内 offset 平移到存活节点的接缝之后，child list 与删除语义一致）。
+
 `TextSelection` 的映射采用向外 bias：两端解析向 replacement 外侧，覆盖被替换内容的 selection 仍覆盖 replacement；collapsed selection 保持 collapsed。
 
 ### Inverse 与 Undo Round-trip
@@ -252,6 +256,8 @@ RemoveMark    逆 = 按旧 piece 恢复被移除的 mark
 InsertNode    逆 = RemoveNode（新分配的节点）
 RemoveNode    逆 = RestoreSubtree（原 NodeId 与 payload 整体回插）
 SetNodeAttrs  逆 = 换回旧 attrs
+SplitNode     逆 = JoinNodes（tail 兄弟并回头部，run 归一化精确还原）
+JoinNodes     逆 = 删除追加文本的 ReplaceText + RestoreSubtree（原 NodeId 整体回插）
 ```
 
 `ReplaceText` 的逆用与 `replace_text` 完全相同的继承规则（首个 end 触及 `range.start` 的 run；run 边界解析到前一个 run）计算需要剥离的 marks，因此跨 run 替换、run 边界编辑与纯删除都能精确还原规范化后的 text / marks。

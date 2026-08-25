@@ -63,6 +63,16 @@ fn text_of(document: &XiaomuDocument, node: xiaomu_core::document::NodeId) -> St
         .collect()
 }
 
+/// Returns the second paragraph of [`fixture`] documents.
+fn second_of(document: &XiaomuDocument) -> xiaomu_core::document::NodeId {
+    document
+        .node(document.root())
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap()[1]
+}
+
 #[test]
 fn replace_text_edits_and_bumps_revision() {
     let (document, [first, _]) = fixture();
@@ -413,4 +423,290 @@ fn empty_transaction_still_bumps_revision_and_revalidates() {
     assert!(next.validate().is_ok());
     assert_eq!(next.revision().as_u64(), document.revision().as_u64() + 1);
     assert_eq!(next.node_count(), document.node_count());
+}
+
+#[test]
+fn split_node_moves_tail_text_into_a_new_sibling() {
+    let (document, [first, _]) = fixture();
+
+    let transaction =
+        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::SplitNode {
+            node: first,
+            at: offset_at(6),
+        });
+    let applied = transaction.apply_with_changes(&document).unwrap();
+    let next = applied.document();
+    assert!(next.validate().is_ok());
+
+    // The original node keeps the head text; a sibling with the same kind
+    // and attributes follows it in the parent's child list.
+    assert_eq!(text_of(next, first), "你好");
+    let children = next
+        .node(next.root())
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap();
+    assert_eq!(children.len(), 3);
+    assert_eq!(children[0], first);
+
+    let tail = children[1];
+    assert_eq!(text_of(next, tail), "世界");
+    assert_eq!(next.node(tail).unwrap().kind(), &NodeKind::Paragraph);
+}
+
+#[test]
+fn split_node_at_run_boundary_keeps_runs_whole() {
+    // bold("你好") + plain("tail"): splitting exactly at byte 6 must leave
+    // each run on one side, not inherit marks across the boundary.
+    let mut builder = NodeStoreBuilder::new();
+    let paragraph = builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            NodeContent::Inline(
+                InlineContent::new([
+                    TextRun::new("你好", MarkSet::new([Mark::Bold]).unwrap()).unwrap(),
+                    TextRun::new("tail", MarkSet::empty()).unwrap(),
+                ])
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([paragraph]),
+        )
+        .unwrap();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+    let transaction =
+        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::SplitNode {
+            node: paragraph,
+            at: offset_at(6),
+        });
+    let applied = transaction.apply_with_changes(&document).unwrap();
+    let next = applied.document();
+
+    let bold_flags = |doc: &XiaomuDocument, node| -> Vec<(String, bool)> {
+        doc.node(node)
+            .unwrap()
+            .content()
+            .as_inline()
+            .unwrap()
+            .runs()
+            .iter()
+            .map(|run| {
+                (
+                    run.text().as_str().to_owned(),
+                    run.marks().as_slice().contains(&Mark::Bold),
+                )
+            })
+            .collect()
+    };
+
+    let children = next
+        .node(next.root())
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap();
+    assert_eq!(
+        bold_flags(next, children[0]),
+        vec![("你好".to_owned(), true)]
+    );
+    assert_eq!(
+        bold_flags(next, children[1]),
+        vec![("tail".to_owned(), false)]
+    );
+
+    // Splitting inside the bold run gives both halves of THAT RUN bold
+    // marks; other runs keep their own marks.
+    let inner =
+        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::SplitNode {
+            node: paragraph,
+            at: offset_at(3),
+        });
+    let inner = inner.apply(&document).unwrap();
+    let children = inner
+        .node(inner.root())
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap();
+    assert_eq!(text_of(&inner, children[0]), "你");
+    assert_eq!(text_of(&inner, children[1]), "好tail");
+    let tail_runs = bold_flags(&inner, children[1]);
+    assert_eq!(
+        tail_runs,
+        vec![("好".to_owned(), true), ("tail".to_owned(), false)]
+    );
+}
+
+#[test]
+fn split_node_rejects_invalid_targets_and_offsets() {
+    let (document, [first, _]) = fixture();
+
+    // Offsets must be UTF-8 boundaries of the concatenated text.
+    let mid_scalar =
+        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::SplitNode {
+            node: first,
+            at: offset_at(1),
+        });
+    assert!(matches!(
+        mid_scalar.apply(&document),
+        Err(Error::InvalidTextBoundary { .. })
+    ));
+
+    // Out-of-bounds offsets fail too.
+    let out_of_bounds_offset = xiaomu_core::text::TextBuffer::from("0".repeat(100))
+        .offset_at(99)
+        .unwrap();
+    let out_of_bounds =
+        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::SplitNode {
+            node: first,
+            at: out_of_bounds_offset,
+        });
+    assert_eq!(
+        out_of_bounds.apply(&document).unwrap_err(),
+        Error::TextOutOfBounds {
+            offset: 99,
+            len: 12
+        }
+    );
+
+    // Unknown nodes fail atomically: a previously valid NodeId becomes
+    // unknown once its node is deleted.
+    let removal =
+        Transaction::new(TransactionOrigin::System).with_step(TransactionStep::RemoveNode {
+            node: second_of(&document),
+        });
+    let next = removal.apply(&document).unwrap();
+    let unknown =
+        Transaction::new(TransactionOrigin::System).with_step(TransactionStep::SplitNode {
+            node: second_of(&document),
+            at: offset_at(0),
+        });
+    assert_eq!(unknown.apply(&next).unwrap_err(), Error::UnknownNode);
+
+    // Structural containers are not inline-bearing, so they cannot split.
+    let mut builder = NodeStoreBuilder::new();
+    let quote = builder
+        .insert(
+            NodeKind::Quote,
+            NodeAttrs::empty(),
+            NodeContent::children([]),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([quote]),
+        )
+        .unwrap();
+    let container_document = XiaomuDocument::new(root, builder.finish()).unwrap();
+    let on_container =
+        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::SplitNode {
+            node: quote,
+            at: offset_at(0),
+        });
+    assert_eq!(
+        on_container.apply(&container_document).unwrap_err(),
+        Error::InvalidTransaction
+    );
+
+    // None of the failures changed anything.
+    assert!(document.validate().is_ok());
+}
+
+#[test]
+fn join_nodes_merges_adjacent_siblings_into_the_first() {
+    let (document, [first, second]) = fixture();
+
+    let transaction = Transaction::new(TransactionOrigin::UserInput)
+        .with_step(TransactionStep::JoinNodes { first, second });
+    let applied = transaction.apply_with_changes(&document).unwrap();
+    let next = applied.document();
+
+    assert!(next.validate().is_ok());
+    assert!(next.node(first).is_some());
+    assert!(next.node(second).is_none());
+    assert_eq!(text_of(next, first), "你好世界second");
+
+    let children = next
+        .node(next.root())
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0], first);
+
+    // Mapping moves positions of the absorbed node into the survivor.
+    use xiaomu_core::mapping::{MapBias, MappedPosition};
+    use xiaomu_core::selection::{CursorAffinity, NodeSelection, TextPoint};
+    let mapped_point = TextPoint::new(second, offset_at(2), CursorAffinity::Before);
+    assert_eq!(
+        applied
+            .changes()
+            .map_text_point(mapped_point, MapBias::Start),
+        MappedPosition::Mapped(TextPoint::new(first, offset_at(14), CursorAffinity::Before))
+    );
+    assert_eq!(
+        applied
+            .changes()
+            .map_node_selection(NodeSelection::new(second)),
+        MappedPosition::Deleted
+    );
+}
+
+#[test]
+fn join_nodes_requires_adjacent_inline_siblings() {
+    let (document, [first, second]) = fixture();
+
+    // Reversed order is rejected: `second` must immediately follow `first`.
+    let reversed =
+        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::JoinNodes {
+            first: second,
+            second: first,
+        });
+    assert_eq!(
+        reversed.apply(&document).unwrap_err(),
+        Error::InvalidTransaction
+    );
+
+    // Non-siblings are rejected even when both identities exist.
+    let mut builder = NodeStoreBuilder::new();
+    let first_copy = inline_node(&mut builder, "one", MarkSet::empty());
+    let second_copy = inline_node(&mut builder, "two", MarkSet::empty());
+    let nested = inline_node(&mut builder, "nested", MarkSet::empty());
+    let quote = builder
+        .insert(
+            NodeKind::Quote,
+            NodeAttrs::empty(),
+            NodeContent::children([nested]),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([first_copy, second_copy, quote]),
+        )
+        .unwrap();
+    let sibling_document = XiaomuDocument::new(root, builder.finish()).unwrap();
+    let cross_parent =
+        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::JoinNodes {
+            first: first_copy,
+            second: nested,
+        });
+    assert_eq!(
+        cross_parent.apply(&sibling_document).unwrap_err(),
+        Error::InvalidTransaction
+    );
+
+    assert!(document.validate().is_ok());
 }
