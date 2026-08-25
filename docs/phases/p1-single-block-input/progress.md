@@ -1,6 +1,6 @@
 # P1 Single Block Native Input 进度
 
-状态：进行中
+状态：已完成（Phase Gate 全部满足）
 
 本文档只记录 P1 的执行状态和验证证据。长期架构事实放在 `docs/architecture.md`，P1 设计放在 `design.md`，顶层路线以 `docs/planning.md` 为准。
 
@@ -15,11 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P1.5 Copy/Paste 与基础 marks 已完成；Windows 实机 Gate 全通过**
+当前切片：**P1 全部切片已完成并合并；Phase Gate 关闭**
 
-当前分支：`feat/p1-clipboard-marks`
-
-前置状态：P0 已完成（PR #13）；P1.0 / P1.1 / P1.2 / P1.3 已合并（PR #14–#17）。
+前置状态：P0 已完成（PR #13）；P1.0–P1.5 已全部合并（PR #14–#19）。
 
 ## P1.0 Phase Contract 与阶段骨架
 
@@ -254,7 +252,7 @@ P1.4 自动 Gate 与实机 Gate 均满足，可以合并。
 
 ## P1.5 Copy/Paste 与基础 marks
 
-状态：进行中
+状态：已完成
 
 - [x] runtime 纯文本 clipboard seam：`TextClipboard` trait + `normalize_paste_text`
 - [x] `DocumentSession::selected_text`（跨 run 选区提取纯文本，collapsed 返回 None）
@@ -391,12 +389,14 @@ P1 只有在以下条件全部满足后才能完成：
 - [x] intent-specific SelectionUpdate 正确处理插入、替换、删除与 mark
 - [x] Deleted update 原子失败；no-op 不增加 revision / notification / history
 - [x] undo 后新编辑清空 redo
-- [ ] IME composition 不触碰 canonical document，commit / cancel 语义正确
-- [ ] 单 block 键盘编辑 + hit-test + clipboard + 基础 marks 实机可用
-- [ ] 真实 IME（Microsoft Pinyin）+ selection + undo 手动 Gate 通过
+- [x] IME composition 不触碰 canonical document，commit / cancel 语义正确（P1.4）
+- [x] 单 block 键盘编辑 + hit-test + clipboard + 基础 marks 实机可用（P1.3 + P1.5 Windows 实机 Gate）
+- [x] 真实 IME（Microsoft Pinyin）+ selection + undo 手动 Gate 通过（P1.4 / P1.5 Windows 实机矩阵）
 - [x] session 纯逻辑测试在 CI 无显示器环境全绿
-- [ ] 架构文档与实现一致
-- [ ] P1 最终 `CI Success` 全绿
+- [x] 架构文档与实现一致（architecture.md 已同步 P1.4 IME / P1.5 clipboard-marks 事实）
+- [x] P1 最终 `CI Success` 全绿（docs/p1-close PR 远端 CI 为准）
+
+P1 关闭说明：Phase Gate 各项的完成证据分别见上方 P1.3 / P1.4 / P1.5 小节；最后一项以本收尾 PR 的远端 CI 运行为准，合入即视为 P1 正式关闭。后续进入 P2 Document Tree / Structural Edit（planning §16）。
 
 ## Regression Log
 
