@@ -11,7 +11,7 @@ use gpui::{
 
 use xiaomu_core::document::{NodeId, XiaomuDocument};
 use xiaomu_core::selection::TextSelection;
-use xiaomu_runtime::session::DocumentSession;
+use xiaomu_runtime::session::{DocumentSelection, DocumentSession};
 
 use crate::block_view::{
     Backspace, ClipboardCopy, ClipboardCut, ClipboardPaste, Delete, End, Home, Left, ParagraphView,
@@ -29,7 +29,7 @@ pub fn run_single_block_editor(
     node: NodeId,
     selection: TextSelection,
 ) -> Result<(), xiaomu_runtime::session::SessionError> {
-    let session = DocumentSession::new(document, selection)?;
+    let session = DocumentSession::new(document, DocumentSelection::text(selection))?;
 
     Application::new().run(move |cx: &mut App| {
         // Quit when the last window closes so the harness terminates cleanly.

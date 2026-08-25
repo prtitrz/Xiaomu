@@ -1,6 +1,6 @@
 //! Basic undo/redo stack: one entry per committed transaction.
 
-use xiaomu_core::selection::TextSelection;
+use super::selection::DocumentSelection;
 use xiaomu_core::transaction::Transaction;
 
 /// One undo unit: the redo/undo transaction pair plus the selections
@@ -8,8 +8,8 @@ use xiaomu_core::transaction::Transaction;
 pub(crate) struct HistoryEntry {
     pub(crate) redo: Transaction,
     pub(crate) undo: Transaction,
-    pub(crate) before_selection: TextSelection,
-    pub(crate) after_selection: TextSelection,
+    pub(crate) before_selection: DocumentSelection,
+    pub(crate) after_selection: DocumentSelection,
 }
 
 /// Basic undo/redo stacks for one session.

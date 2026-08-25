@@ -269,11 +269,18 @@ impl ParagraphView {
     }
 
     fn ordered_range(&self) -> Option<TextRange> {
-        self.session.selection().ordered_range().ok()
+        self.session
+            .text_selection()
+            .and_then(|selection| selection.ordered_range().ok())
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
-        let intent = if self.session.selection().is_collapsed() {
+        let collapsed = self
+            .session
+            .text_selection()
+            .map(|selection| selection.is_collapsed())
+            .unwrap_or(false);
+        let intent = if collapsed {
             EditIntent::MoveCaret {
                 caret_move: CaretMove::Backward,
                 extend_selection: false,
@@ -290,7 +297,12 @@ impl ParagraphView {
     }
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
-        let intent = if self.session.selection().is_collapsed() {
+        let collapsed = self
+            .session
+            .text_selection()
+            .map(|selection| selection.is_collapsed())
+            .unwrap_or(false);
+        let intent = if collapsed {
             EditIntent::MoveCaret {
                 caret_move: CaretMove::Forward,
                 extend_selection: false,

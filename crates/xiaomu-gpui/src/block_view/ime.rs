@@ -121,7 +121,9 @@ impl ParagraphView {
             };
 
             self.composition = Some(CompositionState::begin(
-                self.session.selection(),
+                self.session
+                    .text_selection()
+                    .expect("single-block session selection"),
                 start.as_usize()..end.as_usize(),
                 new_text,
                 new_selected_range,
