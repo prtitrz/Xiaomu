@@ -14,8 +14,9 @@ use xiaomu_core::selection::TextSelection;
 use xiaomu_runtime::session::DocumentSession;
 
 use crate::block_view::{
-    Backspace, Delete, End, Home, Left, ParagraphView, Redo, Right, SelectAll, SelectEnd,
-    SelectHome, SelectLeft, SelectRight, Undo,
+    Backspace, ClipboardCopy, ClipboardCut, ClipboardPaste, Delete, End, Home, Left, ParagraphView,
+    Redo, Right, SelectAll, SelectEnd, SelectHome, SelectLeft, SelectRight, ToggleBold, ToggleCode,
+    ToggleItalic, ToggleStrike, ToggleUnderline, Undo,
 };
 
 /// Runs a single-paragraph editor window over `document`.
@@ -52,6 +53,22 @@ pub fn run_single_block_editor(
             KeyBinding::new("shift-end", SelectEnd, None),
             KeyBinding::new("cmd-a", SelectAll, None),
             KeyBinding::new("ctrl-a", SelectAll, None),
+            KeyBinding::new("cmd-c", ClipboardCopy, None),
+            KeyBinding::new("ctrl-c", ClipboardCopy, None),
+            KeyBinding::new("cmd-x", ClipboardCut, None),
+            KeyBinding::new("ctrl-x", ClipboardCut, None),
+            KeyBinding::new("cmd-v", ClipboardPaste, None),
+            KeyBinding::new("ctrl-v", ClipboardPaste, None),
+            KeyBinding::new("cmd-b", ToggleBold, None),
+            KeyBinding::new("ctrl-b", ToggleBold, None),
+            KeyBinding::new("cmd-i", ToggleItalic, None),
+            KeyBinding::new("ctrl-i", ToggleItalic, None),
+            KeyBinding::new("cmd-e", ToggleCode, None),
+            KeyBinding::new("ctrl-e", ToggleCode, None),
+            KeyBinding::new("cmd-u", ToggleUnderline, None),
+            KeyBinding::new("ctrl-u", ToggleUnderline, None),
+            KeyBinding::new("cmd-shift-x", ToggleStrike, None),
+            KeyBinding::new("ctrl-shift-x", ToggleStrike, None),
             KeyBinding::new("cmd-z", Undo, None),
             KeyBinding::new("ctrl-z", Undo, None),
             KeyBinding::new("cmd-shift-z", Redo, None),

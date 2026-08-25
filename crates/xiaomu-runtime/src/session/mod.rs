@@ -71,6 +71,36 @@ impl DocumentSession {
         self.selection
     }
 
+    /// Returns the selected text as plain text, or `None` for a collapsed
+    /// selection. Runs are concatenated in logical order; marks do not
+    /// participate (plain-text clipboard, P1 scope).
+    #[must_use]
+    pub fn selected_text(&self) -> Option<String> {
+        if self.selection.is_collapsed() {
+            return None;
+        }
+        let range = self.selection.ordered_range().ok()?;
+        let inline = self.inline_of(self.selection.focus().node_id()).ok()?;
+
+        let mut selected = String::new();
+        let mut cursor = 0usize;
+        for run in inline.runs() {
+            let run_start = cursor;
+            let run_end = run_start + run.len_bytes();
+            cursor = run_end;
+
+            let overlap_start = range.start().as_usize().max(run_start);
+            let overlap_end = range.end().as_usize().min(run_end);
+            if overlap_start < overlap_end {
+                selected.push_str(
+                    &run.text().as_str()[overlap_start - run_start..overlap_end - run_start],
+                );
+            }
+        }
+
+        Some(selected)
+    }
+
     /// Returns the `(undo, redo)` history depths.
     #[must_use]
     pub fn history_depths(&self) -> (usize, usize) {

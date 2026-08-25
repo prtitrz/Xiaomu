@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P1.4 IME composition 已完成；自动 Gate 与 Windows Microsoft Pinyin 实机矩阵全通过**
+当前切片：**P1.5 Copy/Paste 与基础 marks 已完成；Windows 实机 Gate 全通过**
 
-当前分支：`feat/p1-ime-composition`
+当前分支：`feat/p1-clipboard-marks`
 
 前置状态：P0 已完成（PR #13）；P1.0 / P1.1 / P1.2 / P1.3 已合并（PR #14–#17）。
 
@@ -252,6 +252,58 @@ Windows Microsoft Pinyin 手动矩阵全通过（连续 composition、候选提�
 P1.4 自动 Gate 与实机 Gate 均满足，可以合并。
 ```
 
+## P1.5 Copy/Paste 与基础 marks
+
+状态：进行中
+
+- [x] runtime 纯文本 clipboard seam：`TextClipboard` trait + `normalize_paste_text`
+- [x] `DocumentSession::selected_text`（跨 run 选区提取纯文本，collapsed 返回 None）
+- [x] GPUI 平台绑定 `PlatformClipboard`（非文本剪贴板内容读为 None）
+- [x] Copy / Cut / Paste 动作 + macOS / Windows 双键位绑定
+- [x] Bold / Italic / Code / Underline / Strike 切换键位（复用 ToggleMark intent）
+- [x] Code mark 视觉映射（半透明背景色块）；Link 留待后续（需属性编辑 UI）
+- [x] Windows 实机 Gate：中英文复制粘贴 + mark 切换 + undo/redo 闭环
+- [x] 实机回归修复：Esc 取消 composition 后键盘编辑被锁死（见 Regression Log）
+
+实现说明：
+
+```text
+seam 形态：xiaomu-runtime::clipboard 只定义 trait 与归一化策略，不接触平台 API；
+gxui 侧 PlatformClipboard<'a>(&'a App) 实现 trait，生命周期限于动作处理调用内。
+copy/cut 取 session 选区纯文本（selected_text 按 run 重叠拼接，marks 不参与）；
+paste 读入文本经 normalize_paste_text（CRLF/CR/LF → 单个空格，paragraph inline
+text 不能含换行；多 block 粘贴语义留 P2+），空文本直接忽略、不清除选区。
+cut = copy + EditIntent::Delete（非折叠选区整段删除），paste = InsertText intent，
+mark 切换 = 复用 P1.2 的 ToggleMark intent（全带则移除否则添加，MapExisting 保选区）：
+三者各为一笔 transaction、一条 history entry，满足“paste / mark 各为一个 undo 单元”。
+composition 期间全部 clipboard / mark 动作被忽略（与既有编辑动作同一停损策略）。
+Code 视觉映射用 TextRun.background_color 半透明色块而非换字体族：避免跨平台
+monospace 字体名解析差异，且保持选区高亮可见。action 命名 Clipboard* 避免
+与 std::marker::Copy 撞名。
+block_view/actions.rs 从 mod.rs 分出（mod.rs 已在 review 区间，新增处理逻辑独立成文件）。
+```
+
+完成证据（自动部分）：
+
+```text
+分支 feat/p1-clipboard-marks：
+cargo fmt --all -- --check 全绿
+cargo clippy --workspace --all-targets -- -D warnings 全绿
+cargo test --workspace 全绿（新增 clipboard 归一化 2 个单元测试 +
+session selected_text 2 个集成测试，19 个 test target）
+tools/check_source_size.py ok（block_view/mod.rs 544 行，review 区间提示）
+tools/check_dependency_boundaries.py ok
+```
+
+实机验证（Windows，用户实测，已关闭）：
+
+```text
+中英文复制粘贴闭环正常；mark 切换（含 undo/redo 单元语义）正常。
+实测中发现并当场修复一个 P1.4 回归（Esc 取消 composition 后方向键失效，
+根因与修复见 Regression Log），修复后 Esc 无需点击即可继续键盘编辑、
+重新输入拼音从头组词、光标回到输入前位置。P1.5 自动 Gate 与实机 Gate 均满足，可以合并。
+```
+
 ## P0 移交的 P1 前置依赖与归属
 
 P0.7 在 progress.md 记录了 7 项"进入 P1 前需要明确归属"的依赖，处置如下：
@@ -282,6 +334,15 @@ P0.7 在 progress.md 记录了 7 项"进入 P1 前需要明确归属"的依赖�
 ## 决策记录
 
 这里只记录影响 P1 执行的决定。长期且难逆转的架构理由应进入 ADR。
+
+### 2026-08-24（P1.5）
+
+- clipboard seam 定为 runtime `TextClipboard` trait（write_text / read_text），平台绑定在 GPUI adapter；不引入通用 ClipboardService registry（宿主 capability service 属后续 Host Contract 阶段）。
+- 粘贴文本中的行断符折叠为单个空格：paragraph inline text 不能含换行，多 block 粘贴语义留到 P2+ document-level 编辑；空剪贴板文本不清除选区。
+- GPUI action 命名用 `ClipboardCopy` / `ClipboardCut` / `ClipboardPaste`，避免与 `std::marker::Copy` 撞名。
+- Code mark 视觉映射用半透明背景色块而非 monospace 字体族切换：跨平台字体名解析差异大，且色块不影响选区高亮可见性；Link 留待有属性编辑 UI 的切片。
+- cut = copy + Delete intent、paste = InsertText intent、mark 切换复用 ToggleMark：各为一笔 transaction、一条 history entry，无需新增 undo 机制。
+- composition 期间忽略全部 clipboard / mark 动作，沿用 P1.4 停损策略（canonical 编辑会破坏 base range）。
 
 ### 2026-08-23（P1.0）
 
@@ -338,6 +399,10 @@ P1 只有在以下条件全部满足后才能完成：
 - [ ] P1 最终 `CI Success` 全绿
 
 ## Regression Log
+
+- 2026-08-24（P1.5 实机，Windows）：拼音 composition 中按 Esc 取消后，preedit 正确消失，但方向键 / 键盘编辑失效，需再点击一次才恢复。
+  根因：微软拼音的取消以空串 GCS_COMPSTR 到达 marked-text 路径（gpui 0.2.2 events.rs L674），旧实现把它当作普通 preedit update，CompositionState 残留为 composing 状态，所有编辑动作被 composing 停损分支吞掉；点击因 on_mouse_down 显式 cancel 才恢复。
+  修复：新增 resolve_preedit_update 决策——活跃 composition 收到空 marked text 一律视为取消并恢复 base selection；空 payload 也不能启动新 composition。决策逻辑为纯函数并有单元测试；实机验收：Esc 后无需点击即可继续键盘编辑与再次输入。
 
 - 2026-08-22（P1.3 实机）：macOS 开中文 IME 输入时拼音字符粘连、候选提交后拼音残留。
   根因是 P1.3 停损实现把 `replace_and_mark_text_in_range`（setMarkedText）立即按普通输入提交，
