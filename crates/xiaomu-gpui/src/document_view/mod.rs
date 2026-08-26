@@ -107,9 +107,32 @@ impl DocumentView {
                     self.route_focus(window, cx);
                 } else if actions::is_structural(&intent) {
                     // Structural no-ops are position-dependent (first item,
-                    // top-level item); surface them so real-machine testing
+                    // top-level item); surface them together with where the
+                    // session thinks the caret is, so real-machine testing
                     // can tell "no-op here" from "key not delivered".
-                    eprintln!("xiaomu: structural command has no effect here: {intent:?}");
+                    let where_am_i = {
+                        let session = self.session.borrow();
+                        match session.selection().focus() {
+                            DocumentPosition::Text(point) => {
+                                let kind = session
+                                    .document()
+                                    .node(point.node_id())
+                                    .map(|n| format!("{:?}", n.kind()))
+                                    .unwrap_or_else(|| "<unknown>".into());
+                                let parent = session
+                                    .document()
+                                    .parent_of(point.node_id())
+                                    .and_then(|p| session.document().node(p))
+                                    .map(|n| format!("{:?}", n.kind()))
+                                    .unwrap_or_else(|| "<none>".into());
+                                format!("caret in {kind} (parent {parent})")
+                            }
+                            DocumentPosition::Gap(_) => "caret at a gap".to_owned(),
+                        }
+                    };
+                    eprintln!(
+                        "xiaomu: structural command has no effect here [{where_am_i}]: {intent:?}"
+                    );
                 }
                 cx.notify();
             }
