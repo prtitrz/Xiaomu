@@ -33,12 +33,20 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      # CI does not need debuginfo. Full PDBs dominate Windows link time
+      # and inflate the rust-cache archive toward GitHub's 10 GB cap.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.1
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       # GPUI links against X11/XCB and xkbcommon on Linux; the test binaries
       # need the development libraries present at link time.
       - name: Install Linux link dependencies
@@ -49,7 +57,12 @@ jobs:
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Clippy is not OS-specific for this workspace (no cfg(windows)/cfg(unix)
+      # in our crates). Tests still compile and run on every platform, so
+      # Windows/macOS catch compile errors and runtime failures.
+      - name: Clippy
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --all-targets
 
   ci-success:
