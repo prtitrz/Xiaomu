@@ -270,7 +270,7 @@ cargo fmt --all -- --check；cargo clippy --workspace --all-targets -D warnings 
 ### 2026-08-27（P2.6 后，Tab 语义补全）
 
 - 实机诊断确认按键分发与 session 行为都正常，“全部不行”实为位置性 no-op：首项不可缩进、顶层项不可 outdent、非列表块两者皆否。语义正确但反直觉。
-- Tab / Shift-Tab 补全为直觉闭环：纯段落 Tab → TurnInto(BulletList)（复用既有 list wrap）；顶层 item Shift-Tab → TurnInto(Paragraph)（lift out）。嵌套项行为不变。判定用 gpui 层 `list_context` 纯函数（navigation.rs，+2 测试），不新增 runtime intent。
+- Tab / Shift-Tab 补全为直觉闭环：纯段落**块首** Tab → TurnInto(BulletList)（复用既有 list wrap）；纯段落其余位置 Tab → 插入字面制表符（含选区替换，走既有 InsertText）；顶层 item Shift-Tab → TurnInto(Paragraph)（lift out）。嵌套项行为不变。判定用 gpui 层 `list_context` 纯函数（navigation.rs，+2 测试），不新增 runtime intent。
 
 ## P1 移交的 P2 前置依赖与归属
 

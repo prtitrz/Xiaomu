@@ -27,6 +27,17 @@ use crate::input::platform_clipboard::PlatformClipboard;
 
 use super::{DocumentView, NavStep, navigation};
 
+/// What Tab should do given the caret context of a plain block. A caret
+/// inside a list never reaches this decision and keeps the item-indent
+/// intent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TabPlan {
+    /// Collapsed caret at the block start: gesture for "make this a list".
+    ConvertToList,
+    /// Anywhere else: insert a literal tab character.
+    InsertTabCharacter,
+}
+
 /// Whether an intent is a structural command whose no-op is worth surfacing.
 pub(crate) fn is_structural(intent: &EditIntent) -> bool {
     matches!(
@@ -148,26 +159,57 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Intuitive Tab semantics: a plain paragraph becomes a bullet list
-        // item; inside a list only items with a previous sibling indent.
-        let turns_into_list = {
+        // Intuitive Tab semantics for plain blocks: only a collapsed caret
+        // at the very start gestures "turn this block into a list"; anywhere
+        // else Tab inserts a literal tab character (replacing the selection).
+        // Inside a list, items with a previous sibling indent as before.
+        let plan = {
             let session = self.session.borrow();
             match session.selection().focus() {
                 DocumentPosition::Text(point) => {
-                    navigation::list_context(session.document(), point.node_id()).is_none()
+                    let in_list =
+                        navigation::list_context(session.document(), point.node_id()).is_some();
+                    if in_list {
+                        None
+                    } else {
+                        // Plain block: start-of-block gestures list
+                        // conversion, anywhere else inserts a tab.
+                        session.text_selection().map(|selection| {
+                            let at_start = selection.is_collapsed()
+                                && selection.focus().offset().as_usize() == 0;
+                            if at_start {
+                                TabPlan::ConvertToList
+                            } else {
+                                TabPlan::InsertTabCharacter
+                            }
+                        })
+                    }
                 }
-                DocumentPosition::Gap(_) => false,
+                DocumentPosition::Gap(_) => None,
             }
         };
-        if turns_into_list {
-            self.apply_intent(
-                EditIntent::TurnInto {
-                    kind: xiaomu_core::document::NodeKind::BulletList,
-                },
-                window,
-                cx,
-            );
-            return;
+        match plan {
+            Some(TabPlan::ConvertToList) => {
+                self.apply_intent(
+                    EditIntent::TurnInto {
+                        kind: xiaomu_core::document::NodeKind::BulletList,
+                    },
+                    window,
+                    cx,
+                );
+                return;
+            }
+            Some(TabPlan::InsertTabCharacter) => {
+                self.apply_intent(
+                    EditIntent::InsertText {
+                        text: "\t".to_owned(),
+                    },
+                    window,
+                    cx,
+                );
+                return;
+            }
+            _ => {}
         }
         self.apply_intent(EditIntent::IndentListItem, window, cx);
     }
