@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P2.5 GPUI multi-block 渲染与导航已完成（待实机验证）**
+当前切片：**P2.6 minimal host-contract harness 已完成（实机 Gate 清单待执行，见 P2.7）**
 
-前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0–P2.4 已合入（PR #21–#25）。
+前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0–P2.5 已合入（PR #21–#27）。
 
 ## P2.0 Phase Contract 与阶段骨架
 
@@ -208,6 +208,38 @@ tools/check_source_size.py ok（document_view/mod.rs 667 行超 review 阈值
 GPUI 实机验证（Windows multi-block 键盘闭环）待 P2.6 harness 接入后执行。
 ```
 
+## P2.6 Minimal host-contract harness
+
+- [x] runtime 新增 `DocumentPersistence` seam：save(&XiaomuDocument) / load() -> Option<XiaomuDocument> + PersistenceError，只承载 Core 类型，格式与存储完全归宿主 adapter
+- [x] GPUI：Ctrl/Cmd-S → SaveDocument action → 经 adapter 写出当前 snapshot；EditorHooks { persistence, listener } 作为最小宿主接入点（run_document_editor_with_hooks）
+- [x] editor_harness 接入 multi-block 编辑器：启动时经 adapter load（无 store 文件则用内置多块 demo fixture——heading / quote / bullet / ordered 全覆盖 P2.5 渲染）
+- [x] listen leg：ChangeCounter 实现 DocumentChangeListener 注册进 session，退出时报告提交变更数
+- [x] persist leg：FixtureStore 文件 adapter（harness 内部行格式 v1，TAB 分隔 + BEGIN/END 容器嵌套 + 最小转义；不承诺 codec 质量，marks 不序列化）
+
+实现说明：
+
+```text
+持久化走 seam 而非 codec：设计 §3.6 明确“格式为 harness 内部约定，
+不经 Markdown codec 生产路径”。adapter 的 round-trip 由结构相等断言锚定
+（同树形 / kind / inline 文本；NodeId 为分配序实现细节不作比较）。
+已知边界：fixture 不序列化 marks 与原子块；文本含反斜杠 / TAB 时按
+最小转义规则往返。
+```
+
+完成证据：
+
+```text
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test -p xiaomu-core -p xiaomu-runtime -p xiaomu-codec-markdown --all-targets 全绿
+harness store 测试 5 个（round-trip 结构相等 / 缺文件 None / 转义 /
+解析 heading-quote-list / 非法输入拒绝）：WSL 缺 libxkbcommon-x11 无法链接
+harness 测试二进制（与 P1–P2.5 一致），已在等价临时 crate 运行通过；
+远端 CI 三平台覆盖正式位置。
+Gate 流程 create → load → edit（listener 计数）→ save（Ctrl/Cmd-S）
+已接线；Windows 实机执行清单归 P2.7 收官 Gate 一并记录。
+```
+
 ## P1 移交的 P2 前置依赖与归属
 
 P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置如下：
@@ -261,6 +293,12 @@ P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置
 - OutdentListItem 的目标父节点是外层 list（紧跟外层 item 之后），不是外层 item：Core 的 `allows_child` 禁止 ListItem 直接嵌套 ListItem。被清空的内层 list 同笔删除。
 - Lift out 把被抬升块插在 list 的原槽位（出现在残留 list 之上）；多 item list 只溶解焦点 item，其余 item 不动。
 - indent/outdent 未引入 MoveNode step：单笔 RemoveNode + RestoreSubtree 即可表达（组合成本可控，§3.4 的 MoveNode 评估结论为不需要）。
+
+### 2026-08-27（P2.6）
+
+- 持久化是宿主 seam 不是 codec：runtime 只定义 DocumentPersistence trait（snapshot 进出），序列化格式、存储介质、触发时机全部归 adapter。GPUI 不感知文件系统，仅把 Ctrl/Cmd-S 翻译成对 adapter 的调用。
+- listen leg 复用既有 DocumentChangeListener，不新增通知类型；harness 用计数器证明 edit 在 session 提交路径上可被宿主观察到。
+- fixture 格式按设计 §3.6 “harness 内部约定”落地：行式 + BEGIN/END 嵌套 + TAB 分隔 + 最小转义，round-trip 以结构相等断言锚定；明确不承诺 codec 质量，为 P3+ 的真实 codec 留出空间。
 
 ### 2026-08-27（P2.5）
 

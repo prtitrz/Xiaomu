@@ -28,11 +28,13 @@ use xiaomu_core::selection::{CursorAffinity, TextPoint};
 use xiaomu_runtime::clipboard::{TextClipboard, normalize_paste_text};
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
+use xiaomu_runtime::persistence::DocumentPersistence;
+
 use crate::block_view::{
     Backspace, BlockBoundsRegistry, ClipboardCopy, ClipboardCut, ClipboardPaste, Delete, Down, End,
-    Enter, Home, Left, ParagraphView, Redo, Right, SelectAll, SelectDown, SelectEnd, SelectHome,
-    SelectLeft, SelectRight, SelectUp, SharedSession, ShiftTabIndent, TabIndent, ToggleBold,
-    ToggleCode, ToggleItalic, ToggleStrike, ToggleUnderline, Undo, Up,
+    Enter, Home, Left, ParagraphView, Redo, Right, SaveDocument, SelectAll, SelectDown, SelectEnd,
+    SelectHome, SelectLeft, SelectRight, SelectUp, SharedSession, ShiftTabIndent, TabIndent,
+    ToggleBold, ToggleCode, ToggleItalic, ToggleStrike, ToggleUnderline, Undo, Up,
 };
 use crate::input::platform_clipboard::PlatformClipboard;
 
@@ -64,6 +66,9 @@ pub struct DocumentView {
     /// IME composition and focus state survive unrelated re-renders.
     children: Vec<(NodeId, Entity<ParagraphView>)>,
     is_dragging: bool,
+    /// Host adapter for the create → load → edit → save contract; absent
+    /// when the host persists through its own channel.
+    persistence: Option<Rc<RefCell<dyn DocumentPersistence>>>,
 }
 
 impl DocumentView {
@@ -76,7 +81,13 @@ impl DocumentView {
             registry: Rc::new(RefCell::new(Vec::new())),
             children: Vec::new(),
             is_dragging: false,
+            persistence: None,
         }
+    }
+
+    /// Attaches the host persistence adapter (Ctrl/Cmd-S saves).
+    pub fn set_persistence(&mut self, persistence: Rc<RefCell<dyn DocumentPersistence>>) {
+        self.persistence = Some(persistence);
     }
 
     /// Returns the shared session this view renders.
@@ -294,6 +305,18 @@ impl DocumentView {
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         self.apply_intent(EditIntent::Delete, window, cx);
+    }
+
+    fn save_document(&mut self, _: &SaveDocument, _: &mut Window, _: &mut Context<Self>) {
+        let Some(adapter) = self.persistence.clone() else {
+            return;
+        };
+        let document = self.session.borrow().document().clone();
+        let outcome = adapter.borrow_mut().save(&document);
+        match outcome {
+            Ok(()) => eprintln!("xiaomu: snapshot saved"),
+            Err(error) => eprintln!("xiaomu: save failed: {error}"),
+        }
     }
 
     fn undo_entry(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
@@ -659,6 +682,7 @@ impl Render for DocumentView {
             .on_action(cx.listener(Self::shift_tab_indent))
             .on_action(cx.listener(Self::undo_entry))
             .on_action(cx.listener(Self::redo_entry))
+            .on_action(cx.listener(Self::save_document))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::paste))

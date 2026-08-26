@@ -14,15 +14,30 @@ use std::rc::Rc;
 
 use xiaomu_core::document::{NodeId, XiaomuDocument};
 use xiaomu_core::selection::TextSelection;
-use xiaomu_runtime::session::{DocumentSelection, DocumentSession};
+use xiaomu_runtime::persistence::DocumentPersistence;
+use xiaomu_runtime::session::{DocumentChangeListener, DocumentSelection, DocumentSession};
 
 use crate::block_view::{
     Backspace, ClipboardCopy, ClipboardCut, ClipboardPaste, Delete, Down, End, Enter, Home, Left,
-    Redo, Right, SelectAll, SelectDown, SelectEnd, SelectHome, SelectLeft, SelectRight, SelectUp,
-    ShiftTabIndent, TabIndent, ToggleBold, ToggleCode, ToggleItalic, ToggleStrike, ToggleUnderline,
-    Undo, Up,
+    Redo, Right, SaveDocument, SelectAll, SelectDown, SelectEnd, SelectHome, SelectLeft,
+    SelectRight, SelectUp, ShiftTabIndent, TabIndent, ToggleBold, ToggleCode, ToggleItalic,
+    ToggleStrike, ToggleUnderline, Undo, Up,
 };
 use crate::document_view::DocumentView;
+
+/// Optional host integrations handed to [`run_document_editor`].
+///
+/// Everything is frontend-neutral: persistence goes through the runtime
+/// [`DocumentPersistence`] seam, change listening through
+/// [`DocumentChangeListener`]. Absent hooks simply disable the feature.
+#[derive(Default)]
+pub struct EditorHooks {
+    /// Adapter used by Ctrl/Cmd-S to persist the current snapshot.
+    pub persistence: Option<Rc<RefCell<dyn DocumentPersistence>>>,
+    /// Listener notified on every committed edit / undo / redo and every
+    /// selection move.
+    pub listener: Option<Box<dyn DocumentChangeListener>>,
+}
 
 /// Runs a single-paragraph editor window over `document`.
 ///
@@ -46,10 +61,24 @@ pub fn run_document_editor(
     document: XiaomuDocument,
     selection: TextSelection,
 ) -> Result<(), xiaomu_runtime::session::SessionError> {
-    let session = Rc::new(RefCell::new(DocumentSession::new(
-        document,
-        DocumentSelection::text(selection),
-    )?));
+    run_document_editor_with_hooks(document, selection, EditorHooks::default())
+}
+
+/// Runs a multi-block editor window with host integration hooks.
+///
+/// This is the minimal host-contract entry point: hosts load their initial
+/// document themselves, hand in a persistence adapter and a change listener,
+/// and receive Ctrl/Cmd-S save semantics.
+pub fn run_document_editor_with_hooks(
+    document: XiaomuDocument,
+    selection: TextSelection,
+    hooks: EditorHooks,
+) -> Result<(), xiaomu_runtime::session::SessionError> {
+    let mut session = DocumentSession::new(document, DocumentSelection::text(selection))?;
+    if let Some(listener) = hooks.listener {
+        session.add_listener(listener);
+    }
+    let session = Rc::new(RefCell::new(session));
 
     Application::new().run(move |cx: &mut App| {
         // Quit when the last window closes so the harness terminates cleanly.
@@ -101,6 +130,8 @@ pub fn run_document_editor(
             KeyBinding::new("cmd-shift-z", Redo, None),
             KeyBinding::new("ctrl-shift-z", Redo, None),
             KeyBinding::new("ctrl-y", Redo, None),
+            KeyBinding::new("cmd-s", SaveDocument, None),
+            KeyBinding::new("ctrl-s", SaveDocument, None),
         ]);
 
         let bounds = Bounds::centered(None, size(px(640.0), px(480.0)), cx);
@@ -114,7 +145,13 @@ pub fn run_document_editor(
                     }),
                     ..Default::default()
                 },
-                |_, cx| cx.new(|_| DocumentView::new(session.clone())),
+                |_, cx| {
+                    let mut view = DocumentView::new(session.clone());
+                    if let Some(persistence) = &hooks.persistence {
+                        view.set_persistence(persistence.clone());
+                    }
+                    cx.new(|_| view)
+                },
             )
             .expect("open editor window");
 

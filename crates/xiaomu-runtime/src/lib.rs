@@ -10,4 +10,5 @@
 //! (GPUI first) sit on top of this crate and their types never leak into it.
 
 pub mod clipboard;
+pub mod persistence;
 pub mod session;
