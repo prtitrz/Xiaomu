@@ -114,16 +114,34 @@ impl DocumentView {
                         let session = self.session.borrow();
                         match session.selection().focus() {
                             DocumentPosition::Text(point) => {
-                                let kind = session
-                                    .document()
-                                    .node(point.node_id())
-                                    .map(|n| format!("{:?}", n.kind()))
-                                    .unwrap_or_else(|| "<unknown>".into());
+                                let describe = |id| {
+                                    session
+                                        .document()
+                                        .node(id)
+                                        .map(|n| {
+                                            let text = n
+                                                .content()
+                                                .as_inline()
+                                                .map(|inline| {
+                                                    let text: String = inline
+                                                        .runs()
+                                                        .iter()
+                                                        .map(|run| run.text().as_str())
+                                                        .collect();
+                                                    let preview: String =
+                                                        text.chars().take(8).collect();
+                                                    format!(" \u{201c}{preview}\u{201d}")
+                                                })
+                                                .unwrap_or_default();
+                                            format!("{:?}{text}", n.kind())
+                                        })
+                                        .unwrap_or_else(|| "<unknown>".into())
+                                };
+                                let kind = describe(point.node_id());
                                 let parent = session
                                     .document()
                                     .parent_of(point.node_id())
-                                    .and_then(|p| session.document().node(p))
-                                    .map(|n| format!("{:?}", n.kind()))
+                                    .map(describe)
                                     .unwrap_or_else(|| "<none>".into());
                                 format!("caret in {kind} (parent {parent})")
                             }
