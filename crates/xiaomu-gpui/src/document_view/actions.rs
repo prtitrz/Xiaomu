@@ -148,6 +148,27 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Intuitive Tab semantics: a plain paragraph becomes a bullet list
+        // item; inside a list only items with a previous sibling indent.
+        let turns_into_list = {
+            let session = self.session.borrow();
+            match session.selection().focus() {
+                DocumentPosition::Text(point) => {
+                    navigation::list_context(session.document(), point.node_id()).is_none()
+                }
+                DocumentPosition::Gap(_) => false,
+            }
+        };
+        if turns_into_list {
+            self.apply_intent(
+                EditIntent::TurnInto {
+                    kind: xiaomu_core::document::NodeKind::BulletList,
+                },
+                window,
+                cx,
+            );
+            return;
+        }
         self.apply_intent(EditIntent::IndentListItem, window, cx);
     }
 
@@ -157,6 +178,28 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Shift-Tab walks out the other way: nested items outdent one
+        // level; a top-level item lifts back to a plain paragraph.
+        let lifts_out = {
+            let session = self.session.borrow();
+            match session.selection().focus() {
+                DocumentPosition::Text(point) => matches!(
+                    navigation::list_context(session.document(), point.node_id()),
+                    Some(context) if !context.nested
+                ),
+                DocumentPosition::Gap(_) => false,
+            }
+        };
+        if lifts_out {
+            self.apply_intent(
+                EditIntent::TurnInto {
+                    kind: xiaomu_core::document::NodeKind::Paragraph,
+                },
+                window,
+                cx,
+            );
+            return;
+        }
         self.apply_intent(EditIntent::OutdentListItem, window, cx);
     }
 

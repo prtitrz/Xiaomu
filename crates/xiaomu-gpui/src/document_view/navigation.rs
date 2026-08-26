@@ -69,6 +69,45 @@ pub(crate) fn block_index(blocks: &[TextBlock], node: NodeId) -> Option<usize> {
     blocks.iter().position(|block| block.node == node)
 }
 
+/// Where the focused block sits relative to list structure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ListContext {
+    /// The item has a previous sibling item (so it can indent).
+    pub has_previous_item: bool,
+    /// The item's list is itself inside another list item (so it can
+    /// outdent).
+    pub nested: bool,
+}
+
+/// Classifies `node`'s position when it is a block directly inside a list
+/// item; `None` when the node is not in a list at all.
+///
+/// Tab / Shift-Tab translate on top of this: a block outside any list
+/// turns into a bullet on Tab, and a top-level item Shift-Tab lifts back
+/// out to a plain paragraph.
+#[must_use]
+pub(crate) fn list_context(document: &XiaomuDocument, node: NodeId) -> Option<ListContext> {
+    let parent = document.parent_of(node)?;
+    if document.node(parent)?.kind() != &xiaomu_core::document::NodeKind::ListItem {
+        return None;
+    }
+    let list = document.parent_of(parent)?;
+    if !matches!(
+        document.node(list)?.kind(),
+        xiaomu_core::document::NodeKind::BulletList | xiaomu_core::document::NodeKind::OrderedList
+    ) {
+        return None;
+    }
+    let list_parent = document.parent_of(list)?;
+    let nested = document.node(list_parent)?.kind() == &xiaomu_core::document::NodeKind::ListItem;
+    let siblings = document.node(list)?.content().as_children()?;
+    let index = siblings.iter().position(|child| child == &parent)?;
+    Some(ListContext {
+        has_previous_item: index > 0,
+        nested,
+    })
+}
+
 /// Previous Unicode scalar boundary in `text`, or `None` at the start.
 pub(crate) fn previous_boundary(text: &str, offset: usize) -> Option<usize> {
     text[..offset]
@@ -312,6 +351,137 @@ mod tests {
         assert_eq!(step_horizontal(&blocks, 0, 0, true), Some((1, 0)));
         assert_eq!(step_horizontal(&blocks, 1, 2, false), Some((1, 1)));
         let _ = empty;
+    }
+
+    #[test]
+    fn list_context_classifies_items_and_outsiders() {
+        let document = sample_document();
+
+        // "one" and the quote's paragraph are not in any list.
+        let blocks = text_blocks(&document);
+        assert_eq!(list_context(&document, blocks[0].node), None);
+        assert_eq!(list_context(&document, blocks[2].node), None);
+
+        // Build Document > ul > [li > p(a), li > p(b)] to cover both items.
+        let mut builder = NodeStoreBuilder::new();
+        let a = paragraph_for_test("a", &mut builder);
+        let b = paragraph_for_test("b", &mut builder);
+        let item_a = builder
+            .insert(
+                xiaomu_core::document::NodeKind::ListItem,
+                NodeAttrs::empty(),
+                NodeContent::children([a]),
+            )
+            .unwrap();
+        let item_b = builder
+            .insert(
+                xiaomu_core::document::NodeKind::ListItem,
+                NodeAttrs::empty(),
+                NodeContent::children([b]),
+            )
+            .unwrap();
+        let ul = builder
+            .insert(
+                xiaomu_core::document::NodeKind::BulletList,
+                NodeAttrs::empty(),
+                NodeContent::children([item_a, item_b]),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                xiaomu_core::document::NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([ul]),
+            )
+            .unwrap();
+        let doc2 = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+        assert_eq!(
+            list_context(&doc2, a),
+            Some(ListContext {
+                has_previous_item: false,
+                nested: false
+            })
+        );
+        assert_eq!(
+            list_context(&doc2, b),
+            Some(ListContext {
+                has_previous_item: true,
+                nested: false
+            })
+        );
+    }
+
+    #[test]
+    fn list_context_detects_nesting() {
+        let mut builder = NodeStoreBuilder::new();
+        let outer_p = paragraph_for_test("outer", &mut builder);
+        let inner_p = paragraph_for_test("inner", &mut builder);
+        let inner_item = builder
+            .insert(
+                xiaomu_core::document::NodeKind::ListItem,
+                NodeAttrs::empty(),
+                NodeContent::children([inner_p]),
+            )
+            .unwrap();
+        let inner_list = builder
+            .insert(
+                xiaomu_core::document::NodeKind::BulletList,
+                NodeAttrs::empty(),
+                NodeContent::children([inner_item]),
+            )
+            .unwrap();
+        let outer_item = builder
+            .insert(
+                xiaomu_core::document::NodeKind::ListItem,
+                NodeAttrs::empty(),
+                NodeContent::children([outer_p, inner_list]),
+            )
+            .unwrap();
+        let outer_list = builder
+            .insert(
+                xiaomu_core::document::NodeKind::BulletList,
+                NodeAttrs::empty(),
+                NodeContent::children([outer_item]),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                xiaomu_core::document::NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([outer_list]),
+            )
+            .unwrap();
+        let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+        // The outer item is top-level; the inner item sits in a nested list
+        // whose previous-sibling count within that inner list is zero.
+        assert_eq!(
+            list_context(&document, outer_p),
+            Some(ListContext {
+                has_previous_item: false,
+                nested: false
+            })
+        );
+        assert_eq!(
+            list_context(&document, inner_p),
+            Some(ListContext {
+                has_previous_item: false,
+                nested: true
+            })
+        );
+    }
+
+    fn paragraph_for_test(text: &str, builder: &mut NodeStoreBuilder) -> NodeId {
+        builder
+            .insert(
+                xiaomu_core::document::NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::Inline(
+                    InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()]).unwrap(),
+                ),
+            )
+            .unwrap()
     }
 
     #[test]
