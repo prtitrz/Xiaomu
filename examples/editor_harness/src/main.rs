@@ -20,7 +20,7 @@ use std::rc::Rc;
 
 mod store;
 
-use xiaomu_core::document::XiaomuDocument;
+use xiaomu_core::document::{NodeContent, NodeId, XiaomuDocument};
 use xiaomu_gpui::editor::{EditorHooks, run_document_editor_with_hooks};
 use xiaomu_runtime::persistence::DocumentPersistence;
 use xiaomu_runtime::session::{DocumentChangeListener, DocumentSelection};
@@ -41,6 +41,7 @@ fn main() {
         None => (demo_fixture(), "created demo fixture".to_owned()),
     };
     eprintln!("xiaomu: {source}");
+    print_outline(&document);
 
     let selection = caret_at_first_block(&document);
     let counter = Rc::new(RefCell::new(ChangeCounter::default()));
@@ -73,6 +74,38 @@ impl DocumentChangeListener for CounterListener {
     fn document_changed(&mut self, _document: &XiaomuDocument, _selection: DocumentSelection) {
         self.0.borrow_mut().document_changes += 1;
     }
+}
+
+/// Prints the loaded document's block outline so the operator can see what
+/// structure the session actually holds (kinds only, one line per node).
+fn print_outline(document: &XiaomuDocument) {
+    fn walk(document: &XiaomuDocument, id: NodeId, depth: usize, out: &mut String) {
+        let Some(node) = document.node(id) else {
+            return;
+        };
+        let indent = "  ".repeat(depth);
+        let label = match node.content() {
+            NodeContent::Inline(inline) => {
+                let text: String = inline
+                    .runs()
+                    .iter()
+                    .map(|run| run.text().as_str())
+                    .collect();
+                let preview: String = text.chars().take(12).collect();
+                format!("{:?} \u{201c}{preview}\u{201d}", node.kind())
+            }
+            _ => format!("{:?}", node.kind()),
+        };
+        out.push_str(&format!("  outline: {indent}{label}\n"));
+        if let NodeContent::Children(children) = node.content() {
+            for child in children {
+                walk(document, *child, depth + 1, out);
+            }
+        }
+    }
+    let mut out = String::new();
+    walk(document, document.root(), 0, &mut out);
+    eprint!("{out}");
 }
 
 #[cfg(test)]
