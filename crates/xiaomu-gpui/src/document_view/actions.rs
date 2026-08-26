@@ -27,6 +27,13 @@ use crate::input::platform_clipboard::PlatformClipboard;
 
 use super::{DocumentView, NavStep, navigation};
 
+/// Soft tab inserted when Tab is pressed inside a plain block away from
+/// offset 0. A literal U+0009 has no glyph advance in GPUI's shaper, so it
+/// looks like a no-op; four ASCII spaces match the usual editor tab size
+/// without needing tab-stop layout. Two spaces is a common indent unit,
+/// not a tab stop.
+const SOFT_TAB: &str = "    ";
+
 /// What Tab should do given the caret context of a plain block. A caret
 /// inside a list never reaches this decision and keeps the item-indent
 /// intent.
@@ -34,8 +41,16 @@ use super::{DocumentView, NavStep, navigation};
 enum TabPlan {
     /// Collapsed caret at the block start: gesture for "make this a list".
     ConvertToList,
-    /// Anywhere else: insert a literal tab character.
-    InsertTabCharacter,
+    /// Anywhere else: insert a visible soft tab (four spaces).
+    InsertSoftTab,
+}
+
+fn tab_plan_for_plain_block(collapsed: bool, offset: usize) -> TabPlan {
+    if collapsed && offset == 0 {
+        TabPlan::ConvertToList
+    } else {
+        TabPlan::InsertSoftTab
+    }
 }
 
 /// Whether an intent is a structural command whose no-op is worth surfacing.
@@ -161,7 +176,7 @@ impl DocumentView {
     ) {
         // Intuitive Tab semantics for plain blocks: only a collapsed caret
         // at the very start gestures "turn this block into a list"; anywhere
-        // else Tab inserts a literal tab character (replacing the selection).
+        // else Tab inserts a visible soft tab (replacing the selection).
         // Inside a list, items with a previous sibling indent as before.
         let plan = {
             let session = self.session.borrow();
@@ -172,16 +187,11 @@ impl DocumentView {
                     if in_list {
                         None
                     } else {
-                        // Plain block: start-of-block gestures list
-                        // conversion, anywhere else inserts a tab.
                         session.text_selection().map(|selection| {
-                            let at_start = selection.is_collapsed()
-                                && selection.focus().offset().as_usize() == 0;
-                            if at_start {
-                                TabPlan::ConvertToList
-                            } else {
-                                TabPlan::InsertTabCharacter
-                            }
+                            tab_plan_for_plain_block(
+                                selection.is_collapsed(),
+                                selection.focus().offset().as_usize(),
+                            )
                         })
                     }
                 }
@@ -199,10 +209,10 @@ impl DocumentView {
                 );
                 return;
             }
-            Some(TabPlan::InsertTabCharacter) => {
+            Some(TabPlan::InsertSoftTab) => {
                 self.apply_intent(
                     EditIntent::InsertText {
-                        text: "\t".to_owned(),
+                        text: SOFT_TAB.to_owned(),
                     },
                     window,
                     cx,
@@ -521,5 +531,23 @@ impl DocumentView {
         let offset = navigation::validated_offset(block, clamped)
             .or_else(|| navigation::validated_offset(block, block.text().len()))?;
         Some(TextPoint::new(node, offset, CursorAffinity::Before))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collapsed_caret_at_block_start_converts_to_list() {
+        assert_eq!(tab_plan_for_plain_block(true, 0), TabPlan::ConvertToList);
+    }
+
+    #[test]
+    fn mid_paragraph_and_selection_insert_a_soft_tab() {
+        assert_eq!(tab_plan_for_plain_block(true, 1), TabPlan::InsertSoftTab);
+        assert_eq!(tab_plan_for_plain_block(false, 0), TabPlan::InsertSoftTab);
+        assert_eq!(SOFT_TAB, "    ");
+        assert!(!SOFT_TAB.contains('\t'));
     }
 }

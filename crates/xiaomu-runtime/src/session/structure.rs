@@ -461,8 +461,10 @@ fn plan_into_list(
 /// Lifts every child of a list item back to the list's own level.
 ///
 /// Single-item lists dissolve entirely, which closes the paragraph → list →
-/// paragraph loop. Multi-item lists keep their remaining items; only the
-/// focused item dissolves into plain sibling blocks.
+/// paragraph loop. Multi-item lists keep remaining items in document order:
+/// a first-item lift sits above the leftover list, a last-item lift sits
+/// below it, and a middle-item lift splits the leftover tail into a new
+/// list of the same kind below the lifted blocks.
 pub(crate) fn plan_lift_out_of_list(
     document: &XiaomuDocument,
     ancestry: ListAncestry,
@@ -472,24 +474,93 @@ pub(crate) fn plan_lift_out_of_list(
         list,
         list_parent,
         list_index,
-        ..
+        item_index,
     } = ancestry;
     let moved = children_of(document, item);
     if moved.is_empty() {
         return Ok(PlannedAction::NoChange);
     }
-    let dissolves = children_of(document, list).len() == 1;
+    let sibling_count = children_of(document, list).len();
+    let after_count = sibling_count.saturating_sub(item_index + 1);
+    let dissolves = sibling_count == 1;
+    let insert_index = if item_index > 0 {
+        list_index + 1
+    } else {
+        list_index
+    };
+    let lift = lift_item_blocks(
+        document,
+        &moved,
+        item,
+        list,
+        list_parent,
+        insert_index,
+        dissolves,
+    );
 
+    if after_count == 0 {
+        return Ok(PlannedAction::Commit(EditPlan::new(
+            lift,
+            SelectionUpdate::PreserveFocus,
+            None,
+        )));
+    }
+
+    let list_kind = kind_of(document, list)?.clone();
+    let n_moved = moved.len();
+    let staged = StagedPlan::new(SelectionUpdate::PreserveFocus)
+        .stage(move |_| Ok(lift))
+        .stage(move |_| {
+            Ok(user_transaction().with_step(TransactionStep::InsertNode {
+                parent: list_parent,
+                index: insert_index + n_moved,
+                kind: list_kind,
+                attrs: NodeAttrs::empty(),
+                content: NodeContent::children([]),
+            }))
+        })
+        .stage(move |document| {
+            let created = children_of(document, list_parent);
+            let new_list = *created
+                .get(insert_index + n_moved)
+                .ok_or(SessionError::SelectionInvalid)?;
+            let remaining = children_of(document, list);
+            let tail_start = remaining
+                .len()
+                .checked_sub(after_count)
+                .ok_or(SessionError::SelectionInvalid)?;
+            let mut transaction = user_transaction();
+            for (offset, tail_item) in remaining[tail_start..].iter().copied().enumerate() {
+                transaction.push_step(TransactionStep::RemoveNode { node: tail_item });
+                transaction.push_step(TransactionStep::RestoreSubtree {
+                    parent: new_list,
+                    index: offset,
+                    root: tail_item,
+                    nodes: subtree_payloads(document, tail_item),
+                });
+            }
+            Ok(transaction)
+        });
+    Ok(PlannedAction::CommitStaged(staged))
+}
+
+fn lift_item_blocks(
+    document: &XiaomuDocument,
+    moved: &[NodeId],
+    item: NodeId,
+    list: NodeId,
+    list_parent: NodeId,
+    insert_index: usize,
+    dissolves: bool,
+) -> Transaction {
     let mut transaction = user_transaction();
-    for child in &moved {
+    for child in moved {
         transaction.push_step(TransactionStep::RemoveNode { node: *child });
     }
     for (offset, child) in moved.iter().enumerate() {
         transaction.push_step(TransactionStep::RestoreSubtree {
             parent: list_parent,
-            // Lifted blocks take the list's own slot, appearing above the
-            // remaining list content.
-            index: list_index + offset,
+            index: insert_index + offset,
             root: *child,
             nodes: subtree_payloads(document, *child),
         });
@@ -498,12 +569,7 @@ pub(crate) fn plan_lift_out_of_list(
     if dissolves {
         transaction.push_step(TransactionStep::RemoveNode { node: list });
     }
-
-    Ok(PlannedAction::Commit(EditPlan::new(
-        transaction,
-        SelectionUpdate::PreserveFocus,
-        None,
-    )))
+    transaction
 }
 
 /// A transaction that moves one subtree below a new parent at `index`.
