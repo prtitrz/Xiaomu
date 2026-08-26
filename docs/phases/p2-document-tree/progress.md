@@ -15,7 +15,7 @@
 
 ## 当前状态
 
-当前切片：**P2.6 minimal host-contract harness 已完成（实机 Gate 清单待执行，见 P2.7）**
+当前切片：**P2.6 harness 完成 + List backspace 修正已合入（实机 Gate 清单待执行，见 P2.7）**
 
 前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0–P2.5 已合入（PR #21–#27）。
 
@@ -152,8 +152,8 @@ list 内容之上；outdent 目标父节点是外层 list 而非外层 item（Co
 ListItem 直接嵌套 ListItem）。
 已知边界：item 含多个子块时整体抬升/缩进；空 item 不产生（wrap/lift 均
 保证至少一个子块）；Enter 在 item 内仍走 SplitNode（在 item 内拆块），
-Backspace 在 item 内块首为 JoinWithPrevious 无前兄弟 → NoChange（不自动
-退出 list，留待后续按需评估）。
+Backspace 在 item 内块首为 JoinWithPrevious 无前兄弟 → NoChange（实机
+反馈后已在下方“List backspace 修正”切片实现合并/退出语义。）
 ```
 
 完成证据：
@@ -238,6 +238,33 @@ harness 测试二进制（与 P1–P2.5 一致），已在等价临时 crate 运
 远端 CI 三平台覆盖正式位置。
 Gate 流程 create → load → edit（listener 计数）→ save（Ctrl/Cmd-S）
 已接线；Windows 实机执行清单归 P2.7 收官 Gate 一并记录。
+```
+
+## List backspace 修正（实机反馈第一轮，P2.6 后）
+
+实机试用发现两个问题：
+
+1. 第二个待办按 Backspace 无任何反应——原实现块首只走 JoinWithPrevious，
+   单块 item 没有前兄弟即 NoChange。
+2. Tab / Shift-Tab 观感“不行”——首项 Tab 与顶层项 Shift-Tab 本就是
+   NoChange，但无任何反馈，无法区分“此处不可”与“按键未送达”。
+
+修正：
+
+- [x] Backspace 块首优先级重排：① 同父前块 JoinNodes → ② 前一兄弟是
+      list / item 时把本块文本追加到其最后一个 inline 块尾部并删除本块
+      （清空的 item 同笔溶解）→ ③ 嵌套项 outdent → ④ 顶层首项 lift out。
+      新增 `SelectionUpdate::CaretAtJoinPoint`：光标落在拼接缝而非插入文本末尾。
+- [x] GPUI 对结构性命令的 NoChange 输出 stderr 说明，实机可区分位置性
+      no-op 与按键分发问题。
+
+完成证据：
+
+```text
+cargo test -p xiaomu-runtime 全绿（session 23→26：
+  second-item 合并进上一 item + 光标在缝上、first-item lift-out 且单 item
+  list 溶解、嵌套项先 outdent 再合并、首项 Tab/顶层 Shift-Tab 明确 NoChange）
+cargo fmt --all -- --check；cargo clippy --workspace --all-targets -D warnings 全绿
 ```
 
 ## P1 移交的 P2 前置依赖与归属

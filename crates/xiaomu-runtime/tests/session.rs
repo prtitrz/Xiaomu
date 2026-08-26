@@ -754,3 +754,140 @@ fn split_block_then_set_selection_reaches_the_new_block() {
         .unwrap();
     assert!(session.selection().is_collapsed());
 }
+
+fn bullet_list_document() -> (XiaomuDocument, NodeId, NodeId) {
+    let mut builder = NodeStoreBuilder::new();
+    let para = |text: &str, builder: &mut NodeStoreBuilder| -> NodeId {
+        builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::Inline(
+                    InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()]).unwrap(),
+                ),
+            )
+            .unwrap()
+    };
+    let p1 = para("第一个待办", &mut builder);
+    let item1 = builder
+        .insert(
+            NodeKind::ListItem,
+            NodeAttrs::empty(),
+            NodeContent::children([p1]),
+        )
+        .unwrap();
+    let p2 = para("第二个待办", &mut builder);
+    let item2 = builder
+        .insert(
+            NodeKind::ListItem,
+            NodeAttrs::empty(),
+            NodeContent::children([p2]),
+        )
+        .unwrap();
+    let list = builder
+        .insert(
+            NodeKind::BulletList,
+            NodeAttrs::empty(),
+            NodeContent::children([item1, item2]),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([list]),
+        )
+        .unwrap();
+    (XiaomuDocument::new(root, builder.finish()).unwrap(), p1, p2)
+}
+
+#[test]
+fn demo_scenario_tab_indents_second_item() {
+    let (document, _p1, p2) = bullet_list_document();
+    let mut session = session_with(&document, caret(&document, p2, 0));
+
+    let outcome = session.apply_intent(&EditIntent::IndentListItem).unwrap();
+    assert_eq!(outcome, SessionOutcome::DocumentChanged);
+}
+
+#[test]
+fn backspace_at_second_item_start_merges_into_previous_item() {
+    let (document, p1, p2) = bullet_list_document();
+    let mut session = session_with(&document, caret(&document, p2, 0));
+
+    let outcome = session.apply_intent(&EditIntent::Backspace).unwrap();
+    assert_eq!(outcome, SessionOutcome::DocumentChanged);
+
+    // The bullet boundary above disappears: the text appends to the
+    // previous item's tail and the emptied item dissolves.
+    assert!(
+        session.document().node(p2).is_none(),
+        "merged block is gone"
+    );
+    assert_eq!(text_of(&session, p1), "第一个待办第二个待办");
+    // Caret sits at the join seam inside the surviving item's block.
+    let seam = session
+        .document()
+        .node(p1)
+        .unwrap()
+        .content()
+        .as_inline()
+        .unwrap()
+        .offset_at("第一个待办".len())
+        .unwrap();
+    assert_eq!(
+        session.selection().focus(),
+        xiaomu_runtime::session::DocumentPosition::Text(TextPoint::new(
+            p1,
+            seam,
+            CursorAffinity::Before
+        ))
+    );
+}
+
+#[test]
+fn backspace_at_first_item_start_lifts_out_of_list() {
+    let (document, p1, _p2) = bullet_list_document();
+    let mut session = session_with(&document, caret(&document, p1, 0));
+
+    let outcome = session.apply_intent(&EditIntent::Backspace).unwrap();
+    assert_eq!(outcome, SessionOutcome::DocumentChanged);
+
+    // Nothing to merge into above: the first item lifts back to a plain
+    // paragraph and the single-item list dissolves.
+    assert!(session.document().node(p1).unwrap().kind() == &NodeKind::Paragraph);
+    assert_eq!(text_of(&session, p1), "第一个待办");
+}
+
+#[test]
+fn backspace_at_nested_item_start_outdents_then_merges() {
+    let (document, p1, p2) = bullet_list_document();
+    let mut session = session_with(&document, caret(&document, p2, 0));
+    session.apply_intent(&EditIntent::IndentListItem).unwrap();
+
+    // Backspace at the start of the nested item walks it back out.
+    let outcome = session.apply_intent(&EditIntent::Backspace).unwrap();
+    assert_eq!(outcome, SessionOutcome::DocumentChanged);
+    assert_eq!(text_of(&session, p2), "第二个待办");
+
+    // Once top-level with a previous sibling item again, the next press
+    // merges into that item instead of leaving the list.
+    let outcome = session.apply_intent(&EditIntent::Backspace).unwrap();
+    assert_eq!(outcome, SessionOutcome::DocumentChanged);
+    assert!(session.document().node(p2).is_none());
+    assert_eq!(text_of(&session, p1), "第一个待办第二个待办");
+}
+
+#[test]
+fn tab_indents_first_item_is_nochange_and_shift_tab_top_level_noops() {
+    let (document, p1, _p2) = bullet_list_document();
+    let mut session = session_with(&document, caret(&document, p1, 0));
+    assert_eq!(
+        session.apply_intent(&EditIntent::IndentListItem).unwrap(),
+        SessionOutcome::NoChange
+    );
+    assert_eq!(
+        session.apply_intent(&EditIntent::OutdentListItem).unwrap(),
+        SessionOutcome::NoChange
+    );
+}
