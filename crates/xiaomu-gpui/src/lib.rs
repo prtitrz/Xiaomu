@@ -17,6 +17,7 @@
 //! - [`editor`]: application assembly for the single-block editor harness.
 
 pub mod block_view;
+pub mod document_view;
 pub mod editor;
 pub mod input;
 

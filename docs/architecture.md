@@ -354,10 +354,12 @@ input/utf16.rs              UTF-16 code unit ↔ Core UTF-8 byte offset 转换
                             （surrogate 中点解析到所在字符边界，始终是合法 Core 坐标）
 input/composition.rs        IME CompositionState 纯状态机（preedit 只存在于 adapter）
 input/platform_clipboard.rs runtime TextClipboard seam 的 GPUI 平台绑定
-block_view/                 ParagraphView：持有 DocumentSession，键/鼠标 → runtime EditIntent，
-                            实现 EntityInputHandler（平台 UTF-16 range 在此转换）
-                            ParagraphElement：shape_line 单行渲染、caret / selection 绘制、
-                            paint 期注册 handle_input、保存 layout 供 hit-test
+document_view/            DocumentView：块列表容器（滚动 / 焦点路由 / 跨块导航），
+                          navigation.rs 纯逻辑键位翻译，cache_key.rs 布局缓存键
+block_view/               ParagraphView：共享 session 句柄，渲染单个 inline block，
+                          实现 EntityInputHandler（平台 UTF-16 range 在此转换）
+                          ParagraphElement：shape_line 单行渲染、文档级选区的逐块投影绘制、
+                          paint 期注册 handle_input、保存 layout 供 hit-test
 editor.rs                   run_single_block_editor：窗口 / 键绑定 / 关窗退出装配（harness 使用）
 ```
 
@@ -366,6 +368,7 @@ editor.rs                   run_single_block_editor：窗口 / 键绑定 / 关�
 - clipboard：copy / cut 取 session 选区纯文本经 `TextClipboard` 写出；paste 读入后经 `normalize_paste_text` 归一化再走 InsertText intent（一笔 undo entry）；cut = copy + Delete，同为单笔。空剪贴板文本不清除选区。
 - 标记渲染：Bold / Italic 映射字重与字形，Underline / Strike 映射装饰线，Code 映射半透明背景色块；Link 需要属性编辑 UI，留待后续切片。
 - IME composition（P1.4）：CompositionState 维护 base selection / preedit / virtual projection，composition 全程 document revision 不变，commit 组装为单笔 InsertText intent 入 history，cancel 恢复 base selection。
+- 多块视图（P2.5）：`DocumentView` 拥有共享 session 句柄并按文档序为每个 inline block 挂载一个 `ParagraphView`；全部键盘动作注册在容器层并从焦点块冒泡。跨块 Left / Right / Up / Down / Home / End 经 `navigation.rs` 纯逻辑翻译为 `SetSelection` intent（Up/Down 在单视觉行的块间移动并钳制字节下标）；鼠标点击 / 拖选经 paint 期发布的块 bounds 注册表分发到目标块再 x hit-test。选区高亮按 `DocumentSelection::ordered` 投影到每个块局部绘制。布局缓存键 = (node, epoch, 宽度取整)，未变化则复用 shape 结果；heading 按层级放大加粗、quote 后代缩进加竖线、list item 按嵌套深度缩进。
 
 ## Codec 边界
 

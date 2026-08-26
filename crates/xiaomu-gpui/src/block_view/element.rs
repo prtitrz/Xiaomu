@@ -1,8 +1,10 @@
-//! Custom element for the single-paragraph view.
+//! Custom element for the single-block view.
 //!
-//! The element shapes the paragraph's inline runs into one line, paints the
-//! selection highlight and caret, registers the platform input handler, and
-//! stores the layout so the view can hit-test mouse positions.
+//! The element shapes the block's displayed text into one line, paints the
+//! selection highlight and caret (projected from the document-level
+//! selection), registers the platform input handler, publishes painted
+//! bounds to the document view's hit-test registry, and reuses the cached
+//! shaped line while the layout cache key is unchanged.
 
 use gpui::{
     App, Bounds, Element, ElementId, ElementInputHandler, Entity, FontStyle, FontWeight,
@@ -11,9 +13,10 @@ use gpui::{
     size,
 };
 
-use super::ParagraphView;
+use super::{ParagraphView, SelectionProjection};
+use crate::document_view::cache_key::LayoutCacheKey;
 
-/// Renders one paragraph view's inline content.
+/// Renders one block view's inline content.
 pub struct ParagraphElement {
     pub(super) view: Entity<ParagraphView>,
 }
@@ -26,12 +29,13 @@ pub struct PrepaintState {
     line: Option<ShapedLine>,
     cursor: Option<PaintQuad>,
     selection: Option<PaintQuad>,
+    cache_key: Option<LayoutCacheKey>,
 }
 
 impl IntoElement for ParagraphElement {
     type Element = Self;
 
-    fn into_element(self) -> Self::Element {
+    fn into_element(self) -> Self {
         self
     }
 }
@@ -71,83 +75,51 @@ impl Element for ParagraphElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let view = self.view.read(cx);
-        let session = view.session();
         let style = window.text_style();
         let font = style.font();
         let font_size = style.font_size.to_pixels(window.rem_size());
         let color = style.color;
 
-        let (display_text, segments) = view.display_content();
-        let runs: Vec<TextRun> = segments
-            .iter()
-            .map(|segment| {
-                let mut font = font.clone();
-                if segment.bold {
-                    font.weight = FontWeight::BOLD;
-                }
-                if segment.italic {
-                    font.style = FontStyle::Italic;
-                }
-                // Only the preedit segment carries an explicit underline;
-                // canonical segments keep their own mark styling.
-                let underline = segment.underline.then_some(UnderlineStyle {
-                    color: Some(color),
-                    thickness: px(1.0),
-                    wavy: false,
-                });
-                TextRun {
-                    len: segment.text.len(),
-                    font,
-                    color,
-                    background_color: segment.code.then_some(rgba(0x00000012).into()),
-                    underline,
-                    strikethrough: segment.strike.then_some(StrikethroughStyle {
-                        color: Some(color),
-                        thickness: px(1.0),
-                    }),
-                }
-            })
-            .collect();
-        // The caret sits at the composition caret while composing, and at
-        // the canonical selection focus otherwise.
-        let caret_byte = view.composing_caret_byte().unwrap_or_else(|| {
-            let selection = session
-                .text_selection()
-                .expect("single-block session selection");
-            selection.focus().offset().as_usize()
-        });
-        let anchor_byte = if view.is_composing() {
-            caret_byte
-        } else {
-            session
-                .text_selection()
-                .expect("single-block session selection")
-                .anchor()
-                .offset()
-                .as_usize()
-        };
-        let line = window.text_system().shape_line(
-            SharedString::new(display_text.as_ref()),
-            font_size,
-            &runs,
-            None,
-        );
+        // Composition transients bypass the cache: the virtual projection
+        // changes without an epoch bump.
+        let composing = view.is_composing();
+        let cache_key = (!composing)
+            .then(|| LayoutCacheKey::new(view.node(), view.epoch.get(), bounds.size.width.into()));
+        let cached_hit = !composing && view.cache_key == cache_key && view.last_layout.is_some();
 
-        let (selection, cursor) = if anchor_byte == caret_byte {
-            let caret_x = line.x_for_index(caret_byte);
-            (
-                None,
-                Some(fill(
-                    Bounds::new(
-                        point(bounds.left() + caret_x, bounds.top()),
-                        size(px(2.0), bounds.bottom() - bounds.top()),
-                    ),
-                    gpui::blue(),
-                )),
-            )
+        let line: ShapedLine = if cached_hit {
+            view.last_layout.clone().expect("checked above")
         } else {
-            let (start, end) = (anchor_byte.min(caret_byte), anchor_byte.max(caret_byte));
-            (
+            let (display_text, segments) = view.display_content();
+            let runs = text_runs(&segments, font.clone(), color);
+            window.text_system().shape_line(
+                SharedString::new(display_text.as_ref()),
+                font_size,
+                &runs,
+                None,
+            )
+        };
+
+        let caret_byte = view.composing_caret_byte().or_else(|| view.focus_byte());
+        let projection = if composing {
+            SelectionProjection::None
+        } else {
+            use crate::document_view::navigation;
+            let order: Vec<_> = {
+                let session = view.session().borrow();
+                navigation::text_blocks(session.document())
+                    .into_iter()
+                    .map(|block| block.node)
+                    .collect()
+            };
+            view.projected_selection(&order)
+        };
+
+        // A non-collapsed highlight wins over the caret; the caret shows
+        // only when this block holds the selection focus.
+        let focused = self.view.read(cx).focus_handle.is_focused(window);
+        let (selection, cursor) = match projection {
+            SelectionProjection::Highlight { start, end } => (
                 Some(fill(
                     Bounds::from_corners(
                         point(bounds.left() + line.x_for_index(start), bounds.top()),
@@ -156,13 +128,27 @@ impl Element for ParagraphElement {
                     rgba(0x3377cc44),
                 )),
                 None,
-            )
+            ),
+            _ => match (focused, caret_byte) {
+                (true, Some(caret)) => (
+                    None,
+                    Some(fill(
+                        Bounds::new(
+                            point(bounds.left() + line.x_for_index(caret), bounds.top()),
+                            size(px(2.0), bounds.bottom() - bounds.top()),
+                        ),
+                        gpui::blue(),
+                    )),
+                ),
+                _ => (None, None),
+            },
         };
 
         PrepaintState {
             line: Some(line),
             cursor,
             selection,
+            cache_key,
         }
     }
 
@@ -198,9 +184,51 @@ impl Element for ParagraphElement {
             window.paint_quad(cursor);
         }
 
+        let node_id = self.view.read(cx).node();
+        let registry = self.view.read(cx).bounds_registry.clone();
+        registry.borrow_mut().push((node_id, bounds));
+
         self.view.update(cx, |view, _| {
             view.last_layout = Some(line);
             view.last_bounds = Some(bounds);
+            view.cache_key = prepaint.cache_key;
         });
     }
+}
+
+fn text_runs(
+    segments: &[super::DisplaySegment],
+    font: gpui::Font,
+    color: gpui::Hsla,
+) -> Vec<TextRun> {
+    segments
+        .iter()
+        .map(|segment| {
+            let mut run_font = font.clone();
+            if segment.bold {
+                run_font.weight = FontWeight::BOLD;
+            }
+            if segment.italic {
+                run_font.style = FontStyle::Italic;
+            }
+            // Only the preedit segment carries an explicit underline;
+            // canonical segments keep their own mark styling.
+            let underline = segment.underline.then_some(UnderlineStyle {
+                color: Some(color),
+                thickness: px(1.0),
+                wavy: false,
+            });
+            TextRun {
+                len: segment.text.len(),
+                font: run_font,
+                color,
+                background_color: segment.code.then_some(rgba(0x00000012).into()),
+                underline,
+                strikethrough: segment.strike.then_some(StrikethroughStyle {
+                    color: Some(color),
+                    thickness: px(1.0),
+                }),
+            }
+        })
+        .collect()
 }

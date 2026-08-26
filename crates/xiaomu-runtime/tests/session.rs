@@ -647,3 +647,110 @@ fn selected_text_covers_full_selection_regardless_of_anchor_order() {
         .unwrap();
     assert_eq!(session.selected_text(), None);
 }
+
+fn paragraph(text: &str, builder: &mut NodeStoreBuilder) -> NodeId {
+    builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            NodeContent::Inline(
+                InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()]).unwrap(),
+            ),
+        )
+        .unwrap()
+}
+
+fn two_paragraph_document(first: &str, second: &str) -> (XiaomuDocument, NodeId, NodeId) {
+    let mut builder = NodeStoreBuilder::new();
+    let head = paragraph(first, &mut builder);
+    let tail = paragraph(second, &mut builder);
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([head, tail]),
+        )
+        .unwrap();
+    (
+        XiaomuDocument::new(root, builder.finish()).unwrap(),
+        head,
+        tail,
+    )
+}
+
+#[test]
+fn set_selection_moves_endpoints_across_blocks_and_validates() {
+    let (document, head, tail) = two_paragraph_document("one", "two");
+
+    let mut session = session_with(&document, caret(&document, head, 0));
+    session
+        .apply_intent(&EditIntent::SetSelection {
+            anchor: TextPoint::at_start_of(head),
+            focus: TextPoint::at_start_of(tail),
+        })
+        .unwrap();
+
+    let selection = session.selection();
+    assert!(
+        matches!(selection.focus(), xiaomu_runtime::session::DocumentPosition::Text(point) if point.node_id() == tail)
+    );
+    // The anchor survives the cross-block extension.
+    assert!(
+        matches!(selection.anchor(), xiaomu_runtime::session::DocumentPosition::Text(point) if point.node_id() == head)
+    );
+
+    // An endpoint outside the focused node's text is rejected atomically:
+    // "one" is 3 bytes but "tw" is only 2.
+    let (document2, head2, tail2) = two_paragraph_document("one", "tw");
+    let mut session2 = session_with(&document2, caret(&document2, head2, 0));
+    assert_eq!(
+        session2.apply_intent(&EditIntent::SetSelection {
+            anchor: TextPoint::at_start_of(head2),
+            focus: TextPoint::new(
+                tail2,
+                offset_of(&document2, head2, 3),
+                CursorAffinity::Before
+            ),
+        }),
+        Err(SessionError::SelectionInvalid)
+    );
+}
+
+#[test]
+fn split_block_then_set_selection_reaches_the_new_block() {
+    use xiaomu_core::selection::CursorAffinity;
+
+    let (document, head, _tail_unused) = two_paragraph_document("abc", "tail");
+    let mut session = session_with(&document, caret(&document, head, 0));
+
+    session
+        .apply_intent(&move_caret(CaretMove::ToEnd, false))
+        .unwrap();
+    session.apply_intent(&EditIntent::SplitBlock).unwrap();
+
+    let focus_node = match session.selection().focus() {
+        xiaomu_runtime::session::DocumentPosition::Text(point) => point.node_id(),
+        xiaomu_runtime::session::DocumentPosition::Gap(_) => {
+            panic!("expected a text position after split")
+        }
+    };
+    assert_ne!(focus_node, head);
+
+    // Collapse back onto the head block's start through the document-level
+    // intent; the offset must be re-derived from the live snapshot.
+    let inline = session
+        .document()
+        .node(head)
+        .unwrap()
+        .content()
+        .as_inline()
+        .unwrap();
+    let start = inline.offset_at(0).unwrap();
+    session
+        .apply_intent(&EditIntent::SetSelection {
+            anchor: TextPoint::new(head, start, CursorAffinity::Before),
+            focus: TextPoint::new(head, start, CursorAffinity::Before),
+        })
+        .unwrap();
+    assert!(session.selection().is_collapsed());
+}

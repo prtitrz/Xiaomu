@@ -5,7 +5,7 @@
 //! only the session knows which after-selection a command promises.
 
 use xiaomu_core::document::{InlineContent, Mark, MarkKind, NodeId, NodeKind};
-use xiaomu_core::selection::TextSelection;
+use xiaomu_core::selection::{TextPoint, TextSelection};
 use xiaomu_core::text::{TextOffset, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
@@ -109,6 +109,19 @@ pub enum EditIntent {
     ///
     /// An item of a top-level list cannot outdent; that is a no-op.
     OutdentListItem,
+    /// Place both selection endpoints at absolute text positions.
+    ///
+    /// This is the document-level form of [`EditIntent::PlaceCaret`]: it can
+    /// move the caret or selection across blocks (cross-block navigation,
+    /// mouse drag select). Both endpoints are validated against the current
+    /// snapshot; an invalid endpoint fails with a typed error and leaves the
+    /// session untouched. Produces no transaction.
+    SetSelection {
+        /// Selection anchor endpoint.
+        anchor: TextPoint,
+        /// Selection focus endpoint.
+        focus: TextPoint,
+    },
 }
 
 /// How the session derives the selection after a plan commits.
