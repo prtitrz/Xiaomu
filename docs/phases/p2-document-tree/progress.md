@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P2.4 List 编辑已完成（待实机验证，GPUI 接入属 P2.5）**
+当前切片：**P2.5 GPUI multi-block 渲染与导航已完成（待实机验证）**
 
-前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0 / P2.1 / P2.2 / P2.3 已合入（PR #21–#24）。
+前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0–P2.4 已合入（PR #21–#25）。
 
 ## P2.0 Phase Contract 与阶段骨架
 
@@ -171,6 +171,43 @@ tools/check_dependency_boundaries.py ok
 各切片环境一致；GPUI 实机验证归 P2.5。
 ```
 
+## P2.5 GPUI multi-block 渲染与导航
+
+- [x] `DocumentView` 块列表容器：按文档序为每个 inline-bearing block 挂载一个块视图，`overflow_y_scroll` 滚动容器，焦点跟随 selection focus 路由
+- [x] per-block view 多实例化：子实体按 NodeId 池化复用（IME composition / 焦点状态跨渲染存活）；layout cache key = (node, epoch, 宽度取整)，命中则复用 shape 结果
+- [x] 跨块 Left / Right / Home / End / Up / Down 导航：`navigation.rs` 纯逻辑（无 GPUI 类型）翻译为 `SetSelection`；Left/Right 在块边界环绕，Up/Down 在相邻块间移动并钳制字节下标（单视觉行模型）
+- [x] 跨块 selection 投影绘制与鼠标拖选：高亮按 `DocumentSelection::ordered` 逐块投影（含中间块全亮）；鼠标经 paint 期发布的块 bounds 注册表分发到目标块再 x hit-test
+- [x] heading / quote 视觉区分：heading 按层级放大加粗，quote 后代缩进 + 左侧竖线，list item 按嵌套深度缩进
+- [x] runtime 新增 `EditIntent::SetSelection { anchor, focus }`：跨块选择 / 导航的文档级放置原语（端点对当前 snapshot 校验，失败原子回退），session 测试 +2
+
+实现说明：
+
+```text
+ParagraphView 从持有 DocumentSession 改为共享 Rc<RefCell<DocumentSession>>；
+全部键盘动作上移到 DocumentView 容器层（从焦点块冒泡分发），块内仅保留
+IME InputHandler 与渲染。编辑 epoch 在每次 DocumentChanged 后递增，作为
+布局缓存键的一部分；composition 期绕过缓存。
+已知边界：块仍为单视觉行（不软换行），Up/Down 不做 x 保持（钳制字节下标，
+实机验证后按需升级为 shaped-line 几何）；gap 端点在 extend 时塌缩为目标点；
+composition 仍限定单块（P1 移交约束不变）。
+```
+
+完成证据：
+
+```text
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test -p xiaomu-core -p xiaomu-runtime -p xiaomu-codec-markdown --all-targets 全绿
+  （runtime session 测试 19→21：SetSelection 跨块移动 + 校验、split 后
+   SetSelection 触达新块；P1/P2.3/P2.4 回归不改断言通过）
+gpui 纯逻辑测试 navigation.rs 7 个 + cache_key.rs 2 个：本机 WSL 缺
+libxkbcommon-x11 无法链接 gpui 测试二进制（与 P1–P2.4 各切片一致），
+已在临时 crate 中等价运行通过；远端 CI 三平台覆盖正式位置。
+tools/check_source_size.py ok（document_view/mod.rs 667 行超 review 阈值
+500，仅 warning，后续切片拆分）；check_dependency_boundaries.py ok
+GPUI 实机验证（Windows multi-block 键盘闭环）待 P2.6 harness 接入后执行。
+```
+
 ## P1 移交的 P2 前置依赖与归属
 
 P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置如下：
@@ -224,6 +261,15 @@ P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置
 - OutdentListItem 的目标父节点是外层 list（紧跟外层 item 之后），不是外层 item：Core 的 `allows_child` 禁止 ListItem 直接嵌套 ListItem。被清空的内层 list 同笔删除。
 - Lift out 把被抬升块插在 list 的原槽位（出现在残留 list 之上）；多 item list 只溶解焦点 item，其余 item 不动。
 - indent/outdent 未引入 MoveNode step：单笔 RemoveNode + RestoreSubtree 即可表达（组合成本可控，§3.4 的 MoveNode 评估结论为不需要）。
+
+### 2026-08-27（P2.5）
+
+- 跨块选择放置不新增 Core 概念：runtime 新增 `EditIntent::SetSelection { anchor, focus }`（两个 `TextPoint` 端点对 snapshot 校验），作为 `PlaceCaret` 的文档级形式；导航/拖选全部编译到这一个原语，session 不暴露裸 selection setter。
+- ParagraphView 从拥有 session 改为共享 `Rc<RefCell<DocumentSession>>`，键盘动作上移到 DocumentView 容器层冒泡分发；块内仅保留 IME InputHandler 与渲染。composition 仍限定单块（P1 移交停损不变），编辑 epoch 在每次 DocumentChanged 后递增。
+- 布局缓存键 = (node, epoch, 宽度取整)：epoch 驱动失效避免每帧重排 shape；composition 期绕过缓存（虚拟投影变化不经 epoch）。宽度取整到整像素，亚像素抖动不失效。
+- Up/Down 采用单视觉行模型：相邻块间移动并钳制字节下标，不做 x 保持——需要 shaped-line 几何，实机验证后按需升级；块不软换行是本切片前提。
+- 选区高亮按 `DocumentSelection::ordered` 逐块投影：两端点所在块画部分高亮，中间块全亮；caret 只在焦点端点所在块且平台焦点在该块时绘制。
+- 鼠标命中用 paint 期发布的逐块 bounds 注册表（每帧清空重建）：y 找最近块、x 用该块的 shaped line hit-test；拖选 extend 保持现有 text anchor（gap anchor 塌缩为目标点，本切片端点全文本化）。
 
 ## P2 Phase Gate
 

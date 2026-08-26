@@ -1,35 +1,45 @@
-//! Single-paragraph block view.
+//! Single inline-bearing block view.
 //!
-//! The view owns its [`DocumentSession`] and renders one inline node. All
-//! editing flows through runtime intents; the view never mutates the
-//! document directly. Platform UTF-16 ranges are converted at this boundary
-//! (see [`crate::input::utf16`]).
+//! A block view renders one inline node of the document owned by the shared
+//! [`DocumentSession`]. It never mutates the document directly except along
+//! the IME commit path; all other editing flows through runtime intents
+//! applied by [`crate::document_view::DocumentView`]. Platform UTF-16
+//! ranges are converted at this boundary (see [`crate::input::utf16`]).
 //!
 //! While IME composition is active, all input-handler queries answer against
 //! a virtual projection (canonical prefix + preedit + suffix); see
 //! [`crate::input::composition`].
 
-mod actions;
 mod element;
 mod ime;
 mod input_handler;
 #[cfg(test)]
 mod tests;
 
-use std::ops::Range;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, Context, FocusHandle, Focusable, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, ShapedLine, Subscription, Window, actions, div, prelude::*, px,
+    App, Bounds, Context, FocusHandle, Focusable, Pixels, ShapedLine, Subscription, Window,
+    actions, div, prelude::*,
 };
 
 use xiaomu_core::document::{InlineContent, NodeId};
-use xiaomu_core::text::{TextOffset, TextRange};
-use xiaomu_runtime::session::{CaretMove, DocumentSession, EditIntent};
+use xiaomu_runtime::session::{DocumentPosition, DocumentSession, EditIntent};
 
+use crate::document_view::cache_key::LayoutCacheKey;
 use crate::input::composition::CompositionState;
 
 pub use element::ParagraphElement;
+
+/// The session handle every block view of one editor shares.
+pub type SharedSession = Rc<RefCell<DocumentSession>>;
+
+/// Per-block paint geometry published to the document view each frame.
+///
+/// The document view consumes these entries for cross-block mouse hit
+/// testing; entries are cleared at the start of every render pass.
+pub type BlockBoundsRegistry = Rc<RefCell<Vec<(NodeId, Bounds<Pixels>)>>>;
 
 actions!(
     xiaomu_gpui,
@@ -46,6 +56,14 @@ actions!(
         SelectLeft,
         /// Extend the selection one scalar to the right.
         SelectRight,
+        /// Move up one visual line (one block in this slice).
+        Up,
+        /// Move down one visual line (one block in this slice).
+        Down,
+        /// Extend the selection one line up.
+        SelectUp,
+        /// Extend the selection one line down.
+        SelectDown,
         /// Collapse to the paragraph's logical start.
         Home,
         /// Collapse to the paragraph's logical end.
@@ -54,8 +72,14 @@ actions!(
         SelectHome,
         /// Extend the selection to the paragraph's logical end.
         SelectEnd,
-        /// Select the whole paragraph.
+        /// Select the whole document.
         SelectAll,
+        /// Split the focused block at the caret (Enter).
+        Enter,
+        /// Indent the focused list item (Tab).
+        TabIndent,
+        /// Outdent the focused list item (Shift-Tab).
+        ShiftTabIndent,
         /// Copy the selected plain text to the clipboard.
         ClipboardCopy,
         /// Cut the selected plain text to the clipboard and delete it.
@@ -95,7 +119,7 @@ pub(crate) struct DisplaySegment {
 
 fn project_display_content(
     inline: &InlineContent,
-    composition: Option<(Range<usize>, &str)>,
+    composition: Option<(std::ops::Range<usize>, &str)>,
 ) -> (String, Vec<DisplaySegment>) {
     let (base_start, base_end, preedit) = composition
         .as_ref()
@@ -162,24 +186,44 @@ fn project_display_content(
     (text, segments)
 }
 
-/// A single-paragraph editor view over one [`DocumentSession`].
+/// How much of this block's text the document selection covers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SelectionProjection {
+    /// Nothing to draw in this block.
+    None,
+    /// A collapsed caret at a displayed-text byte offset.
+    Caret(usize),
+    /// A highlighted span of displayed-text byte offsets.
+    Highlight { start: usize, end: usize },
+}
+
+/// A block editor view rendering one inline node of the shared session.
 pub struct ParagraphView {
-    session: DocumentSession,
+    pub(super) session: SharedSession,
     node: NodeId,
     focus_handle: FocusHandle,
-    last_layout: Option<ShapedLine>,
-    last_bounds: Option<Bounds<Pixels>>,
-    is_selecting: bool,
+    pub(super) last_layout: Option<ShapedLine>,
+    pub(super) last_bounds: Option<Bounds<Pixels>>,
+    pub(super) cache_key: Option<LayoutCacheKey>,
+    /// Render generation shared with the owning document view.
+    pub(super) epoch: Rc<std::cell::Cell<u64>>,
+    pub(crate) bounds_registry: BlockBoundsRegistry,
     composition: Option<CompositionState>,
     focus_out_subscription: Option<Subscription>,
 }
 
 impl ParagraphView {
-    /// Creates a view rendering `node` from the session.
+    /// Creates a view rendering `node` from the shared session.
     ///
-    /// The session's selection must live inside `node`; P1 editing never
-    /// leaves the single inline node.
-    pub fn new(session: DocumentSession, node: NodeId, cx: &mut Context<Self>) -> Self {
+    /// The session's selection does not have to live inside `node`; views
+    /// project the document selection onto their own text for painting.
+    pub fn new(
+        session: SharedSession,
+        epoch: Rc<std::cell::Cell<u64>>,
+        bounds_registry: BlockBoundsRegistry,
+        node: NodeId,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
         Self {
             session,
@@ -187,15 +231,17 @@ impl ParagraphView {
             focus_handle,
             last_layout: None,
             last_bounds: None,
-            is_selecting: false,
+            cache_key: None,
+            epoch,
+            bounds_registry,
             composition: None,
             focus_out_subscription: None,
         }
     }
 
-    /// Returns the session rendered by this view.
+    /// Returns the shared session rendered by this view.
     #[must_use]
-    pub fn session(&self) -> &DocumentSession {
+    pub fn session(&self) -> &SharedSession {
         &self.session
     }
 
@@ -220,8 +266,9 @@ impl ParagraphView {
             .map(CompositionState::caret_virtual_byte)
     }
 
-    fn inline(&self) -> Option<InlineContent> {
+    pub(crate) fn inline(&self) -> Option<InlineContent> {
         self.session
+            .borrow()
             .document()
             .node(self.node)?
             .content()
@@ -230,7 +277,7 @@ impl ParagraphView {
     }
 
     /// Returns the canonical concatenated text of the inline node.
-    fn canonical_text(&self) -> String {
+    pub(crate) fn canonical_text(&self) -> String {
         self.inline()
             .map(|inline| {
                 inline
@@ -242,241 +289,97 @@ impl ParagraphView {
             .unwrap_or_default()
     }
 
-    /// Returns the end offset of the inline content.
-    fn end_offset(&self) -> Option<TextOffset> {
-        self.inline().map(|inline| {
-            let len = inline.len_bytes();
-            inline.offset_at(len).expect("end offset is always valid")
-        })
-    }
-
-    fn apply_intent(&mut self, intent: EditIntent, cx: &mut Context<Self>) {
-        if let Err(error) = self.session.apply_intent(&intent) {
-            eprintln!("xiaomu: intent rejected: {error}");
-        }
-        cx.notify();
-    }
-
-    /// Editing actions are suspended while composing: every canonical edit
-    /// would invalidate the captured base range. Platforms route those keys
-    /// through the IME instead; anything that still arrives here is dropped.
-    fn apply_intent_when_idle(&mut self, intent: EditIntent, cx: &mut Context<Self>) {
-        if self.is_composing() {
-            eprintln!("xiaomu: editing action ignored during composition");
-            return;
-        }
-        self.apply_intent(intent, cx);
-    }
-
-    fn ordered_range(&self) -> Option<TextRange> {
+    /// Ordered text range of the session selection when it is single-node.
+    pub(crate) fn ordered_range(&self) -> Option<xiaomu_core::text::TextRange> {
         self.session
+            .borrow()
             .text_selection()
             .and_then(|selection| selection.ordered_range().ok())
     }
 
-    fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
-        let collapsed = self
-            .session
-            .text_selection()
-            .map(|selection| selection.is_collapsed())
-            .unwrap_or(false);
-        let intent = if collapsed {
-            EditIntent::MoveCaret {
-                caret_move: CaretMove::Backward,
-                extend_selection: false,
-            }
-        } else if let Some(range) = self.ordered_range() {
-            EditIntent::PlaceCaret {
-                offset: range.start(),
-                extend_selection: false,
-            }
-        } else {
-            return;
-        };
-        self.apply_intent_when_idle(intent, cx);
-    }
-
-    fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
-        let collapsed = self
-            .session
-            .text_selection()
-            .map(|selection| selection.is_collapsed())
-            .unwrap_or(false);
-        let intent = if collapsed {
-            EditIntent::MoveCaret {
-                caret_move: CaretMove::Forward,
-                extend_selection: false,
-            }
-        } else if let Some(range) = self.ordered_range() {
-            EditIntent::PlaceCaret {
-                offset: range.end(),
-                extend_selection: false,
-            }
-        } else {
-            return;
-        };
-        self.apply_intent_when_idle(intent, cx);
-    }
-
-    fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent_when_idle(
-            EditIntent::MoveCaret {
-                caret_move: CaretMove::Backward,
-                extend_selection: true,
-            },
-            cx,
-        );
-    }
-
-    fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent_when_idle(
-            EditIntent::MoveCaret {
-                caret_move: CaretMove::Forward,
-                extend_selection: true,
-            },
-            cx,
-        );
-    }
-
-    fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent_when_idle(
-            EditIntent::MoveCaret {
-                caret_move: CaretMove::ToStart,
-                extend_selection: false,
-            },
-            cx,
-        );
-    }
-
-    fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent_when_idle(
-            EditIntent::MoveCaret {
-                caret_move: CaretMove::ToEnd,
-                extend_selection: false,
-            },
-            cx,
-        );
-    }
-
-    fn select_home(&mut self, _: &SelectHome, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent_when_idle(
-            EditIntent::MoveCaret {
-                caret_move: CaretMove::ToStart,
-                extend_selection: true,
-            },
-            cx,
-        );
-    }
-
-    fn select_end(&mut self, _: &SelectEnd, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent_when_idle(
-            EditIntent::MoveCaret {
-                caret_move: CaretMove::ToEnd,
-                extend_selection: true,
-            },
-            cx,
-        );
-    }
-
-    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(end) = self.end_offset() else {
-            return;
-        };
-        self.apply_intent_when_idle(
-            EditIntent::PlaceCaret {
-                offset: TextOffset::ZERO,
-                extend_selection: false,
-            },
-            cx,
-        );
-        self.apply_intent_when_idle(
-            EditIntent::PlaceCaret {
-                offset: end,
-                extend_selection: true,
-            },
-            cx,
-        );
-    }
-
-    fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent_when_idle(EditIntent::Backspace, cx);
-    }
-
-    fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent_when_idle(EditIntent::Delete, cx);
-    }
-
-    fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
-        if self.is_composing() {
-            eprintln!("xiaomu: editing action ignored during composition");
-            return;
+    fn apply_intent(&mut self, intent: EditIntent, cx: &mut Context<Self>) {
+        if let Err(error) = self.session.borrow_mut().apply_intent(&intent) {
+            eprintln!("xiaomu: intent rejected: {error}");
         }
-        if let Err(error) = self.session.undo() {
-            eprintln!("xiaomu: undo rejected: {error}");
-        }
+        self.epoch.set(self.epoch.get() + 1);
         cx.notify();
     }
 
-    fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
-        if self.is_composing() {
-            eprintln!("xiaomu: editing action ignored during composition");
-            return;
-        }
-        if let Err(error) = self.session.redo() {
-            eprintln!("xiaomu: redo rejected: {error}");
-        }
-        cx.notify();
-    }
-
-    fn on_mouse_down(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.is_selecting = true;
-        // Clicking cancels an ongoing composition before repositioning.
-        self.cancel_composition(cx);
-        if let Some(offset) = self.index_for_mouse_position(event.position) {
-            self.apply_intent(
-                EditIntent::PlaceCaret {
-                    offset,
-                    extend_selection: event.modifiers.shift,
-                },
-                cx,
-            );
-        }
-    }
-
-    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
-        self.is_selecting = false;
-    }
-
-    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.is_selecting
-            && let Some(offset) = self.index_for_mouse_position(event.position)
-        {
-            self.apply_intent(
-                EditIntent::PlaceCaret {
-                    offset,
-                    extend_selection: true,
-                },
-                cx,
-            );
-        }
-    }
-
-    /// Maps a window-space point to the closest valid inline offset.
-    fn index_for_mouse_position(&self, position: Point<Pixels>) -> Option<TextOffset> {
+    /// Maps an x coordinate inside this block's last painted bounds to the
+    /// closest valid raw byte index. Used by the document view for mouse
+    /// hit testing.
+    pub(crate) fn hit_test_x(&self, x: Pixels) -> Option<usize> {
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
-        let inline = self.inline()?;
+        Some(layout.closest_index_for_x(x - bounds.left()))
+    }
 
-        let text = self.canonical_text();
-        let raw = if position.y < bounds.top() {
-            0
-        } else if position.y > bounds.bottom() {
-            text.len()
-        } else {
-            layout.closest_index_for_x(position.x - bounds.left())
+    /// Projects the document selection onto this block's displayed text.
+    ///
+    /// `order` lists the document's inline-bearing nodes in document order;
+    /// blocks strictly between the selection endpoints are covered fully.
+    #[must_use]
+    pub(crate) fn projected_selection(&self, order: &[NodeId]) -> SelectionProjection {
+        let session = self.session.borrow();
+        let selection = session.selection();
+        let document = session.document();
+
+        let endpoint = |position: DocumentPosition| match position {
+            DocumentPosition::Text(point) => Some((point.node_id(), point.offset().as_usize())),
+            DocumentPosition::Gap(_) => None,
         };
 
-        inline.offset_at(raw).ok()
+        let Ok((head, tail)) = selection.ordered(document) else {
+            return SelectionProjection::None;
+        };
+        let Some((head_node, head_byte)) = endpoint(head) else {
+            return SelectionProjection::None;
+        };
+        let Some((tail_node, tail_byte)) = endpoint(tail) else {
+            return SelectionProjection::None;
+        };
+        let Some(my_index) = order.iter().position(|id| *id == self.node) else {
+            return SelectionProjection::None;
+        };
+        let Some(head_index) = order.iter().position(|id| *id == head_node) else {
+            return SelectionProjection::None;
+        };
+        let Some(tail_index) = order.iter().position(|id| *id == tail_node) else {
+            return SelectionProjection::None;
+        };
+
+        if my_index < head_index || my_index > tail_index {
+            return SelectionProjection::None;
+        }
+        let text_len = self.canonical_text().len();
+        let start = if head_node == self.node { head_byte } else { 0 };
+        let end = if tail_node == self.node {
+            tail_byte
+        } else {
+            text_len
+        };
+
+        if start >= end {
+            SelectionProjection::Caret(start.min(text_len))
+        } else {
+            SelectionProjection::Highlight {
+                start,
+                end: end.min(text_len),
+            }
+        }
+    }
+
+    /// Displayed-text byte offset of the selection focus when it lives in
+    /// this block.
+    #[must_use]
+    pub(crate) fn focus_byte(&self) -> Option<usize> {
+        let session = self.session.borrow();
+        match session.selection().focus() {
+            DocumentPosition::Text(point) if point.node_id() == self.node => {
+                Some(point.offset().as_usize())
+            }
+            _ => None,
+        }
     }
 
     /// Builds the displayed text plus its styled segments.
@@ -484,6 +387,7 @@ impl ParagraphView {
     /// Without an active composition this is the canonical content itself;
     /// while composing, the preedit is spliced in as an underlined segment
     /// and the replaced canonical span disappears until commit.
+    #[must_use]
     pub(crate) fn display_content(&self) -> (String, Vec<DisplaySegment>) {
         let Some(inline) = self.inline() else {
             return (String::new(), Vec::new());
@@ -519,38 +423,8 @@ impl Render for ParagraphView {
         div()
             .key_context("XiaomuParagraph")
             .track_focus(&self.focus_handle(cx))
-            .size_full()
-            .bg(gpui::white())
-            .p_4()
-            .line_height(px(28.0))
-            .text_size(px(20.0))
-            .text_color(gpui::black())
+            .w_full()
             .cursor(gpui::CursorStyle::IBeam)
-            .on_action(cx.listener(Self::backspace))
-            .on_action(cx.listener(Self::delete))
-            .on_action(cx.listener(Self::left))
-            .on_action(cx.listener(Self::right))
-            .on_action(cx.listener(Self::select_left))
-            .on_action(cx.listener(Self::select_right))
-            .on_action(cx.listener(Self::home))
-            .on_action(cx.listener(Self::end))
-            .on_action(cx.listener(Self::select_home))
-            .on_action(cx.listener(Self::select_end))
-            .on_action(cx.listener(Self::select_all))
-            .on_action(cx.listener(Self::copy))
-            .on_action(cx.listener(Self::cut))
-            .on_action(cx.listener(Self::paste))
-            .on_action(cx.listener(Self::toggle_bold))
-            .on_action(cx.listener(Self::toggle_italic))
-            .on_action(cx.listener(Self::toggle_code))
-            .on_action(cx.listener(Self::toggle_underline))
-            .on_action(cx.listener(Self::toggle_strike))
-            .on_action(cx.listener(Self::undo))
-            .on_action(cx.listener(Self::redo))
-            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_mouse_move(cx.listener(Self::on_mouse_move))
             .child(ParagraphElement { view: cx.entity() })
     }
 }

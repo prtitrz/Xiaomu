@@ -5,19 +5,24 @@
 //! windows on top of [`crate::block_view`] instead.
 
 use gpui::{
-    App, Application, Bounds, Focusable, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions,
-    prelude::*, px, size,
+    App, Application, Bounds, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, prelude::*,
+    px, size,
 };
+
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use xiaomu_core::document::{NodeId, XiaomuDocument};
 use xiaomu_core::selection::TextSelection;
 use xiaomu_runtime::session::{DocumentSelection, DocumentSession};
 
 use crate::block_view::{
-    Backspace, ClipboardCopy, ClipboardCut, ClipboardPaste, Delete, End, Home, Left, ParagraphView,
-    Redo, Right, SelectAll, SelectEnd, SelectHome, SelectLeft, SelectRight, ToggleBold, ToggleCode,
-    ToggleItalic, ToggleStrike, ToggleUnderline, Undo,
+    Backspace, ClipboardCopy, ClipboardCut, ClipboardPaste, Delete, Down, End, Enter, Home, Left,
+    Redo, Right, SelectAll, SelectDown, SelectEnd, SelectHome, SelectLeft, SelectRight, SelectUp,
+    ShiftTabIndent, TabIndent, ToggleBold, ToggleCode, ToggleItalic, ToggleStrike, ToggleUnderline,
+    Undo, Up,
 };
+use crate::document_view::DocumentView;
 
 /// Runs a single-paragraph editor window over `document`.
 ///
@@ -29,7 +34,22 @@ pub fn run_single_block_editor(
     node: NodeId,
     selection: TextSelection,
 ) -> Result<(), xiaomu_runtime::session::SessionError> {
-    let session = DocumentSession::new(document, DocumentSelection::text(selection))?;
+    let _ = node; // the multi-block view derives blocks from the document
+    run_document_editor(document, selection)
+}
+
+/// Runs a multi-block editor window over `document`.
+///
+/// The initial selection must be valid for the document. This function takes
+/// over the main thread and returns only when the application quits.
+pub fn run_document_editor(
+    document: XiaomuDocument,
+    selection: TextSelection,
+) -> Result<(), xiaomu_runtime::session::SessionError> {
+    let session = Rc::new(RefCell::new(DocumentSession::new(
+        document,
+        DocumentSelection::text(selection),
+    )?));
 
     Application::new().run(move |cx: &mut App| {
         // Quit when the last window closes so the harness terminates cleanly.
@@ -43,10 +63,17 @@ pub fn run_single_block_editor(
         cx.bind_keys([
             KeyBinding::new("backspace", Backspace, None),
             KeyBinding::new("delete", Delete, None),
+            KeyBinding::new("enter", Enter, None),
+            KeyBinding::new("tab", TabIndent, None),
+            KeyBinding::new("shift-tab", ShiftTabIndent, None),
             KeyBinding::new("left", Left, None),
             KeyBinding::new("right", Right, None),
+            KeyBinding::new("up", Up, None),
+            KeyBinding::new("down", Down, None),
             KeyBinding::new("shift-left", SelectLeft, None),
             KeyBinding::new("shift-right", SelectRight, None),
+            KeyBinding::new("shift-up", SelectUp, None),
+            KeyBinding::new("shift-down", SelectDown, None),
             KeyBinding::new("home", Home, None),
             KeyBinding::new("end", End, None),
             KeyBinding::new("shift-home", SelectHome, None),
@@ -76,7 +103,7 @@ pub fn run_single_block_editor(
             KeyBinding::new("ctrl-y", Redo, None),
         ]);
 
-        let bounds = Bounds::centered(None, size(px(640.0), px(200.0)), cx);
+        let bounds = Bounds::centered(None, size(px(640.0), px(480.0)), cx);
         let window = cx
             .open_window(
                 WindowOptions {
@@ -87,13 +114,15 @@ pub fn run_single_block_editor(
                     }),
                     ..Default::default()
                 },
-                |_, cx| cx.new(|cx| ParagraphView::new(session, node, cx)),
+                |_, cx| cx.new(|_| DocumentView::new(session.clone())),
             )
             .expect("open editor window");
 
+        // Initial focus goes to the block holding the selection focus once
+        // the view has built its children.
         window
-            .update(cx, |view, window, cx| {
-                window.focus(&view.focus_handle(cx));
+            .update(cx, |view: &mut DocumentView, window, cx| {
+                view.route_focus_initial(window, cx);
                 cx.activate(true);
             })
             .expect("focus editor window");

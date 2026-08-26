@@ -150,6 +150,9 @@ impl DocumentSession {
         {
             return self.place_caret(*offset, *extend_selection);
         }
+        if let EditIntent::SetSelection { anchor, focus } = intent {
+            return self.set_selection(*anchor, *focus);
+        }
 
         // Content and structural intents still act from a single inline
         // node; cross-block forms gain dedicated commands in later slices.
@@ -183,9 +186,9 @@ impl DocumentSession {
             EditIntent::OutdentListItem => {
                 structure::plan_outdent_list_item(&self.document, focus.node_id())?
             }
-            EditIntent::MoveCaret { .. } | EditIntent::PlaceCaret { .. } => {
-                unreachable!("handled above")
-            }
+            EditIntent::MoveCaret { .. }
+            | EditIntent::PlaceCaret { .. }
+            | EditIntent::SetSelection { .. } => unreachable!("handled above"),
         };
 
         match action {
@@ -418,6 +421,29 @@ impl DocumentSession {
         } else {
             DocumentSelection::collapsed(moved)
         };
+
+        if next == self.selection {
+            return Ok(SessionOutcome::NoChange);
+        }
+        self.selection = next;
+        self.notify_selection_changed();
+
+        Ok(SessionOutcome::SelectionChanged)
+    }
+
+    /// Places both selection endpoints at absolute text positions.
+    ///
+    /// The document-level escape hatch for cross-block navigation and mouse
+    /// selection. Both endpoints must be valid for the current snapshot;
+    /// otherwise the session is untouched.
+    fn set_selection(
+        &mut self,
+        anchor: TextPoint,
+        focus: TextPoint,
+    ) -> Result<SessionOutcome, SessionError> {
+        let next = DocumentSelection::new(anchor, focus);
+        next.validate(&self.document)
+            .map_err(|_| SessionError::SelectionInvalid)?;
 
         if next == self.selection {
             return Ok(SessionOutcome::NoChange);
