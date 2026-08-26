@@ -277,6 +277,38 @@ fn bullet_converts_to_ordered_by_rekinding_the_list_itself() {
 }
 
 #[test]
+fn lifting_the_last_item_places_the_block_after_the_remaining_list() {
+    let fixture = three_item_list();
+    let ThreeItemList {
+        ref document,
+        list,
+        c,
+        item_c,
+        ..
+    } = fixture;
+    let mut session = session_with(document, caret(document, c, 0));
+
+    turn_into(&mut session, NodeKind::Paragraph);
+
+    // Shift-Tab on the last item must not jump above earlier items.
+    let root = root_children(&session);
+    assert_eq!(root, vec![list, c]);
+    assert_eq!(
+        children_of(&session, list),
+        vec![fixture.item_a, fixture.item_b]
+    );
+    assert!(!children_of(&session, list).contains(&item_c));
+    assert_eq!(text_of(&session, c), "三");
+    assert_eq!(caret_node_and_offset(&session), (c, 0));
+
+    session.undo().unwrap();
+    assert_eq!(
+        store_snapshot(session.document()),
+        store_snapshot(&fixture.document)
+    );
+}
+
+#[test]
 fn lifting_out_of_a_multi_item_list_dissolves_only_the_focused_item() {
     let fixture = three_item_list();
     let ThreeItemList {
@@ -291,13 +323,15 @@ fn lifting_out_of_a_multi_item_list_dissolves_only_the_focused_item() {
     turn_into(&mut session, NodeKind::Paragraph);
 
     let root = root_children(&session);
-    assert_eq!(root, vec![b, list]);
-    // The other two items stay untouched inside the surviving list.
-    let items = children_of(&session, list);
-    assert_eq!(items.len(), 2);
-    assert_eq!(items[0], fixture.item_a);
-    assert_eq!(children_of(&session, items[0]), vec![fixture.a]);
-    assert!(!items.contains(&item_b));
+    assert_eq!(root.len(), 3);
+    assert_eq!(root[0], list);
+    assert_eq!(root[1], b);
+    let tail = root[2];
+    assert_eq!(kind_of(&session, tail), NodeKind::BulletList);
+    assert_eq!(children_of(&session, list), vec![fixture.item_a]);
+    assert_eq!(children_of(&session, fixture.item_a), vec![fixture.a]);
+    assert_eq!(children_of(&session, tail), vec![fixture.item_c]);
+    assert!(!children_of(&session, list).contains(&item_b));
     assert_eq!(text_of(&session, b), "二");
     assert_eq!(caret_node_and_offset(&session), (b, 3));
 

@@ -315,8 +315,9 @@ TurnInto(BulletList/OrderedList)   段落 → 单 item list：分阶段 InsertNo
                                    （list、item）+ RemoveNode + RestoreSubtree
                                    移动段落；已在 list 内时改为 SetNodeKind
                                    把 list 在 bullet ↔ ordered 间转换
-TurnInto(Paragraph)                item 内块退出 list：item 的全部子块移回 list
-                                   所在层级（占用 list 的槽位），item 删除；
+TurnInto(Paragraph)                item 内块退出 list，保持文档顺序：首项
+                                   出现在残留 list 之前，末项出现在其后；
+                                   中间项把后续 item 拆成同 kind 新 list；
                                    单 item list 整体溶解，闭环 paragraph →
                                    list → paragraph
 IndentListItem                     item 移入前一兄弟 item；前一 item 以嵌套

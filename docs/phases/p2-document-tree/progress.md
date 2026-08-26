@@ -147,9 +147,10 @@ wrap 与 indent 需要引用 application 期间才分配的容器 NodeId：runti
 staged plan——每个阶段从其看到的 snapshot 按确定性位置重新推导新容器 id，
 全部阶段要么全成功并合并为一笔 history entry（undo = 各阶段 inverse 逆序
 拼接，redo = inverse(undo)），要么原子失败且 session 状态不变。
-lift 的插入下标用 list 在父级中的槽位（list_index），被抬升块出现在残留
-list 内容之上；outdent 目标父节点是外层 list 而非外层 item（Core 禁止
-ListItem 直接嵌套 ListItem）。
+lift 的插入下标按焦点 item 在 list 中的位置选择：首项用 `list_index`（残留
+list 之上），其后的项用 `list_index + 1`（残留 list 之下）。中间项再把
+后续 item 拆进同 kind 的新 list。outdent 目标父节点是外层 list 而非外层
+item（Core 禁止 ListItem 直接嵌套 ListItem）。
 已知边界：item 含多个子块时整体抬升/缩进；空 item 不产生（wrap/lift 均
 保证至少一个子块）；Enter 在 item 内仍走 SplitNode（在 item 内拆块），
 Backspace 在 item 内块首为 JoinWithPrevious 无前兄弟 → NoChange（实机
@@ -270,7 +271,7 @@ cargo fmt --all -- --check；cargo clippy --workspace --all-targets -D warnings 
 ### 2026-08-27（P2.6 后，Tab 语义补全）
 
 - 实机诊断确认按键分发与 session 行为都正常，“全部不行”实为位置性 no-op：首项不可缩进、顶层项不可 outdent、非列表块两者皆否。语义正确但反直觉。
-- Tab / Shift-Tab 补全为直觉闭环：纯段落**块首** Tab → TurnInto(BulletList)（复用既有 list wrap）；纯段落其余位置 Tab → 插入字面制表符（含选区替换，走既有 InsertText）；顶层 item Shift-Tab → TurnInto(Paragraph)（lift out）。嵌套项行为不变。判定用 gpui 层 `list_context` 纯函数（navigation.rs，+2 测试），不新增 runtime intent。
+- Tab / Shift-Tab 补全为直觉闭环：纯段落**块首** Tab → TurnInto(BulletList)（复用既有 list wrap）；纯段落其余位置 Tab → 插入 4 个空格的 soft tab（含选区替换，走既有 InsertText；不插字面 `\t`，GPUI 对 U+0009 几乎无宽度，实机像没反应）；顶层 item Shift-Tab → TurnInto(Paragraph)（lift out）。嵌套项行为不变。判定用 gpui 层 `list_context` 纯函数（navigation.rs，+2 测试），不新增 runtime intent。
 
 ## P1 移交的 P2 前置依赖与归属
 
@@ -323,8 +324,12 @@ P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置
 - Staged 命令的 undo = 各阶段 inverse 按逆序拼成的单笔 transaction，redo = inverse(undo)；与单笔命令共用 HistoryEntry 形态，identity 还原语义一致（已由 store 相等断言锚定）。
 - 结构性 list 移动的 after-selection 新增 `PreserveFocus`（焦点块 identity 保留时 caret 折叠回原点），不用 MapExisting——Remove→Restore 组合会把端点判为 Deleted。
 - OutdentListItem 的目标父节点是外层 list（紧跟外层 item 之后），不是外层 item：Core 的 `allows_child` 禁止 ListItem 直接嵌套 ListItem。被清空的内层 list 同笔删除。
-- Lift out 把被抬升块插在 list 的原槽位（出现在残留 list 之上）；多 item list 只溶解焦点 item，其余 item 不动。
+- Lift out 保持文档顺序：首项抬升插在残留 list 之前，末项插在其后；中间项把后续 item 拆成同 kind 的新 list 放在抬升块之下。多 item list 只溶解焦点 item。
 - indent/outdent 未引入 MoveNode step：单笔 RemoveNode + RestoreSubtree 即可表达（组合成本可控，§3.4 的 MoveNode 评估结论为不需要）。
+
+### 2026-08-27（lift-out 文档顺序）
+
+- 实机：顶层第二项 Shift-Tab 后段落跑到整份 list 上方。原因是 lift 一律按 `list_index` 插入。改为按 item 在 list 中的位置选择插入点；中间项再拆尾 list，避免把后面的 item 一并提前。
 
 ### 2026-08-27（P2.6）
 
