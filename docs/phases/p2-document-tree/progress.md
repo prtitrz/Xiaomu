@@ -267,6 +267,11 @@ cargo test -p xiaomu-runtime 全绿（session 23→26：
 cargo fmt --all -- --check；cargo clippy --workspace --all-targets -D warnings 全绿
 ```
 
+### 2026-08-27（P2.6 后，Tab 语义补全）
+
+- 实机诊断确认按键分发与 session 行为都正常，“全部不行”实为位置性 no-op：首项不可缩进、顶层项不可 outdent、非列表块两者皆否。语义正确但反直觉。
+- Tab / Shift-Tab 补全为直觉闭环：纯段落 Tab → TurnInto(BulletList)（复用既有 list wrap）；顶层 item Shift-Tab → TurnInto(Paragraph)（lift out）。嵌套项行为不变。判定用 gpui 层 `list_context` 纯函数（navigation.rs，+2 测试），不新增 runtime intent。
+
 ## P1 移交的 P2 前置依赖与归属
 
 P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置如下：

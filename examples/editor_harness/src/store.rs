@@ -243,7 +243,7 @@ pub fn demo_fixture() -> XiaomuDocument {
     );
     let intro = leaf(
         NodeKind::Paragraph,
-        "多块文档：↑↓ 或鼠标在块间移动；Enter 拆块；Tab / Shift-Tab 缩进列表（首项不可再缩进）。",
+        "多块文档：↑↓ 或鼠标在块间移动；Enter 拆块；普通段落 Tab 变列表；列表项 Tab / Shift-Tab 缩进与退出（有上一兄弟才能缩进）。",
         &mut builder,
     );
     let quoted = leaf(
