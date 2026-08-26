@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P2.3 结构命令编排已完成**
+当前切片：**P2.4 List 编辑已完成（待实机验证，GPUI 接入属 P2.5）**
 
-前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0 / P2.1 / P2.2 已合入（PR #21–#23）。
+前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0 / P2.1 / P2.2 / P2.3 已合入（PR #21–#24）。
 
 ## P2.0 Phase Contract 与阶段骨架
 
@@ -127,6 +127,50 @@ cargo test --workspace --all-targets
 tools/check_source_size.py 与 tools/check_dependency_boundaries.py
 ```
 
+## P2.4 List 编辑
+
+- [x] TurnInto(BulletList/OrderedList)：段落 wrap 为单 item list（staged 命令，焦点块 identity 保留）
+- [x] TurnInto(Paragraph)：item 内块 lift out；单 item list 整体溶解，paragraph → list → paragraph 闭环
+- [x] bullet ↔ ordered 转换走 SetNodeKind（保留 list / item / 块全部 identity）
+- [x] IndentListItem：移入前一兄弟 item；前一 item 以嵌套 list 结尾则复用，否则 staged 创建同 kind 内层 list
+- [x] OutdentListItem：移入外层 list 紧跟外层 item；被清空的内层 list 同笔删除
+- [x] PreserveFocus after-selection policy（结构移动后 caret 折叠回原 focus 点并重新校验）
+- [x] undo / redo 对 wrap / lift / indent / outdent 全部还原 exact store 与 recorded selection（含 redo 复用 identity）
+- [x] NoChange 语义：首 item indent、顶层 item outdent、同 kind 转换、非 list 段落 TurnInto(Paragraph)
+
+实现说明：
+
+```text
+未新增任何 Core step（遵守 design §3.4）；list 命令全部由 InsertNode /
+RemoveNode / RestoreSubtree / SetNodeKind 组合。
+wrap 与 indent 需要引用 application 期间才分配的容器 NodeId：runtime 引入
+staged plan——每个阶段从其看到的 snapshot 按确定性位置重新推导新容器 id，
+全部阶段要么全成功并合并为一笔 history entry（undo = 各阶段 inverse 逆序
+拼接，redo = inverse(undo)），要么原子失败且 session 状态不变。
+lift 的插入下标用 list 在父级中的槽位（list_index），被抬升块出现在残留
+list 内容之上；outdent 目标父节点是外层 list 而非外层 item（Core 禁止
+ListItem 直接嵌套 ListItem）。
+已知边界：item 含多个子块时整体抬升/缩进；空 item 不产生（wrap/lift 均
+保证至少一个子块）；Enter 在 item 内仍走 SplitNode（在 item 内拆块），
+Backspace 在 item 内块首为 JoinWithPrevious 无前兄弟 → NoChange（不自动
+退出 list，留待后续按需评估）。
+```
+
+完成证据：
+
+```text
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test -p xiaomu-core -p xiaomu-runtime -p xiaomu-codec-markdown --all-targets
+  （新增 tests/list.rs 11 个测试；P1 session 19 个、P2.3 structural 14 个
+   回归不改断言通过）
+tools/check_source_size.py ok（session/mod.rs 566 行超 review 阈值 500，
+  仅 warning，后续切片拆分）
+tools/check_dependency_boundaries.py ok
+注：本机 WSL 缺 libxkbcommon-x11，gpui/harness 测试无法链接，与 P1–P2.3
+各切片环境一致；GPUI 实机验证归 P2.5。
+```
+
 ## P1 移交的 P2 前置依赖与归属
 
 P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置如下：
@@ -172,6 +216,15 @@ P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置
 - Enter 对应 `SplitBlock` intent。GPUI 按键绑定仍属 P2.5；本切片只保证 session 语义与纯逻辑测试。
 - Session history 的 redo 存 `inverse(inverse(T))`，不重放原始 SplitNode。否则 redo 会重新分配 tail NodeId，录下的 after-selection 与 JoinNodes inverse 都会指向已消失的 identity。
 
+### 2026-08-27（P2.4）
+
+- List 编辑不新增 Core step（维持 §3.4 决策）。跨 step 引用新分配 NodeId 的问题用 runtime 层 staged plan 解决：每阶段从当前 snapshot 按确定性位置重新推导容器 id，而不是给 Core 加占位符机制或复合 step——保持 Core step 语言最小、inverse/mapping 语义不变。
+- Staged 命令的 undo = 各阶段 inverse 按逆序拼成的单笔 transaction，redo = inverse(undo)；与单笔命令共用 HistoryEntry 形态，identity 还原语义一致（已由 store 相等断言锚定）。
+- 结构性 list 移动的 after-selection 新增 `PreserveFocus`（焦点块 identity 保留时 caret 折叠回原点），不用 MapExisting——Remove→Restore 组合会把端点判为 Deleted。
+- OutdentListItem 的目标父节点是外层 list（紧跟外层 item 之后），不是外层 item：Core 的 `allows_child` 禁止 ListItem 直接嵌套 ListItem。被清空的内层 list 同笔删除。
+- Lift out 把被抬升块插在 list 的原槽位（出现在残留 list 之上）；多 item list 只溶解焦点 item，其余 item 不动。
+- indent/outdent 未引入 MoveNode step：单笔 RemoveNode + RestoreSubtree 即可表达（组合成本可控，§3.4 的 MoveNode 评估结论为不需要）。
+
 ## P2 Phase Gate
 
 P2 只有在以下条件全部满足后才能完成：
@@ -179,7 +232,7 @@ P2 只有在以下条件全部满足后才能完成：
 - [x] SplitNode / JoinNodes 以 Core step 落地，mapping + inverse 满足随机不变量
 - [x] DocumentSelection 成为 session 的 selection 形态，公开读取点全部校验
 - [x] 结构命令 after-selection fallback 显式且可测试
-- [ ] list 日常编辑闭环 undo 可还原
+- [x] list 日常编辑闭环 undo 可还原（P2.4 纯逻辑层；实机验证归 P2.5）
 - [ ] multi-block 渲染 + 跨块导航 + 跨块 selection 实机可用
 - [ ] minimal host-contract harness 完成 load / listen / persist 闭环
 - [ ] position mapping regression matrix 建立并通过

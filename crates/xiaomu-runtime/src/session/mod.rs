@@ -29,7 +29,7 @@ use xiaomu_core::document::{InlineContent, NodeId, XiaomuDocument};
 use xiaomu_core::mapping::{ChangeMap, StepMap};
 use xiaomu_core::selection::{CursorAffinity, TextPoint, TextSelection};
 use xiaomu_core::text::TextOffset;
-use xiaomu_core::transaction::Transaction;
+use xiaomu_core::transaction::{Transaction, TransactionOrigin};
 
 use self::history::HistoryEntry;
 use self::intent::PlannedAction;
@@ -177,6 +177,12 @@ impl DocumentSession {
             EditIntent::TurnInto { kind } => {
                 structure::plan_turn_into(&self.document, focus.node_id(), kind)?
             }
+            EditIntent::IndentListItem => {
+                structure::plan_indent_list_item(&self.document, focus.node_id())?
+            }
+            EditIntent::OutdentListItem => {
+                structure::plan_outdent_list_item(&self.document, focus.node_id())?
+            }
             EditIntent::MoveCaret { .. } | EditIntent::PlaceCaret { .. } => {
                 unreachable!("handled above")
             }
@@ -185,6 +191,7 @@ impl DocumentSession {
         match action {
             PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
             PlannedAction::Commit(plan) => self.commit(plan),
+            PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
         }
     }
 
@@ -272,6 +279,61 @@ impl DocumentSession {
             after_selection,
         });
         self.document = applied.into_document();
+        self.selection = after_selection;
+        self.notify_document_changed();
+
+        Ok(SessionOutcome::DocumentChanged)
+    }
+
+    /// Commits a multi-stage command as one history entry.
+    ///
+    /// Stages run against intermediate snapshots that never become visible:
+    /// if any stage fails, the session keeps its previous state unchanged.
+    /// The combined undo applies every stage's inverse in reverse order; the
+    /// redo is `inverse(undo)` so restored identities are reused, matching
+    /// single-transaction commits.
+    fn commit_staged(
+        &mut self,
+        staged: structure::StagedPlan,
+    ) -> Result<SessionOutcome, SessionError> {
+        let before_selection = self.selection;
+        let mut current = self.document.clone();
+        let mut inverse_groups: Vec<Transaction> = Vec::new();
+
+        for build in staged.stages {
+            let transaction = build(&current)?;
+            let applied = transaction
+                .apply_with_changes(&current)
+                .map_err(SessionError::Core)?;
+            inverse_groups.push(applied.inverse().clone());
+            current = applied.into_document();
+        }
+
+        let mut undo = Transaction::new(TransactionOrigin::UserInput);
+        for transaction in inverse_groups.into_iter().rev() {
+            for step in transaction.steps() {
+                undo.push_step(step.clone());
+            }
+        }
+        // Redo must reproduce the post-command identities (see `commit`).
+        let redo = undo
+            .apply_with_changes(&current)
+            .map_err(SessionError::Core)?
+            .inverse()
+            .clone();
+
+        let after_selection = match staged.selection_update {
+            SelectionUpdate::PreserveFocus => preserved_focus(before_selection, &current)?,
+            _ => return Err(SessionError::SelectionInvalid),
+        };
+
+        self.history.record(HistoryEntry {
+            redo,
+            undo,
+            before_selection,
+            after_selection,
+        });
+        self.document = current;
         self.selection = after_selection;
         self.notify_document_changed();
 
@@ -451,6 +513,11 @@ fn resolve_selection(
                 .ok_or(SessionError::SelectionInvalid)?;
             collapsed_caret(document, first, first_len, affinity_of(before))
         }
+        // Single-transaction plans may promise PreserveFocus when the
+        // focused block's identity survives a structural move (lift out,
+        // outdent); staged list commands resolve the same policy in
+        // `commit_staged`.
+        SelectionUpdate::PreserveFocus => preserved_focus(before, document),
     }
 }
 
@@ -475,6 +542,23 @@ fn collapsed_caret(
         .ok_or(SessionError::SelectionInvalid)?;
     let offset = inline.offset_at(raw).map_err(SessionError::Core)?;
     let selection = DocumentSelection::collapsed(TextPoint::new(node, offset, affinity));
+    selection
+        .validate(document)
+        .map_err(|_| SessionError::SelectionInvalid)?;
+    Ok(selection)
+}
+
+/// Collapses the caret onto the focus endpoint's node and offset, validated
+/// against the post-command snapshot.
+fn preserved_focus(
+    before: DocumentSelection,
+    document: &XiaomuDocument,
+) -> Result<DocumentSelection, SessionError> {
+    let point = match before.focus() {
+        DocumentPosition::Text(point) => point,
+        DocumentPosition::Gap(_) => return Err(SessionError::SelectionInvalid),
+    };
+    let selection = DocumentSelection::collapsed(point);
     selection
         .validate(document)
         .map_err(|_| SessionError::SelectionInvalid)?;

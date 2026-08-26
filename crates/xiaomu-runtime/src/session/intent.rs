@@ -89,10 +89,26 @@ pub enum EditIntent {
     ///
     /// The same kind is a no-op. Shape-incompatible kinds (for example
     /// turning a paragraph into a quote container) are rejected by Core.
+    ///
+    /// List kinds compose with the surrounding structure instead of a plain
+    /// kind rewrite: a paragraph becomes a single-item list, a paragraph
+    /// inside a list item returns to a plain block (lifting out), and a
+    /// bullet list converts to ordered (or back) by rekinding the list
+    /// itself.
     TurnInto {
         /// Replacement semantic kind.
         kind: NodeKind,
     },
+    /// Indent the focused block's list item under its previous sibling
+    /// item, creating the nested list when needed.
+    ///
+    /// The first item of a list cannot indent; that is a no-op.
+    IndentListItem,
+    /// Outdent the focused block's nested list item into its enclosing
+    /// list, directly after the item that contains the list.
+    ///
+    /// An item of a top-level list cannot outdent; that is a no-op.
+    OutdentListItem,
 }
 
 /// How the session derives the selection after a plan commits.
@@ -111,6 +127,13 @@ pub enum SelectionUpdate {
     CaretAtSplitTail,
     /// After a join: caret at the join seam of the surviving node.
     CaretAtJoinSeam,
+    /// The focus endpoint keeps its node and offset; the selection
+    /// collapses.
+    ///
+    /// Used by structural moves that preserve the focused block's identity
+    /// (list wrap / lift / indent / outdent). The resolved selection is
+    /// validated against the post-command snapshot.
+    PreserveFocus,
 }
 
 /// The coordinates of the primary text edit of a plan.
@@ -191,6 +214,8 @@ impl EditPlan {
 pub(crate) enum PlannedAction {
     /// Commit a plan.
     Commit(EditPlan),
+    /// Commit a multi-stage command as one history entry.
+    CommitStaged(super::structure::StagedPlan),
     /// The intent is a legitimate no-op.
     NoChange,
 }

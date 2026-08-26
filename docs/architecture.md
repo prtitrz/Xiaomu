@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前 codec、testkit 和 example harness 的编辑功能处于 bootstrap 阶段。P0（Core contract）、P1（单 block 原生输入）已完成，P2（document tree / 结构编辑）进行中：Core 已有 SplitNode / JoinNodes / SetNodeKind 结构 step；`xiaomu-runtime` 的 session 已升级为跨 block `DocumentSelection`，并编排 SplitBlock / JoinWithPrevious / TurnInto 结构命令；`xiaomu-gpui` 以精确 pin 的 crates.io GPUI `0.2.2` 实现单 Paragraph 编辑闭环（渲染 / 输入 / hit-test / IME composition / copy-paste / 基础 marks / harness）。
+当前 codec、testkit 和 example harness 的编辑功能处于 bootstrap 阶段。P0（Core contract）、P1（单 block 原生输入）已完成；P2（document tree / 结构编辑）进行中：Core 已有 SplitNode / JoinNodes / SetNodeKind 结构 step；`xiaomu-runtime` 的 session 已升级为跨 block `DocumentSelection`，编排 SplitBlock / JoinWithPrevious / TurnInto 结构命令，并以既有原语的组合实现 list 编辑闭环（wrap / 拆解 / bullet↔ordered 转换 / indent / outdent）；`xiaomu-gpui` 以精确 pin 的 crates.io GPUI `0.2.2` 实现单 Paragraph 编辑闭环（渲染 / 输入 / hit-test / IME composition / copy-paste / 基础 marks / harness）。
 
 ## Core 边界
 
@@ -284,10 +284,14 @@ Runtime 保持 `#![forbid(unsafe_code)]` 与 `#![warn(missing_docs)]`。
 DocumentSession（snapshot + selection + history + notification seam）
 DocumentSelection / DocumentPosition（跨 block selection：端点为 TextPoint 或 NodeGap）
 EditIntent（InsertText / Backspace / Delete / MoveCaret / PlaceCaret / ToggleMark /
-            SplitBlock / JoinWithPrevious / TurnInto）
+            SplitBlock / JoinWithPrevious / TurnInto / IndentListItem / OutdentListItem）
 EditPlan（Core Transaction + runtime SelectionUpdate）
+StagedPlan（多 transaction 阶段的组合命令：list wrap / indent 需要引用
+            application 期间才分配的容器 NodeId，后续阶段从其看到的 snapshot
+            按确定性位置重新推导；全部阶段要么全成功并合并为一笔 history，
+            要么原子失败且 session 状态不变）
 SelectionUpdate（CaretAfterReplacement / CaretAtEditStart / MapExisting /
-                 CaretAtSplitTail / CaretAtJoinSeam）
+                 CaretAtSplitTail / CaretAtJoinSeam / PreserveFocus）
 HistoryStack（一笔 transaction 一个 entry，保存 redo/undo transaction 与 before/after selection）
 SessionOutcome（DocumentChanged / SelectionChanged / NoChange）
 DocumentChangeListener（frontend-neutral 通知 seam）
@@ -302,7 +306,28 @@ TurnInto          → MapExisting（kind 变更不移动 position，identity 保
 fallback 失败     → 收敛后的位置无法合法化才原子失败
 ```
 
-`SetNodeKind` 是 TurnInto 的 Core 原语：保留 NodeId / attrs / content，只替换 kind；content shape 必须与新 kind 兼容，parent 必须仍允许该 child，root 不能改 kind。Paragraph ↔ Heading ↔ CodeBlock 属于同 shape 转换；把 inline 节点变成 Quote 等 container 会因 shape 不兼容被拒绝，wrapping 留给后续 list 切片。
+`SetNodeKind` 是 TurnInto 的 Core 原语：保留 NodeId / attrs / content，只替换 kind；content shape 必须与新 kind 兼容，parent 必须仍允许该 child，root 不能改 kind。Paragraph ↔ Heading ↔ CodeBlock 属于同 shape 转换；把 inline 节点变成 Quote 等 container 会因 shape 不兼容被拒绝。
+
+list 编辑（P2.4）不新增 Core step，全部由既有原语组合而成，遵守 §3.4 的决策：
+
+```text
+TurnInto(BulletList/OrderedList)   段落 → 单 item list：分阶段 InsertNode 容器
+                                   （list、item）+ RemoveNode + RestoreSubtree
+                                   移动段落；已在 list 内时改为 SetNodeKind
+                                   把 list 在 bullet ↔ ordered 间转换
+TurnInto(Paragraph)                item 内块退出 list：item 的全部子块移回 list
+                                   所在层级（占用 list 的槽位），item 删除；
+                                   单 item list 整体溶解，闭环 paragraph →
+                                   list → paragraph
+IndentListItem                     item 移入前一兄弟 item；前一 item 以嵌套
+                                   list 结尾则复用之，否则先创建同 kind 嵌套
+                                   list（staged）；首 item 是 NoChange
+OutdentListItem                    嵌套 item 移入外层 list（紧跟外层 item 之后；
+                                   Core 禁止 ListItem 直接嵌套 ListItem）；被清空
+                                   的内层 list 同笔删除；顶层 item 是 NoChange
+```
+
+这些命令保留焦点块的 identity 与 offset，after-selection 为 `PreserveFocus`（caret 折叠到原 focus 点并对新 snapshot 校验）；undo / redo 复用整链 RestoreSubtree 的 identity 还原语义，与单笔命令一致。
 
 P2.2 的 selection 形态：session 持有 `DocumentSelection`，两端点可落在不同 block（`TextPoint`）或 child 边界（`NodeGap`），任何公开读取点都针对当前 snapshot 校验。跨 block 排序由 snapshot 上的 pre-order slot 分配解析（节点与 gap 各占单调槽位，文本位置以 byte offset 为子键）。单 inline node 内的 selection 可经 `text_selection()` 投影回 Core `TextSelection`（P1 单块前端继续使用）。内容编辑与 P2.3 结构命令仍要求选区整体位于一个 inline node 内；gap 端点上的 caret 移动返回 `NoChange`，跨块导航属后续切片。
 
