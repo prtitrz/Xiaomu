@@ -140,6 +140,11 @@ pub enum SelectionUpdate {
     CaretAtSplitTail,
     /// After a join: caret at the join seam of the surviving node.
     CaretAtJoinSeam,
+    /// Collapse the caret at the start of the primary edit's range.
+    ///
+    /// Used when text appends at a container tail: the junction sits at the
+    /// pre-edit seam, not after the inserted span.
+    CaretAtJoinPoint,
     /// The focus endpoint keeps its node and offset; the selection
     /// collapses.
     ///

@@ -7,10 +7,11 @@
 
 use xiaomu_core::document::{Node, NodeAttrs, NodeContent, NodeId, NodeKind, XiaomuDocument};
 use xiaomu_core::selection::TextSelection;
+use xiaomu_core::text::TextRange;
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
 use super::SessionError;
-use super::intent::{EditPlan, PlannedAction, SelectionUpdate};
+use super::intent::{EditPlan, PlannedAction, PrimaryEdit, SelectionUpdate, concatenated};
 
 /// A transaction built lazily from the snapshot its stage sees.
 pub(crate) type StagedTransaction =
@@ -97,18 +98,143 @@ pub(crate) fn plan_join_with_previous(
     document: &XiaomuDocument,
     node: NodeId,
 ) -> Result<PlannedAction, SessionError> {
-    let Some(first) = previous_join_target(document, node) else {
-        return Ok(PlannedAction::NoChange);
+    if let Some(first) = previous_join_target(document, node) {
+        return Ok(PlannedAction::Commit(EditPlan::new(
+            Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::JoinNodes {
+                first,
+                second: node,
+            }),
+            SelectionUpdate::CaretAtJoinSeam,
+            None,
+        )));
+    }
+
+    // The preceding sibling is not an inline block; when it is a list
+    // container, joining means appending this block's text to the tail of
+    // the list's last item (the seam sits at that block's end).
+    if let Some(previous) = previous_sibling_of(document, node) {
+        let is_list = matches!(
+            document
+                .node(previous)
+                .ok_or(SessionError::SelectionInvalid)?
+                .kind(),
+            NodeKind::BulletList | NodeKind::OrderedList
+        );
+        if is_list
+            && let Some(plan) = plan_join_block_into_container_tail(document, node, previous)?
+        {
+            return Ok(PlannedAction::Commit(plan));
+        }
+    }
+
+    Ok(PlannedAction::NoChange)
+}
+
+/// Joins `node`'s text into the last inline block of `container`.
+///
+/// Shared by two backspace shapes: a plain block whose preceding sibling is
+/// a list appends into the list's tail, and a list item with a previous
+/// sibling item appends into that item's tail (the editor-standard "delete
+/// the bullet by merging upward"). The emptied source block is removed; an
+/// emptied parent item dissolves with it. The caret lands at the join seam
+/// via [`SelectionUpdate::CaretAfterReplacement`].
+fn plan_join_block_into_container_tail(
+    document: &XiaomuDocument,
+    node: NodeId,
+    container: NodeId,
+) -> Result<Option<EditPlan>, SessionError> {
+    let Some(target) = last_inline_descendant(document, container) else {
+        return Ok(None);
     };
 
-    Ok(PlannedAction::Commit(EditPlan::new(
-        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::JoinNodes {
-            first,
-            second: node,
+    let focus_inline = document
+        .node(node)
+        .ok_or(SessionError::SelectionInvalid)?
+        .content()
+        .as_inline()
+        .ok_or(SessionError::SelectionInvalid)?;
+    let moved_text = concatenated(focus_inline);
+    let tail_inline = document
+        .node(target)
+        .ok_or(SessionError::SelectionInvalid)?
+        .content()
+        .as_inline()
+        .ok_or(SessionError::SelectionInvalid)?;
+    let seam = tail_inline
+        .offset_at(concatenated(tail_inline).len())
+        .map_err(SessionError::Core)?;
+
+    let mut transaction = user_transaction().with_step(TransactionStep::ReplaceText {
+        node: target,
+        range: TextRange::new(seam, seam).map_err(SessionError::Core)?,
+        replacement: moved_text.clone(),
+    });
+
+    // The focused block goes first; removing it may leave its own list
+    // item empty, and that item dissolves right after.
+    transaction.push_step(TransactionStep::RemoveNode { node });
+    let parent = document
+        .parent_of(node)
+        .ok_or(SessionError::SelectionInvalid)?;
+    if document
+        .node(parent)
+        .ok_or(SessionError::SelectionInvalid)?
+        .kind()
+        == &NodeKind::ListItem
+    {
+        let siblings = children_of(document, parent);
+        if siblings.len() == 1 && siblings[0] == node {
+            transaction.push_step(TransactionStep::RemoveNode { node: parent });
+        }
+    }
+
+    Ok(Some(EditPlan::new(
+        transaction,
+        SelectionUpdate::CaretAtJoinPoint,
+        Some(PrimaryEdit {
+            node: target,
+            range: TextRange::new(seam, seam).map_err(SessionError::Core)?,
+            inserted_len: moved_text.len(),
         }),
-        SelectionUpdate::CaretAtJoinSeam,
-        None,
     )))
+}
+
+/// Merges the focused list item into its previous sibling item's tail.
+///
+/// Backspace at the start of a block whose item has a previous sibling
+/// deletes the item boundary upward: the block's text appends to the
+/// previous item's last block and the emptied item dissolves.
+pub(crate) fn plan_merge_item_into_previous(
+    document: &XiaomuDocument,
+    node: NodeId,
+) -> Result<PlannedAction, SessionError> {
+    let Some(ancestry) = list_ancestry_of(document, node) else {
+        return Ok(PlannedAction::NoChange);
+    };
+    let siblings = children_of(document, ancestry.list);
+    let Some(previous_item) = ancestry
+        .item_index
+        .checked_sub(1)
+        .map(|index| siblings[index])
+    else {
+        return Ok(PlannedAction::NoChange);
+    };
+    match plan_join_block_into_container_tail(document, node, previous_item)? {
+        Some(plan) => Ok(PlannedAction::Commit(plan)),
+        None => Ok(PlannedAction::NoChange),
+    }
+}
+
+/// Depth-first last inline-bearing leaf inside `node`'s subtree.
+fn last_inline_descendant(document: &XiaomuDocument, node: NodeId) -> Option<NodeId> {
+    match document.node(node)?.content() {
+        NodeContent::Inline(_) => Some(node),
+        NodeContent::Children(children) => children
+            .iter()
+            .rev()
+            .find_map(|child| last_inline_descendant(document, *child)),
+        _ => None,
+    }
 }
 
 /// Changes `node`'s kind, keeping identity and content.
@@ -337,7 +463,7 @@ fn plan_into_list(
 /// Single-item lists dissolve entirely, which closes the paragraph → list →
 /// paragraph loop. Multi-item lists keep their remaining items; only the
 /// focused item dissolves into plain sibling blocks.
-fn plan_lift_out_of_list(
+pub(crate) fn plan_lift_out_of_list(
     document: &XiaomuDocument,
     ancestry: ListAncestry,
 ) -> Result<PlannedAction, SessionError> {
@@ -402,18 +528,18 @@ fn move_item_transaction(
 /// planners can build transactions from stable coordinates.
 pub(crate) struct ListAncestry {
     /// The list item containing the focused block.
-    item: NodeId,
+    pub(crate) item: NodeId,
     /// The bullet/ordered list containing `item`.
-    list: NodeId,
+    pub(crate) list: NodeId,
     /// The parent of `list` (root, quote, or another list item).
-    list_parent: NodeId,
+    pub(crate) list_parent: NodeId,
     /// Index of `list` among the parent's children.
-    list_index: usize,
+    pub(crate) list_index: usize,
     /// Index of `item` among the list's children.
-    item_index: usize,
+    pub(crate) item_index: usize,
 }
 
-fn list_ancestry_of(document: &XiaomuDocument, block: NodeId) -> Option<ListAncestry> {
+pub(crate) fn list_ancestry_of(document: &XiaomuDocument, block: NodeId) -> Option<ListAncestry> {
     let item = document.parent_of(block)?;
     if document.node(item)?.kind() != &NodeKind::ListItem {
         return None;
@@ -441,6 +567,18 @@ fn list_ancestry_of(document: &XiaomuDocument, block: NodeId) -> Option<ListAnce
     })
 }
 
+/// Whether the ancestry's list is itself nested inside another list item.
+pub(crate) fn item_is_nested(
+    document: &XiaomuDocument,
+    ancestry: &ListAncestry,
+) -> Result<bool, SessionError> {
+    Ok(document
+        .node(ancestry.list_parent)
+        .ok_or(SessionError::SelectionInvalid)?
+        .kind()
+        == &NodeKind::ListItem)
+}
+
 /// Returns the last child of `node` when it is a list container.
 fn trailing_list_of(document: &XiaomuDocument, node: NodeId) -> Option<NodeId> {
     let last = *children_of(document, node).last()?;
@@ -449,6 +587,14 @@ fn trailing_list_of(document: &XiaomuDocument, node: NodeId) -> Option<NodeId> {
         NodeKind::BulletList | NodeKind::OrderedList
     )
     .then_some(last)
+}
+
+/// Previous sibling of `node`, if any.
+pub(crate) fn previous_sibling_of(document: &XiaomuDocument, node: NodeId) -> Option<NodeId> {
+    let parent = document.parent_of(node)?;
+    let children = document.node(parent)?.content().as_children()?;
+    let index = children.iter().position(|child| child == &node)?;
+    index.checked_sub(1).map(|previous| children[previous])
 }
 
 fn children_of(document: &XiaomuDocument, node: NodeId) -> Vec<NodeId> {

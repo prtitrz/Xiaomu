@@ -165,10 +165,40 @@ impl DocumentSession {
         let action = match intent {
             EditIntent::InsertText { text } => intent::plan_insert_text(selection, text)?,
             EditIntent::Backspace => {
-                if selection.is_collapsed() && focus.offset().as_usize() == 0 {
-                    structure::plan_join_with_previous(&self.document, focus.node_id())?
-                } else {
+                let at_block_start = selection.is_collapsed() && focus.offset().as_usize() == 0;
+                // Priority at a block start: merge into the previous block
+                // (same parent), then into the previous list item's tail,
+                // then leave the list itself (outdent when nested, lift out
+                // at the top level).
+                if !at_block_start {
                     intent::plan_backspace(&inline, selection)?
+                } else {
+                    match structure::plan_join_with_previous(&self.document, focus.node_id())? {
+                        PlannedAction::NoChange => {
+                            match structure::list_ancestry_of(&self.document, focus.node_id()) {
+                                Some(ancestry) if ancestry.item_index > 0 => {
+                                    structure::plan_merge_item_into_previous(
+                                        &self.document,
+                                        focus.node_id(),
+                                    )?
+                                }
+                                Some(ancestry) => {
+                                    let nested =
+                                        structure::item_is_nested(&self.document, &ancestry)?;
+                                    if nested {
+                                        structure::plan_outdent_list_item(
+                                            &self.document,
+                                            focus.node_id(),
+                                        )?
+                                    } else {
+                                        structure::plan_lift_out_of_list(&self.document, ancestry)?
+                                    }
+                                }
+                                None => PlannedAction::NoChange,
+                            }
+                        }
+                        planned => planned,
+                    }
                 }
             }
             EditIntent::Delete => intent::plan_delete(&inline, selection)?,
@@ -505,6 +535,15 @@ fn resolve_selection(
                 _ => edit.range().start().as_usize(),
             };
             collapsed_caret(document, edit.node(), raw, affinity_of(before))
+        }
+        SelectionUpdate::CaretAtJoinPoint => {
+            let edit = plan.primary_edit().ok_or(SessionError::SelectionInvalid)?;
+            collapsed_caret(
+                document,
+                edit.node(),
+                edit.range().start().as_usize(),
+                affinity_of(before),
+            )
         }
         SelectionUpdate::MapExisting => {
             let mapped = before.map_through(changes, before_document)?;
