@@ -98,6 +98,8 @@ actions!(
         ToggleStrike,
         /// Undo the newest history entry.
         Undo,
+        /// Persist the current snapshot through the host adapter (Ctrl/Cmd-S).
+        SaveDocument,
         /// Redo the newest undone entry.
         Redo,
     ]

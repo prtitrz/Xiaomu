@@ -360,7 +360,9 @@ block_view/               ParagraphView：共享 session 句柄，渲染单个 i
                           实现 EntityInputHandler（平台 UTF-16 range 在此转换）
                           ParagraphElement：shape_line 单行渲染、文档级选区的逐块投影绘制、
                           paint 期注册 handle_input、保存 layout 供 hit-test
-editor.rs                   run_single_block_editor：窗口 / 键绑定 / 关窗退出装配（harness 使用）
+editor.rs                   run_document_editor(_with_hooks)：窗口 / 键绑定 / 关窗退出装配；
+                            EditorHooks 携带 persistence adapter 与 change listener
+                            run_single_block_editor 保留为单块入口的薄包装
 ```
 
 - 所有编辑经 session intent 提交，view 不直接改文档；`replace_text_in_range` 的显式范围用两次 selection-only 的 `PlaceCaret` + 一次 `InsertText` 完成，保持单条 history entry。
@@ -368,6 +370,7 @@ editor.rs                   run_single_block_editor：窗口 / 键绑定 / 关�
 - clipboard：copy / cut 取 session 选区纯文本经 `TextClipboard` 写出；paste 读入后经 `normalize_paste_text` 归一化再走 InsertText intent（一笔 undo entry）；cut = copy + Delete，同为单笔。空剪贴板文本不清除选区。
 - 标记渲染：Bold / Italic 映射字重与字形，Underline / Strike 映射装饰线，Code 映射半透明背景色块；Link 需要属性编辑 UI，留待后续切片。
 - IME composition（P1.4）：CompositionState 维护 base selection / preedit / virtual projection，composition 全程 document revision 不变，commit 组装为单笔 InsertText intent 入 history，cancel 恢复 base selection。
+- 宿主契约（P2.6）：runtime 新增 `DocumentPersistence` seam（load/save canonical snapshot，Core 类型进出，格式归宿主 adapter）；GPUI 绑定 Ctrl/Cmd-S → `SaveDocument` action 经 adapter 落盘；`EditorHooks` 同时接受 `DocumentChangeListener`。editor_harness 以文件 fixture adapter（harness 内部行格式，非 codec 承诺）演示 create → load → edit（listener 计数可见变更）→ save 闭环。
 - 多块视图（P2.5）：`DocumentView` 拥有共享 session 句柄并按文档序为每个 inline block 挂载一个 `ParagraphView`；全部键盘动作注册在容器层并从焦点块冒泡。跨块 Left / Right / Up / Down / Home / End 经 `navigation.rs` 纯逻辑翻译为 `SetSelection` intent（Up/Down 在单视觉行的块间移动并钳制字节下标）；鼠标点击 / 拖选经 paint 期发布的块 bounds 注册表分发到目标块再 x hit-test。选区高亮按 `DocumentSelection::ordered` 投影到每个块局部绘制。布局缓存键 = (node, epoch, 宽度取整)，未变化则复用 shape 结果；heading 按层级放大加粗、quote 后代缩进加竖线、list item 按嵌套深度缩进。
 
 ## Codec 边界
