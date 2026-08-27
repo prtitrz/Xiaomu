@@ -38,7 +38,12 @@ pub trait DocumentPersistence {
 
     /// Returns the most recently persisted snapshot, if one exists.
     ///
-    /// Returning `None` starts the editor from whatever initial document
-    /// the host provides instead.
-    fn load(&self) -> Option<XiaomuDocument>;
+    /// # Contract
+    ///
+    /// - Store does not exist / not found → `Ok(None)`. The host may start
+    ///   from its own initial document.
+    /// - The store exists but cannot be read or parsed → `Err`. The host
+    ///   must not treat this as an empty store and silently start a new
+    ///   document over corrupt data.
+    fn load(&self) -> Result<Option<XiaomuDocument>, PersistenceError>;
 }

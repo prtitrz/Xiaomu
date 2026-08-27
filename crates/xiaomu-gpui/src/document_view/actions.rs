@@ -1,15 +1,12 @@
-//! Action listeners and mouse handlers of [`DocumentView`].
+//! Action listeners of [`DocumentView`].
 //!
 //! Split out of `mod.rs` to stay under the source-size guardrail. All
 //! handlers translate GPUI events into runtime intents or pure navigation
 //! steps; the session remains the single mutation point.
 
-use gpui::{
-    App, Context, Entity, Focusable as _, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, Window,
-};
+use gpui::{App, Context, Entity, Focusable as _, Window};
 
-use xiaomu_core::document::{Mark, NodeId};
+use xiaomu_core::document::Mark;
 use xiaomu_core::selection::{CursorAffinity, TextPoint};
 use xiaomu_runtime::clipboard::normalize_paste_text;
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
@@ -25,7 +22,7 @@ use xiaomu_runtime::clipboard::TextClipboard;
 use crate::block_view::ParagraphView;
 use crate::input::platform_clipboard::PlatformClipboard;
 
-use super::{DocumentView, NavStep, navigation};
+use super::{DocumentView, NavStep, markers, navigation};
 
 /// Soft tab inserted when Tab is pressed inside a plain block away from
 /// offset 0. A literal U+0009 has no glyph advance in GPUI's shaper, so it
@@ -54,6 +51,7 @@ fn tab_plan_for_plain_block(collapsed: bool, offset: usize) -> TabPlan {
 }
 
 /// Whether an intent is a structural command whose no-op is worth surfacing.
+#[cfg(debug_assertions)]
 pub(crate) fn is_structural(intent: &EditIntent) -> bool {
     matches!(
         intent,
@@ -183,7 +181,7 @@ impl DocumentView {
             match session.selection().focus() {
                 DocumentPosition::Text(point) => {
                     let in_list =
-                        navigation::list_context(session.document(), point.node_id()).is_some();
+                        markers::list_context(session.document(), point.node_id()).is_some();
                     if in_list {
                         None
                     } else {
@@ -236,7 +234,7 @@ impl DocumentView {
             let session = self.session.borrow();
             match session.selection().focus() {
                 DocumentPosition::Text(point) => matches!(
-                    navigation::list_context(session.document(), point.node_id()),
+                    markers::list_context(session.document(), point.node_id()),
                     Some(context) if !context.nested
                 ),
                 DocumentPosition::Gap(_) => false,
@@ -275,7 +273,10 @@ impl DocumentView {
         let document = self.session.borrow().document().clone();
         let outcome = adapter.borrow_mut().save(&document);
         match outcome {
-            Ok(()) => eprintln!("xiaomu: snapshot saved"),
+            Ok(()) => {
+                #[cfg(debug_assertions)]
+                eprintln!("xiaomu: snapshot saved");
+            }
             Err(error) => eprintln!("xiaomu: save failed: {error}"),
         }
     }
@@ -431,106 +432,6 @@ impl DocumentView {
         self.sync_children(cx);
         let app = &*cx;
         self.route_focus(window, app);
-    }
-
-    // ---- mouse ----
-
-    pub(crate) fn on_mouse_down(
-        &mut self,
-        event: &MouseDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.is_dragging = true;
-        if let Some(point) = self.hit_test(event.position, cx) {
-            // Click-placement diagnostic: shows which block the click landed
-            // on, so mis-hits are visible during real-machine testing.
-            let clicked = {
-                let session = self.session.borrow();
-                session.document().node(point.node_id()).map(|node| {
-                    let text = node
-                        .content()
-                        .as_inline()
-                        .map(|inline| {
-                            let text: String = inline
-                                .runs()
-                                .iter()
-                                .map(|run| run.text().as_str())
-                                .collect();
-                            let preview: String = text.chars().take(8).collect();
-                            format!(" \u{201c}{preview}\u{201d}")
-                        })
-                        .unwrap_or_default();
-                    format!(
-                        "{:?}{text} at byte {}",
-                        node.kind(),
-                        point.offset().as_usize()
-                    )
-                })
-            };
-            if let Some(description) = clicked {
-                eprintln!("xiaomu: click placed caret in {description}");
-            }
-            if event.modifiers.shift {
-                self.move_focus_to(point, true, window, cx);
-            } else {
-                self.place(point, window, cx);
-            }
-        }
-    }
-
-    pub(crate) fn on_mouse_move(
-        &mut self,
-        event: &MouseMoveEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.is_dragging {
-            return;
-        }
-        if let Some(point) = self.hit_test(event.position, cx) {
-            self.move_focus_to(point, true, window, cx);
-        }
-    }
-
-    pub(crate) fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
-        self.is_dragging = false;
-    }
-
-    /// Maps a window-space point to a validated caret point via the paint
-    /// registry: nearest block by vertical position, then x hit-testing
-    /// within that block's shaped line.
-    fn hit_test(&self, position: Point<Pixels>, cx: &App) -> Option<TextPoint> {
-        let registry = self.registry.borrow();
-        let mut nearest: Option<(NodeId, Pixels)> = None;
-        for (node, bounds) in registry.iter() {
-            let distance = if position.y < bounds.top() {
-                bounds.top() - position.y
-            } else if position.y > bounds.bottom() {
-                position.y - bounds.bottom()
-            } else {
-                Pixels::ZERO
-            };
-            if nearest.is_none_or(|(_, best)| distance < best) {
-                nearest = Some((*node, distance));
-            }
-        }
-        let (node, _) = nearest?;
-
-        let session = self.session.borrow();
-        let blocks = navigation::text_blocks(session.document());
-        drop(session);
-        let block = blocks.iter().find(|block| block.node == node)?;
-        let child = self
-            .children
-            .iter()
-            .find(|(id, _)| *id == node)
-            .map(|(_, view)| view.clone())?;
-        let raw = child.read(cx).hit_test_x(position.x)?;
-        let clamped = raw.min(block.text().len());
-        let offset = navigation::validated_offset(block, clamped)
-            .or_else(|| navigation::validated_offset(block, block.text().len()))?;
-        Some(TextPoint::new(node, offset, CursorAffinity::Before))
     }
 }
 

@@ -1,6 +1,6 @@
 # P2 收官审计
 
-状态：**P2.7 收官输入**
+???**P2.7 ????????Windows ?? Gate ????P2 Phase Gate ???**
 
 本文档记录 P2.0–P2.6 合入后，对照 `design.md`、`progress.md`、当前 `main` 实现进行的收官审计。它只记录需要在 P2 关闭前处理或明确移交的事项；长期路线仍以 `docs/planning.md` 为准。
 
@@ -13,10 +13,10 @@ P2.0  Phase contract                 已完成
 P2.1  SplitNode / JoinNodes          已完成
 P2.2  DocumentSelection              已完成
 P2.3  Structural commands            已完成
-P2.4  List editing                   主体完成，Enter / marker 闭环需收官
+P2.4  List editing                   ????Enter / marker ?????????? ?3.3?
 P2.5  GPUI multi-block               已完成实现，最终实机 Gate 待收口
-P2.6  Minimal host-contract harness  已完成实现，持久化契约需补强
-P2.7  Mapping / invariants / Gate     待完成
+P2.6  Minimal host-contract harness  ??????load ????? marks round-trip ????? Gate ???
+P2.7  Mapping / invariants / Gate     ??????Windows Gate ??
 ```
 
 因此 P2 已经过了“做一半”的阶段。主体能力已经落地，但剩余工作不只是文档盖章：收官审计又发现了 list Enter / marker、Unicode navigation 和 persistence fidelity 等可见 correctness 缺口。完成度更适合判断为“主体已完成、Phase Gate 尚未关闭”，不建议用一个精确百分比替代 Gate。
@@ -86,6 +86,7 @@ P2.7 要求至少定义并实现：
 嵌套 list 的空项退出策略可以先采用一条确定、可测的规则，不需要在 P2 做复杂编辑器启发式。
 
 ### 2.3 List 必须真正绘制 marker / ordinal
+???**???**?marker ? GPUI ?????? canonical text / offsets??????????????? ?3.3??
 
 当前 `DocumentView::render_block_tree` 对 BulletList / OrderedList 主要体现为 `list_depth` 缩进；inline block 的 `style_block` 没有生成 bullet marker 或 ordered ordinal。
 
@@ -104,6 +105,7 @@ marker 不破坏 block hit-test 与 selection paint
 marker 属 frontend projection，不能伪造成 TextRun 写入 canonical document。
 
 ### 2.4 `DocumentPersistence::load` 必须区分“没有文档”和“加载失败”
+???**???**?`load` ? `Result<Option<XiaomuDocument>, PersistenceError>`?NotFound = Ok(None)??/???? = Err?harness ?? store ???????????
 
 当前接口：
 
@@ -134,6 +136,7 @@ fn load(&self) -> Result<Option<XiaomuDocument>, PersistenceError>;
 - harness 不允许在损坏持久化数据时静默启动一份新文档。
 
 ### 2.5 P2.6 fixture round-trip 不能丢失 P1 已经支持的 marks
+???**???**?fixture v2 ?? run ???MarkSet ? Link attrs????? NodeAttrs?round-trip ??????? canonical semantics??
 
 `DocumentPersistence` 的契约是保存 canonical snapshot；但当前 P2.6 fixture 明确只拼接 inline text，load 时用 `MarkSet::empty()` 重建，Bold / Italic / Code / Underline / Strike 会在 save → reload 后丢失。
 
@@ -153,6 +156,7 @@ fixture 仍然可以是 harness-private 格式，不需要升级成公共 codec�
 ## 3. P2.7 必须完成的原计划事项
 
 ### 3.1 Mapping regression matrix
+???**???**?`tests/mapping_matrix.rs`?Split/Join/Remove-Restore/list wrap?indent?outdent?Enter/undo-redo/??????? Gate ? ?3.3??
 
 P0 / P2.1 已经有单 step mapping 与随机 inverse 基础；P2 关闭前还需要 session / structural composition 级矩阵：
 
@@ -169,6 +173,7 @@ cross-block anchor/focus direction preservation
 重点不是增加测试数量，而是证明 P2 runtime 不在 ChangeMap 之外维护另一套隐式 offset 修补规则。
 
 ### 3.2 会话级随机结构编辑不变量
+???**???**?`tests/structural_invariants.rs`??? fixture ????????validate / selection / undo ?? identity / redo ???? / NoChange ?????
 
 在合法 fixture 上生成结构命令序列，至少检查：
 
@@ -181,6 +186,7 @@ NoChange: revision / history / notification do not advance
 ```
 
 ### 3.3 Windows 实机最终 Gate
+???**???**?Windows ???? Gate ????P2 ?????
 
 P2.5/P2.6 已经有多次实机反馈和修复，但最终收官清单仍需一次完整执行并记录证据：
 
@@ -208,14 +214,17 @@ P2 不要求 cross-block copy / cut / delete；这些仍属于 P3。
 ## 4. 关闭前文档与代码卫生
 
 ### 4.1 进度文档应按真实状态收口
+???**???**?progress.md ?????? vs ?? Gate?Windows Gate ????
 
 `progress.md` 底部 Gate 目前落后于实现：P2.5/P2.6 已经合入，P1 session 回归也在后续 PR 中持续通过。P2.7 最终 PR 应把“实现已完成”和“实机 Gate 已完成”区分清楚后同步状态。
 
 ### 4.2 `architecture.md` 顶部摘要需要同步 multi-block 事实
+???**???**?architecture.md ?????? DocumentView ?? / list marker / persistence ?????? P3 ????
 
 当前架构正文已经记录 DocumentView / multi-block，但顶部总体摘要仍主要描述单 Paragraph GPUI 闭环。P2 收官 PR 应统一为当前真实状态。
 
 ### 4.3 Source-size warning 在进入 P3 前清理
+???**???**?hot module ??????session caret/resolve?document_view markers/mouse?harness store/format?`apply.rs` / `structure.rs` ?? 501?700 warning?P3 ????? clipboard / visual-line?source-size / dependency-boundary ????
 
 P2 已经出现多个高频修改文件接近 source-size review warning。P2.7 应重新运行 guard；仍处于 501–700 行 warning 且 P3 会继续增长的 hot module，优先按职责拆分。
 

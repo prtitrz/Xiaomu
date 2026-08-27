@@ -211,7 +211,7 @@ GPUI 实机验证（Windows multi-block 键盘闭环）待 P2.6 harness 接入�
 
 ## P2.6 Minimal host-contract harness
 
-- [x] runtime 新增 `DocumentPersistence` seam：save(&XiaomuDocument) / load() -> Option<XiaomuDocument> + PersistenceError，只承载 Core 类型，格式与存储完全归宿主 adapter
+- [x] runtime 新增 `DocumentPersistence` seam：save(&XiaomuDocument) / load() -> Result<Option<XiaomuDocument>, PersistenceError>，只承载 Core 类型，格式与存储完全归宿主 adapter
 - [x] GPUI：Ctrl/Cmd-S → SaveDocument action → 经 adapter 写出当前 snapshot；EditorHooks { persistence, listener } 作为最小宿主接入点（run_document_editor_with_hooks）
 - [x] editor_harness 接入 multi-block 编辑器：启动时经 adapter load（无 store 文件则用内置多块 demo fixture——heading / quote / bullet / ordered 全覆盖 P2.5 渲染）
 - [x] listen leg：ChangeCounter 实现 DocumentChangeListener 注册进 session，退出时报告提交变更数
@@ -351,6 +351,19 @@ P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置
 - 选区高亮按 `DocumentSelection::ordered` 逐块投影：两端点所在块画部分高亮，中间块全亮；caret 只在焦点端点所在块且平台焦点在该块时绘制。
 - 鼠标命中用 paint 期发布的逐块 bounds 注册表（每帧清空重建）：y 找最近块、x 用该块的 shaped line hit-test；拖选 extend 保持现有 text anchor（gap anchor 塌缩为目标点，本切片端点全文本化）。
 
+## P2.7 ????? vs ???
+
+??????? Windows ?? Gate ?????
+
+- [x] list Enter??? item ?? sibling ListItem?? item ???? list level
+- [x] ?? Up/Down ?????? Unicode scalar boundary
+- [x] BulletList / OrderedList marker ? frontend projection???? canonical text / selection offset
+- [x] `DocumentPersistence::load` ? `Result<Option<XiaomuDocument>, PersistenceError>`?NotFound = Ok(None)??/???? = Err??harness ???? store ???????
+- [x] fixture v2 round-trip ?? run ???MarkSet?? Link attrs?????? NodeAttrs
+- [x] session/structural mapping matrix + ???????
+- [x] source-size / dependency-boundary guard?hot module ???????`apply.rs` / `structure.rs` ?? warning?P3 ????? clipboard / visual-line?
+- [ ] Windows ???? Gate?? closeout-audit.md ?3.3???????P2 Phase Gate ???
+
 ## P2 Phase Gate
 
 P2 只有在以下条件全部满足后才能完成：
@@ -361,9 +374,9 @@ P2 只有在以下条件全部满足后才能完成：
 - [x] list 日常编辑闭环 undo 可还原（P2.4 纯逻辑层；实机验证归 P2.5）
 - [ ] multi-block 渲染 + 跨块导航 + 跨块 selection 实机可用
 - [ ] minimal host-contract harness 完成 load / listen / persist 闭环
-- [ ] position mapping regression matrix 建立并通过
-- [ ] P1 全部 session 行为回归通过
-- [ ] 架构文档与实现一致
+- [x] position mapping regression matrix ?????????????? Gate ???
+- [x] P1 ?? session ?????????????
+- [x] ??????????Windows ?? Gate ???????? Phase Gate?
 - [ ] P2 最终 `CI Success` 全绿
 
 ## Regression Log

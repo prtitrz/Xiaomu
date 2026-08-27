@@ -35,10 +35,16 @@ fn main() {
     let store = Rc::new(RefCell::new(FixtureStore::new(path.clone())));
 
     // load document: through the adapter when a snapshot exists, otherwise
-    // start from the in-memory demo fixture.
+    // start from the in-memory demo fixture. A corrupt store is a hard
+    // failure: never silently replace persisted data with a new document.
     let (document, source) = match store.borrow().load() {
-        Some(document) => (document, format!("loaded from {}", path.display())),
-        None => (demo_fixture(), "created demo fixture".to_owned()),
+        Ok(Some(document)) => (document, format!("loaded from {}", path.display())),
+        Ok(None) => (demo_fixture(), "created demo fixture".to_owned()),
+        Err(error) => {
+            eprintln!("xiaomu: failed to load persisted document: {error}");
+            eprintln!("xiaomu: refusing to start a new document over corrupt store data");
+            std::process::exit(1);
+        }
     };
     eprintln!("xiaomu: {source}");
     print_outline(&document);
@@ -111,7 +117,7 @@ fn print_outline(document: &XiaomuDocument) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{escape_text, parse_document, structurally_equal, unescape_text};
+    use crate::store::{canonical_semantics_equal, escape_text, parse_document, unescape_text};
     use xiaomu_core::document::{NodeContent as TestNodeContent, NodeKind as TestNodeKind};
 
     #[test]
@@ -123,16 +129,30 @@ mod tests {
         let mut adapter = FixtureStore::new(path.clone());
         adapter.save(&original).expect("save");
 
-        let restored = adapter.load().expect("load after save");
+        let restored = adapter
+            .load()
+            .expect("load after save")
+            .expect("saved snapshot must exist");
         let _ = std::fs::remove_file(&path);
 
-        assert!(structurally_equal(&original, &restored));
+        assert!(canonical_semantics_equal(&original, &restored));
     }
 
     #[test]
     fn load_without_store_file_starts_from_none() {
         let adapter = FixtureStore::new(std::env::temp_dir().join("xiaomu-harness-missing"));
-        assert!(adapter.load().is_none());
+        assert!(adapter.load().expect("missing store is Ok(None)").is_none());
+    }
+
+    #[test]
+    fn load_returns_err_for_corrupt_store_data() {
+        let path =
+            std::env::temp_dir().join(format!("xiaomu-harness-corrupt-{}", std::process::id()));
+        std::fs::write(&path, "not a fixture\n").expect("write corrupt store");
+        let adapter = FixtureStore::new(path.clone());
+        let result = adapter.load();
+        let _ = std::fs::remove_file(&path);
+        assert!(result.is_err(), "corrupt data must not look like Ok(None)");
     }
 
     #[test]
@@ -143,7 +163,7 @@ mod tests {
 
     #[test]
     fn parses_headings_quotes_and_lists() {
-        let text = "xiaomu-fixture-doc v1\nh2\t标题\np\t正文\nquote\np\t引文\nend\nul\nli\np\t甲\nend\nli\np\t乙\nend\nend\n";
+        let text = "xiaomu-fixture-doc v2\nh2\t标题\t\np\t正文\t\nquote\np\t引文\t\nend\nul\nli\np\t甲\t\nend\nli\np\t乙\t\nend\nend\n";
         let document = parse_document(text).expect("parse");
 
         let root_children = match document.node(document.root()).unwrap().content() {
@@ -164,6 +184,67 @@ mod tests {
     #[test]
     fn rejects_unknown_headers_and_unclosed_containers() {
         assert!(parse_document("nope\n").is_err());
-        assert!(parse_document("xiaomu-fixture-doc v1\nquote\n").is_err());
+        assert!(parse_document("xiaomu-fixture-doc v2\nquote\n").is_err());
+    }
+
+    #[test]
+    fn save_load_preserves_marks_runs_and_link_attrs() {
+        use std::collections::BTreeMap;
+        use xiaomu_core::document::{
+            AttrValue, InlineContent, LinkMark, Mark, MarkSet, NodeAttrs, NodeContent, NodeKind,
+            NodeStoreBuilder, TextRun,
+        };
+
+        let marks = |list: Vec<Mark>| MarkSet::new(list).unwrap();
+        let run = |text: &str, list: Vec<Mark>| TextRun::new(text, marks(list)).unwrap();
+        let mut builder = NodeStoreBuilder::new();
+        let attrs = NodeAttrs::new(BTreeMap::from([(
+            "note".to_owned(),
+            AttrValue::String("keep-me".to_owned()),
+        )]))
+        .unwrap();
+        let paragraph = builder
+            .insert(
+                NodeKind::Paragraph,
+                attrs,
+                NodeContent::Inline(
+                    InlineContent::new([
+                        run("bold ", vec![Mark::Bold]),
+                        run("italic ", vec![Mark::Italic]),
+                        run("code ", vec![Mark::Code]),
+                        run("under ", vec![Mark::Underline]),
+                        run("strike ", vec![Mark::Strike]),
+                        run(
+                            "link",
+                            vec![Mark::Link(LinkMark::new(
+                                "https://example.com",
+                                Some("Example".to_owned()),
+                            ))],
+                        ),
+                    ])
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([paragraph]),
+            )
+            .unwrap();
+        let original = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+        let path =
+            std::env::temp_dir().join(format!("xiaomu-harness-marks-{}.txt", std::process::id()));
+        let mut adapter = FixtureStore::new(path.clone());
+        adapter.save(&original).expect("save");
+        let restored = adapter.load().expect("load").expect("snapshot present");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            canonical_semantics_equal(&original, &restored),
+            "save/load dropped marks, runs, or attrs"
+        );
     }
 }

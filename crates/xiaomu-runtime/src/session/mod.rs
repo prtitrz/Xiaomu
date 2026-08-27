@@ -11,10 +11,12 @@
 //! at all. The session selection is valid for the current snapshot at every
 //! public read.
 
+mod caret;
 mod history;
 mod intent;
 mod listener;
 mod outcome;
+mod resolve;
 mod selection;
 mod split;
 mod structure;
@@ -27,13 +29,13 @@ pub use selection::DocumentPosition;
 pub use selection::DocumentSelection;
 
 use xiaomu_core::document::{InlineContent, NodeId, XiaomuDocument};
-use xiaomu_core::mapping::{ChangeMap, StepMap};
-use xiaomu_core::selection::{CursorAffinity, TextPoint, TextSelection};
-use xiaomu_core::text::TextOffset;
+use xiaomu_core::mapping::StepMap;
+use xiaomu_core::selection::{TextPoint, TextSelection};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin};
 
 use self::history::HistoryEntry;
 use self::intent::PlannedAction;
+use self::resolve::{affinity_of, collapsed_caret, preserved_focus, resolve_selection};
 
 /// Orchestrates one editing session over an immutable Core snapshot.
 ///
@@ -409,98 +411,6 @@ impl DocumentSession {
         Ok(())
     }
 
-    fn move_caret(
-        &mut self,
-        caret_move: CaretMove,
-        extend_selection: bool,
-    ) -> Result<SessionOutcome, SessionError> {
-        // Cross-block caret movement arrives with the multi-block frontend;
-        // at a gap endpoint there is nothing to move within yet.
-        let Some(focus) = self.text_focus().ok() else {
-            return Ok(SessionOutcome::NoChange);
-        };
-        let inline = self.inline_of(focus.node_id())?;
-        let text = intent::concatenated(&inline);
-        let current = focus.offset().as_usize();
-        let target = match caret_move {
-            CaretMove::Backward => intent::previous_boundary(&text, current),
-            CaretMove::Forward => intent::next_boundary(&text, current),
-            CaretMove::ToStart => (current != 0).then_some(0),
-            CaretMove::ToEnd => (current != text.len()).then_some(text.len()),
-        };
-
-        let Some(raw) = target else {
-            return Ok(SessionOutcome::NoChange);
-        };
-        let offset = inline.offset_at(raw).map_err(SessionError::Core)?;
-        let moved = TextPoint::new(focus.node_id(), offset, focus.affinity());
-        let next = if extend_selection {
-            DocumentSelection::new(self.selection.anchor(), moved)
-        } else {
-            DocumentSelection::collapsed(moved)
-        };
-
-        if next == self.selection {
-            return Ok(SessionOutcome::NoChange);
-        }
-        self.selection = next;
-        self.notify_selection_changed();
-
-        Ok(SessionOutcome::SelectionChanged)
-    }
-
-    fn place_caret(
-        &mut self,
-        offset: TextOffset,
-        extend_selection: bool,
-    ) -> Result<SessionOutcome, SessionError> {
-        // Hit-testing against the block tree lands on one block's text; gap
-        // endpoints have no in-node coordinates to place into.
-        let Some(focus) = self.text_focus().ok() else {
-            return Ok(SessionOutcome::NoChange);
-        };
-        let inline = self.inline_of(focus.node_id())?;
-        inline.validate_offset(offset).map_err(SessionError::Core)?;
-
-        let moved = TextPoint::new(focus.node_id(), offset, focus.affinity());
-        let next = if extend_selection {
-            DocumentSelection::new(self.selection.anchor(), moved)
-        } else {
-            DocumentSelection::collapsed(moved)
-        };
-
-        if next == self.selection {
-            return Ok(SessionOutcome::NoChange);
-        }
-        self.selection = next;
-        self.notify_selection_changed();
-
-        Ok(SessionOutcome::SelectionChanged)
-    }
-
-    /// Places both selection endpoints at absolute text positions.
-    ///
-    /// The document-level escape hatch for cross-block navigation and mouse
-    /// selection. Both endpoints must be valid for the current snapshot;
-    /// otherwise the session is untouched.
-    fn set_selection(
-        &mut self,
-        anchor: TextPoint,
-        focus: TextPoint,
-    ) -> Result<SessionOutcome, SessionError> {
-        let next = DocumentSelection::new(anchor, focus);
-        next.validate(&self.document)
-            .map_err(|_| SessionError::SelectionInvalid)?;
-
-        if next == self.selection {
-            return Ok(SessionOutcome::NoChange);
-        }
-        self.selection = next;
-        self.notify_selection_changed();
-
-        Ok(SessionOutcome::SelectionChanged)
-    }
-
     fn inline_of(&self, node: NodeId) -> Result<InlineContent, SessionError> {
         self.document
             .node(node)
@@ -532,117 +442,4 @@ impl DocumentSession {
             listener.selection_changed(selection);
         }
     }
-}
-
-/// Resolves the after-selection of one committed plan.
-fn resolve_selection(
-    plan: &EditPlan,
-    changes: &ChangeMap,
-    before: DocumentSelection,
-    before_document: &XiaomuDocument,
-    document: &XiaomuDocument,
-) -> Result<DocumentSelection, SessionError> {
-    match plan.selection_update() {
-        SelectionUpdate::CaretAfterReplacement | SelectionUpdate::CaretAtEditStart => {
-            let edit = plan.primary_edit().ok_or(SessionError::SelectionInvalid)?;
-            let raw = match plan.selection_update() {
-                SelectionUpdate::CaretAfterReplacement => {
-                    edit.range().start().as_usize() + edit.inserted_len()
-                }
-                _ => edit.range().start().as_usize(),
-            };
-            collapsed_caret(document, edit.node(), raw, affinity_of(before))
-        }
-        SelectionUpdate::CaretAtJoinPoint => {
-            let edit = plan.primary_edit().ok_or(SessionError::SelectionInvalid)?;
-            collapsed_caret(
-                document,
-                edit.node(),
-                edit.range().start().as_usize(),
-                affinity_of(before),
-            )
-        }
-        SelectionUpdate::MapExisting => {
-            let mapped = before.map_through(changes, before_document)?;
-            mapped
-                .validate(document)
-                .map_err(|_| SessionError::SelectionInvalid)?;
-            Ok(mapped)
-        }
-        SelectionUpdate::CaretAtSplitTail => {
-            let inserted = changes
-                .steps()
-                .iter()
-                .rev()
-                .find_map(|step| match step {
-                    StepMap::NodeSplit { inserted, .. } => Some(*inserted),
-                    _ => None,
-                })
-                .ok_or(SessionError::SelectionInvalid)?;
-            collapsed_caret(document, inserted, 0, affinity_of(before))
-        }
-        SelectionUpdate::CaretAtJoinSeam => {
-            let (first, first_len) = changes
-                .steps()
-                .iter()
-                .rev()
-                .find_map(|step| match step {
-                    StepMap::NodeJoined {
-                        first, first_len, ..
-                    } => Some((*first, *first_len)),
-                    _ => None,
-                })
-                .ok_or(SessionError::SelectionInvalid)?;
-            collapsed_caret(document, first, first_len, affinity_of(before))
-        }
-        // Single-transaction plans may promise PreserveFocus when the
-        // focused block's identity survives a structural move (lift out,
-        // outdent); staged list commands resolve the same policy in
-        // `commit_staged`.
-        SelectionUpdate::PreserveFocus => preserved_focus(before, document),
-    }
-}
-
-fn affinity_of(selection: DocumentSelection) -> CursorAffinity {
-    match selection.focus() {
-        DocumentPosition::Text(point) => point.affinity(),
-        DocumentPosition::Gap(_) => CursorAffinity::Before,
-    }
-}
-
-fn collapsed_caret(
-    document: &XiaomuDocument,
-    node: NodeId,
-    raw: usize,
-    affinity: CursorAffinity,
-) -> Result<DocumentSelection, SessionError> {
-    let inline = document
-        .node(node)
-        .ok_or(SessionError::Core(xiaomu_core::Error::UnknownNode))?
-        .content()
-        .as_inline()
-        .ok_or(SessionError::SelectionInvalid)?;
-    let offset = inline.offset_at(raw).map_err(SessionError::Core)?;
-    let selection = DocumentSelection::collapsed(TextPoint::new(node, offset, affinity));
-    selection
-        .validate(document)
-        .map_err(|_| SessionError::SelectionInvalid)?;
-    Ok(selection)
-}
-
-/// Collapses the caret onto the focus endpoint's node and offset, validated
-/// against the post-command snapshot.
-fn preserved_focus(
-    before: DocumentSelection,
-    document: &XiaomuDocument,
-) -> Result<DocumentSelection, SessionError> {
-    let point = match before.focus() {
-        DocumentPosition::Text(point) => point,
-        DocumentPosition::Gap(_) => return Err(SessionError::SelectionInvalid),
-    };
-    let selection = DocumentSelection::collapsed(point);
-    selection
-        .validate(document)
-        .map_err(|_| SessionError::SelectionInvalid)?;
-    Ok(selection)
 }
