@@ -1,6 +1,6 @@
 # P2 Document Tree / Structural Edit 进度
 
-状态：**收官验证中**
+状态：**已完成 / CLOSED**
 
 本文档只记录 P2 的执行状态和验证证据。长期架构事实放在 `docs/architecture.md`，P2 设计放在 `design.md`，顶层路线以 `docs/planning.md` 为准。
 
@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P2 收官 PR，功能与 Windows 实机 Gate 已完成，仅待本 PR 最终 CI Success。**
+当前切片：**P2 已完成并关闭。后续功能变更进入 P3，不再扩张 P2 范围。**
 
-前置状态：P0 已完成；P1 已完成并关闭；P2.0–P2.7 功能实现均已合入 `main`，PR #38 完成 P2.7 最后一轮功能收口与 Windows 实机 Gate。
+前置状态：P0 已完成；P1 已完成并关闭；P2.0–P2.7 功能实现已合入 `main`，PR #38 完成 P2.7 最后一轮功能收口与 Windows 实机 Gate；PR #39 完成 persistence fail-closed 与收官文档同步。
 
 ## P2.0 Phase Contract 与阶段骨架
 
@@ -121,7 +121,7 @@ fixture 仍是 harness-private 格式，不是公共 codec。P2 只要求它能�
 - [x] source-size / dependency-boundary guard 复核
 - [x] Windows 最终实机 Gate
 - [x] 收官复核补充 unsupported atomic / custom persistence fail-closed
-- [~] 收官 PR 最终 `CI Success`
+- [x] 收官 PR `CI Success`
 
 ## Windows 最终实机 Gate
 
@@ -192,7 +192,7 @@ harness fixture 只对它明确支持的 canonical node / mark / attr 表达返�
 
 ## P2 Phase Gate
 
-P2 只有在以下条件全部满足后关闭：
+P2 关闭条件全部满足：
 
 - [x] SplitNode / JoinNodes 以 Core step 落地，mapping + inverse 满足随机不变量
 - [x] DocumentSelection 成为 session selection 形态，公开读取点全部校验
@@ -206,9 +206,9 @@ P2 只有在以下条件全部满足后关闭：
 - [x] persistence 不吞 load 错误、不静默丢 unsupported canonical node
 - [x] Windows 最终 Gate 完成
 - [x] architecture / progress / closeout 文档同步
-- [~] 本收官 PR 最终 `CI Success` 全绿
+- [x] 收官 PR 最终 `CI Success` 全绿
 
-最终 CI 通过并合入后，本文件状态改为 **已完成 / CLOSED**，P2 不再继续接收功能扩张。
+P2 自 PR #39 起正式 **CLOSED**。后续能力和回归修复按 P3 及后续 Phase 的边界继续演进。
 
 ## Regression Log
 
