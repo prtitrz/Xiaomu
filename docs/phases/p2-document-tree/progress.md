@@ -1,6 +1,6 @@
 # P2 Document Tree / Structural Edit 进度
 
-状态：进行中
+状态：**收官验证中**
 
 本文档只记录 P2 的执行状态和验证证据。长期架构事实放在 `docs/architecture.md`，P2 设计放在 `design.md`，顶层路线以 `docs/planning.md` 为准。
 
@@ -15,370 +15,201 @@
 
 ## 当前状态
 
-当前切片：**P2.7 收官进行中（list Enter / Unicode Up-Down 已开始；marker、persistence、mapping matrix、Windows Gate 待做）**
+当前切片：**P2 收官 PR，功能与 Windows 实机 Gate 已完成，仅待本 PR 最终 CI Success。**
 
-前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0–P2.5 已合入（PR #21–#27）。
+前置状态：P0 已完成；P1 已完成并关闭；P2.0–P2.7 功能实现均已合入 `main`，PR #38 完成 P2.7 最后一轮功能收口与 Windows 实机 Gate。
 
 ## P2.0 Phase Contract 与阶段骨架
 
-- [x] 创建 `docs/phases/p2-document-tree/design.md`
-- [x] 创建 `docs/phases/p2-document-tree/progress.md`
-- [x] 记录 P1 移交的 P2 前置依赖归属（见下方决策记录）
-- [x] 运行 source-size 与 dependency-boundary guard
-- [x] 运行 `cargo fmt --all -- --check`
-- [x] 运行 `cargo clippy --workspace --all-targets -- -D warnings`
-- [x] 运行 `cargo test --workspace --all-targets`
+- [x] P2 design / progress 文档建立
+- [x] P1 → P2 前置依赖归属明确
+- [x] source-size / dependency-boundary guard 接入并持续执行
+- [x] fmt / clippy / workspace tests 持续作为 CI Gate
 
-完成证据：
-
-```text
-分支 docs/p2-phase-contract：
-uv run python tools/check_source_size.py 全绿
-uv run python tools/check_dependency_boundaries.py 全绿
-cargo fmt / clippy -D warnings / cargo test 全绿
-本 PR 的远端 CI Success 即 P2.0 Gate 证据。
-```
+结果：P2 的范围、非目标、分层与 Phase Gate 在实现前固定，后续切片没有把 P3 能力倒灌进 P2。
 
 ## P2.1 Core 结构 steps
 
-- [x] SplitNode step：构造校验（inline 节点、scalar boundary offset）+ application + 新兄弟分配
-- [x] JoinNodes step：相邻 inline 兄弟合并，内容归一化拼接，被吸收子树移除
-- [x] StepMap::NodeSplit / NodeJoined 映射数据（text point / node gap / node selection）
-- [x] inverse 精确还原（SplitNode ↔ JoinNodes；JoinNodes 逆 = 删除追加文本 + RestoreSubtree）
-- [x] 随机不变量测试扩展到新 step（valid 序列 + 整链 undo 还原初始 store）
-- [x] mapping 单测迁出 production source（src/mapping.rs tests → tests/step_mapping.rs，source-size guard）
+- [x] `SplitNode`：inline 节点在合法 Unicode scalar boundary 拆分，tail 获得新 NodeId
+- [x] `JoinNodes`：相邻 inline 兄弟合并，保留 first identity
+- [x] `StepMap::NodeSplit / NodeJoined` 与 parent child-boundary 映射
+- [x] inverse 精确还原，随机 valid transaction 不变量覆盖结构 step
+- [x] `SetNodeKind` 后续加入 Core，保留 NodeId / attrs / content 并校验 shape 与 parent compatibility
 
-实现说明：
+关键结果：结构 mutation 继续只通过 typed transaction；mapping 与 inverse 由 application 产出，没有建立第二套隐式 offset 修补机制。
 
-```text
-SplitNode 只作用于 inline-bearing 节点；offset 经 InlineContent::validate_offset 校验。
-run 内拆分时两半继承该 run 的 marks；恰好落在 run 边界则各 run 完整归属一侧；
-任一半允许为空。tail 兄弟复用原节点的 kind 与 attrs，由 snapshot 内部 allocator 分配 id。
-JoinNodes 要求 second 是 first 的紧邻后继兄弟；合并结果保留 first 的 identity/kind/attrs，
-内容按 piece 顺序归一化拼接（跨 first/second 边界的同 marks run 会重新合并，
-undo 时 JoinNodes 逆可精确还原该切分）。
-映射语义见 architecture.md Transaction/Mapping 小节；split 点 offset 由 MapBias 解析。
-```
+## P2.2 Runtime DocumentSelection
 
-完成证据：
+- [x] `DocumentSelection / DocumentPosition` 成为 session selection 形态
+- [x] anchor / focus 可跨 inline block，并保留方向
+- [x] `validate / ordered / map_through / as_single_node` 语义有纯逻辑测试
+- [x] session 公开读取点始终对当前 snapshot 重新校验 selection
+- [x] P1 单块能力经 `text_selection()` 投影保持兼容
 
-```text
-分支 feat/p2-core-structural-steps：
-cargo fmt --all -- --check 全绿
-cargo clippy --workspace --all-targets -- -D warnings 全绿
-cargo test --workspace --all-targets 全绿（新增 split/join 应用与 round-trip 测试，
-随机不变量生成器扩展 SplitNode/JoinNodes，mapping 单测迁至 tests/step_mapping.rs）
-tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
-```
-
-## P2.2 Runtime DocumentSelection 与 session 升级
-
-- [x] `DocumentSelection` / `DocumentPosition` 数据结构：端点为 TextPoint 或 NodeGap，validate / ordered / map_through / as_single_node 语义完整并有单测
-- [x] 跨块排序：snapshot pre-order slot 分配（节点与 gap 各占单调槽位），ordered() 解析 head/tail
-- [x] session selection 读写点切换到 document-level 校验；`text_selection()` 投影回单块 Core 选区供 P1 前端使用
-- [x] MapExisting 升级为 `map_through`：非折叠选区 head/tail 分别取 Start / End bias，任一端点被删整体失败，anchor/focus 方向保留
-- [x] gap 端点行为定义：内容编辑 intent 返回 `SelectionInvalid`；caret 移动返回 `NoChange`（跨块导航属 P2.5）
-- [x] P1 全部行为回归通过（session.rs 19 个集成测试未改断言语义即通过）
-
-实现说明：
-
-```text
-Core selection 类型不动；DocumentSelection 是 runtime 层超集。
-listener seam 与 HistoryEntry 的 before/after selection 同步升级为 DocumentSelection。
-gpui 单块视图全部经 text_selection() 投影读取；editor 入口用
-DocumentSelection::text 包装既有 TextSelection 参数，公开 API 无破坏性变更。
-```
-
-完成证据：
-
-```text
-分支 feat/p2-document-selection：
-cargo fmt --all -- --check 全绿
-cargo clippy --workspace --all-targets -- -D warnings 全绿
-cargo test --workspace --all-targets 全绿（新增 selection.rs 7 个单元测试，
-P1 回归 session.rs 19 个测试不改断言通过）
-tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
-```
+关键结果：Core selection contract 没有为了 UI 跨块能力扩张，document-level selection 留在 Runtime。
 
 ## P2.3 结构命令编排
 
-- [x] 结构 EditIntent：`SplitBlock` / `JoinWithPrevious` / `TurnInto { kind }`
-- [x] AfterSelectionPolicy：`CaretAtSplitTail`（新块起点）/ `CaretAtJoinSeam`（接缝 offset）；TurnInto 走 `MapExisting`
-- [x] Enter 命令流 = `SplitBlock`（非折叠选区先删除再拆分，一笔 history）；split 后新块继承被拆 run 的 marks（Core SplitNode 语义）
-- [x] Backspace-at-start 解释为 `JoinWithPrevious`；第一块块首仍为 NoChange（P1 回归）
-- [x] Core `SetNodeKind`：保留 NodeId / attrs / content，校验 shape 与 parent/child kind；root 不可改 kind
-- [x] undo / redo 对 split / join / turn-into 还原 store、identity 与 recorded selection
+- [x] `SplitBlock / JoinWithPrevious / TurnInto` intent
+- [x] 结构命令使用显式 after-selection policy
+- [x] Enter split / Backspace-at-start join
+- [x] Paragraph / Heading / CodeBlock 同 shape 转换
+- [x] undo / redo 保留结构 identity 与 recorded selection
 
-实现说明：
-
-```text
-TurnInto 只做同 shape 转换（Paragraph ↔ Heading ↔ CodeBlock）。把 inline 节点
-变成 Quote 等 container 由 Core 以 InvalidNodeContent 拒绝；wrapping / list
-留给 P2.4。JoinNodes 保留 first 的 kind，因此 heading 后的 paragraph 在块首
-Backspace 会并入 heading。
-```
-
-完成证据：
+主要 selection policy：
 
 ```text
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets
-tools/check_source_size.py 与 tools/check_dependency_boundaries.py
+SplitBlock        → caret 到 split tail 起点
+JoinWithPrevious  → caret 到 join seam
+TurnInto          → MapExisting
+结构移动          → PreserveFocus / intent-specific fallback
+fallback 无法合法化 → typed error，session 原子失败
 ```
 
 ## P2.4 List 编辑
 
-- [x] TurnInto(BulletList/OrderedList)：段落 wrap 为单 item list（staged 命令，焦点块 identity 保留）
-- [x] TurnInto(Paragraph)：item 内块 lift out；单 item list 整体溶解，paragraph → list → paragraph 闭环
-- [x] bullet ↔ ordered 转换走 SetNodeKind（保留 list / item / 块全部 identity）
-- [x] IndentListItem：移入前一兄弟 item；前一 item 以嵌套 list 结尾则复用，否则 staged 创建同 kind 内层 list
-- [x] OutdentListItem：移入外层 list 紧跟外层 item；被清空的内层 list 同笔删除
-- [x] PreserveFocus after-selection policy（结构移动后 caret 折叠回原 focus 点并重新校验）
-- [x] undo / redo 对 wrap / lift / indent / outdent 全部还原 exact store 与 recorded selection（含 redo 复用 identity）
-- [x] NoChange 语义：首 item indent、顶层 item outdent、同 kind 转换、非 list 段落 TurnInto(Paragraph)
+- [x] Paragraph → BulletList / OrderedList
+- [x] BulletList ↔ OrderedList
+- [x] List item → Paragraph，完成 paragraph → list → paragraph 闭环
+- [x] `IndentListItem / OutdentListItem`
+- [x] list item 块首 Backspace：前项合并、嵌套 outdent、顶层 lift-out
+- [x] Tab / Shift-Tab 的段落与 list 语义形成可理解闭环
+- [x] staged plan 把多阶段结构操作合并成一笔 history
+- [x] undo / redo 恢复 contracted identity
 
-实现说明：
+结论：P2 没有为 list 新增 Core 专用 transaction step。`InsertNode / RemoveNode / RestoreSubtree / SetNodeKind / SplitNode / JoinNodes` 足以表达当前 Gate。
 
-```text
-未新增任何 Core step（遵守 design §3.4）；list 命令全部由 InsertNode /
-RemoveNode / RestoreSubtree / SetNodeKind 组合。
-wrap 与 indent 需要引用 application 期间才分配的容器 NodeId：runtime 引入
-staged plan——每个阶段从其看到的 snapshot 按确定性位置重新推导新容器 id，
-全部阶段要么全成功并合并为一笔 history entry（undo = 各阶段 inverse 逆序
-拼接，redo = inverse(undo)），要么原子失败且 session 状态不变。
-lift 的插入下标按焦点 item 在 list 中的位置选择：首项用 `list_index`（残留
-list 之上），其后的项用 `list_index + 1`（残留 list 之下）。中间项再把
-后续 item 拆进同 kind 的新 list。outdent 目标父节点是外层 list 而非外层
-item（Core 禁止 ListItem 直接嵌套 ListItem）。
-已知边界：item 含多个子块时整体抬升/缩进；空 item 不产生（wrap/lift 均
-保证至少一个子块）；Enter 在 item 内仍走 SplitNode（在 item 内拆块），
-Backspace 在 item 内块首为 JoinWithPrevious 无前兄弟 → NoChange（实机
-反馈后已在下方“List backspace 修正”切片实现合并/退出语义。）
-```
+## P2.5 GPUI multi-block
 
-完成证据：
+- [x] `DocumentView` 多块容器、滚动与焦点路由
+- [x] per-block `ParagraphView` 多实例化与 NodeId 池化复用
+- [x] layout cache key = node + editing epoch + rounded width
+- [x] Left / Right / Home / End 跨块导航
+- [x] Up / Down 跨块导航，最终候选始终解析到合法 Unicode scalar boundary
+- [x] Shift keyboard selection 跨块
+- [x] mouse drag selection 跨块
+- [x] heading / quote 视觉投影
+- [x] BulletList / OrderedList marker / ordinal frontend projection
+- [x] marker 不进入 canonical text / selection offset
 
-```text
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test -p xiaomu-core -p xiaomu-runtime -p xiaomu-codec-markdown --all-targets
-  （新增 tests/list.rs 11 个测试；P1 session 19 个、P2.3 structural 14 个
-   回归不改断言通过）
-tools/check_source_size.py ok（session/mod.rs 566 行超 review 阈值 500，
-  仅 warning，后续切片拆分）
-tools/check_dependency_boundaries.py ok
-注：本机 WSL 缺 libxkbcommon-x11，gpui/harness 测试无法链接，与 P1–P2.3
-各切片环境一致；GPUI 实机验证归 P2.5。
-```
-
-## P2.5 GPUI multi-block 渲染与导航
-
-- [x] `DocumentView` 块列表容器：按文档序为每个 inline-bearing block 挂载一个块视图，`overflow_y_scroll` 滚动容器，焦点跟随 selection focus 路由
-- [x] per-block view 多实例化：子实体按 NodeId 池化复用（IME composition / 焦点状态跨渲染存活）；layout cache key = (node, epoch, 宽度取整)，命中则复用 shape 结果
-- [x] 跨块 Left / Right / Home / End / Up / Down 导航：`navigation.rs` 纯逻辑（无 GPUI 类型）翻译为 `SetSelection`；Left/Right 在块边界环绕，Up/Down 在相邻块间移动并钳制字节下标（单视觉行模型）
-- [x] 跨块 selection 投影绘制与鼠标拖选：高亮按 `DocumentSelection::ordered` 逐块投影（含中间块全亮）；鼠标经 paint 期发布的块 bounds 注册表分发到目标块再 x hit-test
-- [x] heading / quote 视觉区分：heading 按层级放大加粗，quote 后代缩进 + 左侧竖线，list item 按嵌套深度缩进
-- [x] runtime 新增 `EditIntent::SetSelection { anchor, focus }`：跨块选择 / 导航的文档级放置原语（端点对当前 snapshot 校验，失败原子回退），session 测试 +2
-
-实现说明：
-
-```text
-ParagraphView 从持有 DocumentSession 改为共享 Rc<RefCell<DocumentSession>>；
-全部键盘动作上移到 DocumentView 容器层（从焦点块冒泡分发），块内仅保留
-IME InputHandler 与渲染。编辑 epoch 在每次 DocumentChanged 后递增，作为
-布局缓存键的一部分；composition 期绕过缓存。
-已知边界：块仍为单视觉行（不软换行），Up/Down 不做 x 保持（钳制字节下标，
-实机验证后按需升级为 shaped-line 几何）；gap 端点在 extend 时塌缩为目标点；
-composition 仍限定单块（P1 移交约束不变）。
-```
-
-完成证据：
-
-```text
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test -p xiaomu-core -p xiaomu-runtime -p xiaomu-codec-markdown --all-targets 全绿
-  （runtime session 测试 19→21：SetSelection 跨块移动 + 校验、split 后
-   SetSelection 触达新块；P1/P2.3/P2.4 回归不改断言通过）
-gpui 纯逻辑测试 navigation.rs 7 个 + cache_key.rs 2 个：本机 WSL 缺
-libxkbcommon-x11 无法链接 gpui 测试二进制（与 P1–P2.4 各切片一致），
-已在临时 crate 中等价运行通过；远端 CI 三平台覆盖正式位置。
-tools/check_source_size.py ok（document_view/mod.rs 667 行超 review 阈值
-500，仅 warning，后续切片拆分）；check_dependency_boundaries.py ok
-GPUI 实机验证（Windows multi-block 键盘闭环）待 P2.6 harness 接入后执行。
-```
+当前边界保持明确：P2 仍是单视觉行模型；soft-wrap、x-preserving vertical navigation、grapheme/BiDi visual affinity 留给 P3 或后续阶段。
 
 ## P2.6 Minimal host-contract harness
 
-- [x] runtime 新增 `DocumentPersistence` seam：save(&XiaomuDocument) / load() -> Result<Option<XiaomuDocument>, PersistenceError>，只承载 Core 类型，格式与存储完全归宿主 adapter
-- [x] GPUI：Ctrl/Cmd-S → SaveDocument action → 经 adapter 写出当前 snapshot；EditorHooks { persistence, listener } 作为最小宿主接入点（run_document_editor_with_hooks）
-- [x] editor_harness 接入 multi-block 编辑器：启动时经 adapter load（无 store 文件则用内置多块 demo fixture——heading / quote / bullet / ordered 全覆盖 P2.5 渲染）
-- [x] listen leg：ChangeCounter 实现 DocumentChangeListener 注册进 session，退出时报告提交变更数
-- [x] persist leg：FixtureStore 文件 adapter（harness 内部行格式 v1，TAB 分隔 + BEGIN/END 容器嵌套 + 最小转义；不承诺 codec 质量，marks 不序列化）
+- [x] Runtime `DocumentPersistence` seam
+- [x] `load() -> Result<Option<XiaomuDocument>, PersistenceError>`
+- [x] NotFound → `Ok(None)`；I/O / parse failure → `Err`
+- [x] GPUI Ctrl/Cmd-S 经 adapter 保存当前 canonical snapshot
+- [x] `EditorHooks` 接入 persistence 与 `DocumentChangeListener`
+- [x] harness create → load → edit/listen → save 闭环
+- [x] fixture v2 round-trip 保留 tree shape、inline runs、MarkSet、Link attrs 与 NodeAttrs
+- [x] unsupported atomic / custom node save 时 fail closed，不允许静默丢 canonical 数据
 
-实现说明：
+fixture 仍是 harness-private 格式，不是公共 codec。P2 只要求它能可靠证明 host seam；尚未编码的 node kind 必须明确报错，而不是假装保存成功。
 
-```text
-持久化走 seam 而非 codec：设计 §3.6 明确“格式为 harness 内部约定，
-不经 Markdown codec 生产路径”。adapter 的 round-trip 由结构相等断言锚定
-（同树形 / kind / inline 文本；NodeId 为分配序实现细节不作比较）。
-已知边界：fixture 不序列化 marks 与原子块；文本含反斜杠 / TAB 时按
-最小转义规则往返。
-```
+## P2.7 Closeout
 
-完成证据：
+- [x] list Enter：非空 item 创建 sibling `ListItem`
+- [x] empty list item Enter：退出当前 list level
+- [x] Unicode Up / Down boundary regression
+- [x] Bullet / ordered marker projection
+- [x] persistence load error semantics
+- [x] fixture marks / attrs fidelity
+- [x] session / structural mapping matrix
+- [x] structural invariants / history regression
+- [x] release 构建中 Gate-era diagnostics 仅保留真实错误
+- [x] source-size / dependency-boundary guard 复核
+- [x] Windows 最终实机 Gate
+- [x] 收官复核补充 unsupported atomic / custom persistence fail-closed
+- [~] 收官 PR 最终 `CI Success`
 
-```text
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test -p xiaomu-core -p xiaomu-runtime -p xiaomu-codec-markdown --all-targets 全绿
-harness store 测试 5 个（round-trip 结构相等 / 缺文件 None / 转义 /
-解析 heading-quote-list / 非法输入拒绝）：WSL 缺 libxkbcommon-x11 无法链接
-harness 测试二进制（与 P1–P2.5 一致），已在等价临时 crate 运行通过；
-远端 CI 三平台覆盖正式位置。
-Gate 流程 create → load → edit（listener 计数）→ save（Ctrl/Cmd-S）
-已接线；Windows 实机执行清单归 P2.7 收官 Gate 一并记录。
-```
+## Windows 最终实机 Gate
 
-## List backspace 修正（实机反馈第一轮，P2.6 后）
-
-实机试用发现两个问题：
-
-1. 第二个待办按 Backspace 无任何反应——原实现块首只走 JoinWithPrevious，
-   单块 item 没有前兄弟即 NoChange。
-2. Tab / Shift-Tab 观感“不行”——首项 Tab 与顶层项 Shift-Tab 本就是
-   NoChange，但无任何反馈，无法区分“此处不可”与“按键未送达”。
-
-修正：
-
-- [x] Backspace 块首优先级重排：① 同父前块 JoinNodes → ② 前一兄弟是
-      list / item 时把本块文本追加到其最后一个 inline 块尾部并删除本块
-      （清空的 item 同笔溶解）→ ③ 嵌套项 outdent → ④ 顶层首项 lift out。
-      新增 `SelectionUpdate::CaretAtJoinPoint`：光标落在拼接缝而非插入文本末尾。
-- [x] GPUI 对结构性命令的 NoChange 输出 stderr 说明，实机可区分位置性
-      no-op 与按键分发问题。
-
-完成证据：
+PR #38 已记录真实 Windows 环境 Gate 完成，覆盖：
 
 ```text
-cargo test -p xiaomu-runtime 全绿（session 23→26：
-  second-item 合并进上一 item + 光标在缝上、first-item lift-out 且单 item
-  list 溶解、嵌套项先 outdent 再合并、首项 Tab/顶层 Shift-Tab 明确 NoChange）
-cargo fmt --all -- --check；cargo clippy --workspace --all-targets -D warnings 全绿
+multi-block direct input
+Microsoft Pinyin in different blocks
+Left / Right cross-block
+Up / Down cross-block，含中英 / emoji
+Shift keyboard selection cross-block
+mouse drag selection cross-block
+Enter split / Backspace join
+paragraph → list
+list Enter creates sibling item
+empty list item Enter exits current level
+bullet / ordered marker 可见且不同
+indent / outdent → paragraph
+undo / redo structural edits
+Ctrl+S save
+restart + load
+listener observes committed changes
 ```
 
-### 2026-08-27（P2.6 后，Tab 语义补全）
-
-- 实机诊断确认按键分发与 session 行为都正常，“全部不行”实为位置性 no-op：首项不可缩进、顶层项不可 outdent、非列表块两者皆否。语义正确但反直觉。
-- Tab / Shift-Tab 补全为直觉闭环：纯段落**块首** Tab → TurnInto(BulletList)（复用既有 list wrap）；纯段落其余位置 Tab → 插入 4 个空格的 soft tab（含选区替换，走既有 InsertText；不插字面 `\t`，GPUI 对 U+0009 几乎无宽度，实机像没反应）；顶层 item Shift-Tab → TurnInto(Paragraph)（lift out）。嵌套项行为不变。判定用 gpui 层 `list_context` 纯函数（navigation.rs，+2 测试），不新增 runtime intent。
-
-## P1 移交的 P2 前置依赖与归属
-
-P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置如下：
+## P1 移交事项处置
 
 ```text
-1. 跨 block selection 属于 session 层
-   → P2 引入 runtime DocumentSelection（anchor/focus 端点为 TextPoint 或 NodeGap 级），
-     Core TextSelection / NodeSelection 语义不变；渲染投影属 GPUI 层。
-2. "Deleted 即原子失败"的 selection fallback 停损
-   → P2 结构命令需要显式 AfterSelectionPolicy（join 点 / 邻接位收敛等），
-     取代无差别停损；fallback 无法合法化才允许 typed error 原子失败。
-3. SplitNode / JoinNodes / MoveNode / list steps 未实现
-   → P2.1 落地最小集 SplitNode / JoinNodes；MoveNode 仅在 indent/outdent 组合成本
-     过高时评估引入；list 通过 InsertNode/RemoveNode/RestoreSubtree 组合实现。
-4. 视觉行导航与 grapheme 光标
-   → P2 提供跨 block Left/Right/Home/End/Up/Down 导航（仍按 scalar boundary、
-     单行视觉模型）；grapheme cluster 与 BiDi affinity 维持 ADR 0001 后续增强边界。
-5. IME composition 跨 block preedit
-   → P2 明确停损：composition 只在单 block 内启动，跨块 preedit 属后续增强，
-     在实现切片中记录并测试该约束的行为。
-6. 宿主集成（planning §13.1 从 P2 开始）
-   → P2.6 minimal host-contract harness：load document / listen to changes /
-     persist through adapter，不绑定 Markdown codec 生产质量，不引入产品专用类型。
+跨 block selection
+→ Runtime DocumentSelection，已完成
+
+Deleted 即全局失败的结构 selection 停损
+→ intent-specific after-selection policy，已完成
+
+SplitNode / JoinNodes / list structural capability
+→ Core minimal steps + Runtime staged plan，已完成；未引入 MoveNode
+
+视觉行导航 / grapheme caret
+→ P2 完成 scalar-safe 单视觉行跨块导航；visual-line / grapheme 留 P3+
+
+IME composition 跨块 preedit
+→ P2 明确 composition 仅在单 block 内启动，保持后续增强边界
+
+宿主集成
+→ minimal host-contract harness 已完成
 ```
 
-## 决策记录
+## 关键决策记录
 
-这里只记录影响 P2 执行的决定。长期且难逆转的架构理由应进入 ADR。
+### DocumentSelection 边界
 
-### 2026-08-25（P2.0）
+跨块 selection 属 Runtime session，不扩张 Core `TextSelection / NodeSelection / NodeGap` 的职责。
 
-- Document selection 放在 runtime session 层（DocumentSelection），不扩展 Core selection 类型——沿用 P0 "跨 block selection 属 session 层"决策，避免 Core contract 为 UI 形态让步。
-- 结构编辑 after-selection 用逐 intent 显式 policy 定义，取代 P1 的全局"Deleted 即失败"；这是行为语义变化，P1 回归测试需按新契约审视后迁移。
-- Core 最小 step 集 = SplitNode + JoinNodes；WrapList/UnwrapList 不在本阶段引入，list 编辑用既有原语组合，indent/outdent 是否需要 MoveNode 由 P2.4 以实际成本决定。
-- GPUI multi-block 采用"保留单块 view 能力 + 外层容器/焦点路由"的渐进替换，不重写渲染路径；所有 block 永远 mounted 只是过渡形态，公开 API 不得固化该假设（planning §10.1）。
-- IME composition 在 P2 停损为单块内启动；跨块 preedit 不做。
+### List step 语言
 
-### 2026-08-26（P2.3）
+P2 未新增 WrapList / UnwrapList / MoveNode。list 编辑通过 Core 已有通用结构原语和 Runtime staged plan 表达。实际实现证明组合成本可控，因此没有为 API 对称性增加 Core step。
 
-- TurnInto 通过新的 Core `SetNodeKind` 保持 NodeId，而不是 RemoveNode + InsertNode。kind 变更不移动 position，after-selection 走 MapExisting。
-- P2.3 的 TurnInto 只覆盖同 shape 的 inline kind（Paragraph / Heading / CodeBlock）；Quote wrapping 与 list 闭环留给 P2.4。
-- Backspace 在块首且存在前一兄弟时由 session 解释为 JoinWithPrevious，前端不必另发结构 intent；显式 `JoinWithPrevious` 在没有前一兄弟时同样是 NoChange。
-- Enter 对应 `SplitBlock` intent。GPUI 按键绑定仍属 P2.5；本切片只保证 session 语义与纯逻辑测试。
-- Session history 的 redo 存 `inverse(inverse(T))`，不重放原始 SplitNode。否则 redo 会重新分配 tail NodeId，录下的 after-selection 与 JoinNodes inverse 都会指向已消失的 identity。
+### Redo identity
 
-### 2026-08-27（P2.4）
+redo 重放 `inverse(inverse(T))`，不直接重放会重新分配 NodeId 的原始 `SplitNode`。因此结构命令 redo 可以恢复记录过的 identity 与 after-selection。
 
-- List 编辑不新增 Core step（维持 §3.4 决策）。跨 step 引用新分配 NodeId 的问题用 runtime 层 staged plan 解决：每阶段从当前 snapshot 按确定性位置重新推导容器 id，而不是给 Core 加占位符机制或复合 step——保持 Core step 语言最小、inverse/mapping 语义不变。
-- Staged 命令的 undo = 各阶段 inverse 按逆序拼成的单笔 transaction，redo = inverse(undo)；与单笔命令共用 HistoryEntry 形态，identity 还原语义一致（已由 store 相等断言锚定）。
-- 结构性 list 移动的 after-selection 新增 `PreserveFocus`（焦点块 identity 保留时 caret 折叠回原点），不用 MapExisting——Remove→Restore 组合会把端点判为 Deleted。
-- OutdentListItem 的目标父节点是外层 list（紧跟外层 item 之后），不是外层 item：Core 的 `allows_child` 禁止 ListItem 直接嵌套 ListItem。被清空的内层 list 同笔删除。
-- Lift out 保持文档顺序：首项抬升插在残留 list 之前，末项插在其后；中间项把后续 item 拆成同 kind 的新 list 放在抬升块之下。多 item list 只溶解焦点 item。
-- indent/outdent 未引入 MoveNode step：单笔 RemoveNode + RestoreSubtree 即可表达（组合成本可控，§3.4 的 MoveNode 评估结论为不需要）。
+### Persistence seam
 
-### 2026-08-27（lift-out 文档顺序）
+Runtime 只定义 canonical snapshot 的 load/save seam；格式、存储介质、触发策略属于 host adapter。harness fixture 不升级为公共 codec。
 
-- 实机：顶层第二项 Shift-Tab 后段落跑到整份 list 上方。原因是 lift 一律按 `list_index` 插入。改为按 item 在 list 中的位置选择插入点；中间项再拆尾 list，避免把后面的 item 一并提前。
+### Fixture fail-closed
 
-### 2026-08-27（P2.7 开始：list Enter + Unicode 垂直导航）
-
-- List Enter 不新增 intent：`SplitBlock` 在 list item 内解释为新 sibling item（staged SplitNode → InsertNode → RestoreSubtree），空折叠项复用 outdent / lift-out。GPUI 仍只发 SplitBlock。
-- Up/Down 在单视觉行模型下把候选 UTF-8 offset clamp 后 floor 到目标块的 scalar boundary；禁止再把 mid-scalar raw index 交给 `validated_offset` 变成静默 no-op。
-
-### 2026-08-27（P2.6）
-
-- 持久化是宿主 seam 不是 codec：runtime 只定义 DocumentPersistence trait（snapshot 进出），序列化格式、存储介质、触发时机全部归 adapter。GPUI 不感知文件系统，仅把 Ctrl/Cmd-S 翻译成对 adapter 的调用。
-- listen leg 复用既有 DocumentChangeListener，不新增通知类型；harness 用计数器证明 edit 在 session 提交路径上可被宿主观察到。
-- fixture 格式按设计 §3.6 “harness 内部约定”落地：行式 + BEGIN/END 嵌套 + TAB 分隔 + 最小转义，round-trip 以结构相等断言锚定；明确不承诺 codec 质量，为 P3+ 的真实 codec 留出空间。
-
-### 2026-08-27（P2.5）
-
-- 跨块选择放置不新增 Core 概念：runtime 新增 `EditIntent::SetSelection { anchor, focus }`（两个 `TextPoint` 端点对 snapshot 校验），作为 `PlaceCaret` 的文档级形式；导航/拖选全部编译到这一个原语，session 不暴露裸 selection setter。
-- ParagraphView 从拥有 session 改为共享 `Rc<RefCell<DocumentSession>>`，键盘动作上移到 DocumentView 容器层冒泡分发；块内仅保留 IME InputHandler 与渲染。composition 仍限定单块（P1 移交停损不变），编辑 epoch 在每次 DocumentChanged 后递增。
-- 布局缓存键 = (node, epoch, 宽度取整)：epoch 驱动失效避免每帧重排 shape；composition 期绕过缓存（虚拟投影变化不经 epoch）。宽度取整到整像素，亚像素抖动不失效。
-- Up/Down 采用单视觉行模型：相邻块间移动并钳制字节下标，不做 x 保持——需要 shaped-line 几何，实机验证后按需升级；块不软换行是本切片前提。
-- 选区高亮按 `DocumentSelection::ordered` 逐块投影：两端点所在块画部分高亮，中间块全亮；caret 只在焦点端点所在块且平台焦点在该块时绘制。
-- 鼠标命中用 paint 期发布的逐块 bounds 注册表（每帧清空重建）：y 找最近块、x 用该块的 shaped line hit-test；拖选 extend 保持现有 text anchor（gap anchor 塌缩为目标点，本切片端点全文本化）。
-
-## P2.7 ????? vs ???
-
-??????? Windows ?? Gate ?????
-
-- [x] list Enter??? item ?? sibling ListItem?? item ???? list level
-- [x] ?? Up/Down ?????? Unicode scalar boundary
-- [x] BulletList / OrderedList marker ? frontend projection???? canonical text / selection offset
-- [x] `DocumentPersistence::load` ? `Result<Option<XiaomuDocument>, PersistenceError>`?NotFound = Ok(None)??/???? = Err??harness ???? store ???????
-- [x] fixture v2 round-trip ?? run ???MarkSet?? Link attrs?????? NodeAttrs
-- [x] session/structural mapping matrix + ???????
-- [x] source-size / dependency-boundary guard?hot module ???????`apply.rs` / `structure.rs` ?? warning?P3 ????? clipboard / visual-line?
-- [ ] Windows ???? Gate?? closeout-audit.md ?3.3???????P2 Phase Gate ???
+harness fixture 只对它明确支持的 canonical node / mark / attr 表达返回成功。遇到未编码语义必须返回 `PersistenceError`，禁止 silent data loss。
 
 ## P2 Phase Gate
 
-P2 只有在以下条件全部满足后才能完成：
+P2 只有在以下条件全部满足后关闭：
 
 - [x] SplitNode / JoinNodes 以 Core step 落地，mapping + inverse 满足随机不变量
-- [x] DocumentSelection 成为 session 的 selection 形态，公开读取点全部校验
+- [x] DocumentSelection 成为 session selection 形态，公开读取点全部校验
 - [x] 结构命令 after-selection fallback 显式且可测试
-- [x] list 日常编辑闭环 undo 可还原（P2.4 纯逻辑层；实机验证归 P2.5）
-- [ ] multi-block 渲染 + 跨块导航 + 跨块 selection 实机可用
-- [ ] minimal host-contract harness 完成 load / listen / persist 闭环
-- [x] position mapping regression matrix ?????????????? Gate ???
-- [x] P1 ?? session ?????????????
-- [x] ??????????Windows ?? Gate ???????? Phase Gate?
-- [ ] P2 最终 `CI Success` 全绿
+- [x] paragraph → list → paragraph 日常编辑闭环，undo 可还原
+- [x] multi-block 渲染 + 跨块导航 + 跨块 selection Windows 实机可用
+- [x] minimal host-contract harness 完成 load / listen / persist 闭环
+- [x] position mapping regression matrix 与结构不变量覆盖完成
+- [x] P1 session / IME / clipboard / marks 回归保持成立
+- [x] list Enter / marker / Unicode navigation 收官缺口关闭
+- [x] persistence 不吞 load 错误、不静默丢 unsupported canonical node
+- [x] Windows 最终 Gate 完成
+- [x] architecture / progress / closeout 文档同步
+- [~] 本收官 PR 最终 `CI Success` 全绿
+
+最终 CI 通过并合入后，本文件状态改为 **已完成 / CLOSED**，P2 不再继续接收功能扩张。
 
 ## Regression Log
 
-（空）
+P2 收官时无未解决 correctness regression。后续若 P3 变更破坏上述 Gate，应记录为 P3 regression，不回开 P2 范围。
