@@ -17,7 +17,9 @@ pub(crate) fn write_node(
     out: &mut String,
 ) -> Result<(), PersistenceError> {
     let Some(node) = document.node(id) else {
-        return Ok(());
+        return Err(PersistenceError(
+            "fixture document references a missing node".to_owned(),
+        ));
     };
     if !node.attrs().is_empty() {
         out.push_str("@\t");
@@ -47,7 +49,7 @@ pub(crate) fn write_node(
                 NodeKind::OrderedList => out.push_str("ol\n"),
                 NodeKind::ListItem => out.push_str("li\n"),
                 NodeKind::Document => {}
-                _ => {}
+                _ => return Err(unsupported_node_error(node.kind())),
             }
             for child in children {
                 write_node(document, *child, out)?;
@@ -56,9 +58,15 @@ pub(crate) fn write_node(
                 out.push_str("end\n");
             }
         }
-        _ => {}
+        _ => return Err(unsupported_node_error(node.kind())),
     }
     Ok(())
+}
+
+fn unsupported_node_error(kind: &NodeKind) -> PersistenceError {
+    PersistenceError(format!(
+        "fixture format does not encode node kind {kind:?}; refusing to save a lossy snapshot"
+    ))
 }
 
 fn encode_inline(inline: &InlineContent) -> Result<String, PersistenceError> {

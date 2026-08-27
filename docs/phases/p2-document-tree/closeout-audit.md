@@ -1,269 +1,192 @@
 # P2 收官审计
 
-???**P2.7 ????????Windows ?? Gate ????P2 Phase Gate ???**
+状态：**CLOSED。功能 Gate、Windows 实机 Gate 与收官 CI 均通过。**
 
-本文档记录 P2.0–P2.6 合入后，对照 `design.md`、`progress.md`、当前 `main` 实现进行的收官审计。它只记录需要在 P2 关闭前处理或明确移交的事项；长期路线仍以 `docs/planning.md` 为准。
+本文档记录 P2 的最终收官判断。长期架构事实放在 `docs/architecture.md`，执行证据放在 `progress.md`，未来路线仍以 `docs/planning.md` 为准。
 
-## 1. 当前阶段判断
+## 1. 最终阶段判断
 
-P2 已经完成主要实现切片：
+P2 全部实现与验证切片已完成：
 
 ```text
 P2.0  Phase contract                 已完成
 P2.1  SplitNode / JoinNodes          已完成
 P2.2  DocumentSelection              已完成
 P2.3  Structural commands            已完成
-P2.4  List editing                   ????Enter / marker ?????????? ?3.3?
-P2.5  GPUI multi-block               已完成实现，最终实机 Gate 待收口
-P2.6  Minimal host-contract harness  ??????load ????? marks round-trip ????? Gate ???
-P2.7  Mapping / invariants / Gate     ??????Windows Gate ??
+P2.4  List editing                   已完成
+P2.5  GPUI multi-block               已完成并通过 Windows 实机验证
+P2.6  Minimal host-contract harness  已完成
+P2.7  Mapping / invariants / Gate     已完成
 ```
 
-因此 P2 已经过了“做一半”的阶段。主体能力已经落地，但剩余工作不只是文档盖章：收官审计又发现了 list Enter / marker、Unicode navigation 和 persistence fidelity 等可见 correctness 缺口。完成度更适合判断为“主体已完成、Phase Gate 尚未关闭”，不建议用一个精确百分比替代 Gate。
+P2 已形成完整的 document-tree 编辑闭环：Core 提供结构 transaction / mapping / inverse，Runtime 提供 document-level selection 与结构命令编排，GPUI 提供 multi-block 视图与跨块交互，harness 证明宿主可 load、listen、save。
 
-## 2. P2 关闭前必须修复
+## 2. P2.7 收官问题处置
 
-### 2.1 跨块 Up / Down 必须始终产出合法 Unicode 坐标
+### 2.1 Unicode Up / Down 坐标
 
-当前 `xiaomu-gpui::document_view::navigation::step_vertical` 把当前块的 UTF-8 byte offset 直接 `min(target.len())` 后带到相邻块。
+已修复。跨块 Up / Down 在单视觉行模型下先把候选 UTF-8 byte offset 钳制到目标文本范围，再向下解析到合法 Unicode scalar boundary，随后才构造 `TextOffset`。
 
-这在中英混排下不成立。例如：
+因此中英混排与 emoji 场景不会再把 mid-scalar raw index 交给 Core validation 形成静默 NoChange。
+
+P3 仍可升级为基于 shaped-line 几何的 x-preserving visual-line navigation；这不影响 P2 当前模型的坐标合法性。
+
+### 2.2 List Enter / empty-item exit
+
+已修复。`SplitBlock` 在 list item 内具有 list-aware 语义：
 
 ```text
-source = "one"      offset = 2
- target = "二👍三"   raw candidate = 2
+非空 item Enter
+→ split 当前 inline block
+→ tail 进入新 sibling ListItem
+→ caret 到新 item 的 tail block 起点
+→ staged plan 作为一笔 history 提交
+
+空折叠 item Enter
+→ 嵌套 item 执行 outdent
+→ 顶层 item 执行 lift out
+→ selection 按结构命令 policy 收敛并重新校验
 ```
 
-`2` 落在汉字 `二` 的 UTF-8 编码内部，不是合法 scalar boundary。随后 `validated_offset()` 会拒绝该坐标，使 Up / Down 静默失效。
+没有为此新增 Core list 专用 step，继续复用既有结构原语和 staged plan。
 
-P2.7 要求：
+### 2.3 Bullet / Ordered marker
 
-```text
-vertical navigation target
-    ↓
-clamp / resolve to a valid scalar boundary
-    ↓
-TextOffset validation succeeds
-```
+已修复。BulletList / OrderedList marker 由 GPUI frontend projection 生成，ordinal 确定性计算；marker 不写入 canonical text，不占 selection offset，也不改变 Core document semantics。
 
-至少增加：
+### 2.4 Persistence load 错误语义
 
-- ASCII → CJK / emoji 的向上、向下回归测试；
-- candidate 落在多字节字符内部时的确定性 boundary policy；
-- 测试必须断言最终 `TextOffset` 合法，而不是只断言 raw `usize`。
-
-P3 的 soft-wrap / x-preserving visual-line navigation 会替换这套简化算法，但 P2 的单视觉行模型本身也不能产生非法 Core 坐标。
-
-### 2.2 List Enter 必须建立“新 item / 退出空 item”语义
-
-当前 GPUI 的 Enter 无条件发送 `EditIntent::SplitBlock`；runtime 的 `plan_split_block` 又只对 focused inline node 执行 `SplitNode`。在：
-
-```text
-BulletList
-└─ ListItem
-   └─ Paragraph |caret
-```
-
-中，这会把 Paragraph 拆成同一个 `ListItem` 下的两个 Paragraph，而不是创建新的 sibling `ListItem`。
-
-这不满足常规列表编辑闭环，也与顶层 native interaction harness 已经列出的 `list Enter / Backspace` 目标不一致。
-
-P2.7 要求至少定义并实现：
-
-```text
-非空 list item 中 Enter
-→ 在当前 item 后创建 sibling ListItem
-→ tail 内容进入新 item
-→ caret 到新 item 首块起点
-→ 一笔 history
-
-空 list item 中 Enter
-→ 退出当前 list level / 溶解最后空 item
-→ 形成合法 Paragraph 位置
-→ selection identity / fallback 明确
-```
-
-嵌套 list 的空项退出策略可以先采用一条确定、可测的规则，不需要在 P2 做复杂编辑器启发式。
-
-### 2.3 List 必须真正绘制 marker / ordinal
-???**???**?marker ? GPUI ?????? canonical text / offsets??????????????? ?3.3??
-
-当前 `DocumentView::render_block_tree` 对 BulletList / OrderedList 主要体现为 `list_depth` 缩进；inline block 的 `style_block` 没有生成 bullet marker 或 ordered ordinal。
-
-因此当前“list”在视觉上更像缩进块，BulletList 与 OrderedList 缺少最基本的可见区分。
-
-P2.7 至少补：
-
-```text
-BulletList  → bullet marker
-OrderedList → deterministic ordinal marker
-nested list → marker 与缩进层级对应
-marker 不进入 canonical text / selection offset
-marker 不破坏 block hit-test 与 selection paint
-```
-
-marker 属 frontend projection，不能伪造成 TextRun 写入 canonical document。
-
-### 2.4 `DocumentPersistence::load` 必须区分“没有文档”和“加载失败”
-???**???**?`load` ? `Result<Option<XiaomuDocument>, PersistenceError>`?NotFound = Ok(None)??/???? = Err?harness ?? store ???????????
-
-当前接口：
-
-```rust
-fn load(&self) -> Option<XiaomuDocument>;
-```
-
-无法区分：
-
-```text
-store 不存在       → 合法空状态
-I/O 失败            → 错误
-格式损坏 / parse 失败 → 错误
-```
-
-当前 harness 的 `FixtureStore` 又用 `.ok()?` 吞掉 I/O / parse 错误，损坏文件会被当成“没有文档”，然后回退到 demo fixture。这对真实宿主契约不可接受。
-
-P2.7 应调整为类似：
+已修复。Runtime seam 为：
 
 ```rust
 fn load(&self) -> Result<Option<XiaomuDocument>, PersistenceError>;
 ```
 
-并锚定：
+契约明确：
 
-- NotFound → `Ok(None)`；
-- read / parse error → `Err(PersistenceError)`；
-- harness 不允许在损坏持久化数据时静默启动一份新文档。
+```text
+store 不存在          → Ok(None)
+I/O 读取失败           → Err(PersistenceError)
+格式损坏 / parse 失败  → Err(PersistenceError)
+```
 
-### 2.5 P2.6 fixture round-trip 不能丢失 P1 已经支持的 marks
-???**???**?fixture v2 ?? run ???MarkSet ? Link attrs????? NodeAttrs?round-trip ??????? canonical semantics??
+harness 遇到损坏 store 会拒绝以 demo fixture 覆盖启动，不再吞掉错误。
 
-`DocumentPersistence` 的契约是保存 canonical snapshot；但当前 P2.6 fixture 明确只拼接 inline text，load 时用 `MarkSet::empty()` 重建，Bold / Italic / Code / Underline / Strike 会在 save → reload 后丢失。
+### 2.5 Fixture canonical fidelity
 
-这会让 P1 已完成的 canonical 语义在 P2 host-contract Gate 中发生数据损失。
-
-P2.7 要求至少让 fixture 保存当前 P1/P2 可编辑语义：
+fixture v2 已保存当前 P1/P2 所需的 canonical 语义：
 
 ```text
 node kind / tree shape
-inline run boundaries needed for mark reconstruction
-MarkSet（含 Link 属性的 preservation，即使当前无 Link UI）
-当前阶段实际使用的 NodeAttrs
+inline run boundaries
+MarkSet
+Link href / title
+NodeAttrs
 ```
 
-fixture 仍然可以是 harness-private 格式，不需要升级成公共 codec，但 round-trip 断言必须从“kind + 拼接文本”提高到“当前阶段 canonical semantics 等价”。
+round-trip 断言按当前阶段 canonical semantics 等价校验，不比较分配顺序相关的 NodeId。
 
-## 3. P2.7 必须完成的原计划事项
+### 2.6 Unsupported node 必须 fail closed
 
-### 3.1 Mapping regression matrix
-???**???**?`tests/mapping_matrix.rs`?Split/Join/Remove-Restore/list wrap?indent?outdent?Enter/undo-redo/??????? Gate ? ?3.3??
+P2 收官复核发现 fixture v2 尚未编码 `HorizontalRule`、`Image` 或 extension `Custom` node；旧 `write_node()` fallback 会让这些节点在 save 时被静默跳过。
 
-P0 / P2.1 已经有单 step mapping 与随机 inverse 基础；P2 关闭前还需要 session / structural composition 级矩阵：
+PR #39 将该路径改为 fail closed：fixture 遇到当前格式不支持的 node kind 时直接返回 `PersistenceError`，不会产生一个“保存成功但丢节点”的快照。
+
+回归测试覆盖：
 
 ```text
-SplitNode → selection map
-JoinNodes → selection map
-RemoveNode / RestoreSubtree → Deleted / restored identity
+HorizontalRule → save Err，不允许静默丢失
+Custom node    → save Err，不允许静默丢失
+```
+
+这保持 `DocumentPersistence::save` 的“保存整个 canonical snapshot”契约，同时避免为了关闭 P2 提前扩展 P4 的 atomic / extension codec 能力。
+
+## 3. Mapping 与结构不变量
+
+P2 已补齐 session / structural composition 级覆盖，重点验证：
+
+```text
+SplitNode / JoinNodes selection mapping
+RemoveNode / RestoreSubtree identity 与 Deleted 语义
 list wrap / lift / indent / outdent staged plans
 list Enter / empty-item exit
 undo / redo across structural edits
-cross-block anchor/focus direction preservation
+cross-block anchor / focus 方向保持
 ```
 
-重点不是增加测试数量，而是证明 P2 runtime 不在 ChangeMap 之外维护另一套隐式 offset 修补规则。
-
-### 3.2 会话级随机结构编辑不变量
-???**???**?`tests/structural_invariants.rs`??? fixture ????????validate / selection / undo ?? identity / redo ???? / NoChange ?????
-
-在合法 fixture 上生成结构命令序列，至少检查：
+会话级结构测试持续检查：
 
 ```text
-after every committed command: document.validate() succeeds
-after every committed command: selection validates against current snapshot
-undo whole chain: initial canonical semantics / identities restored as contracted
-redo whole chain: recorded selections remain valid
-NoChange: revision / history / notification do not advance
+after committed command: document.validate() 成功
+after committed command: selection 对当前 snapshot 合法
+undo: contracted identity / canonical state 可还原
+redo: recorded selection 仍合法
+NoChange: revision / history / notification 不推进
 ```
 
-### 3.3 Windows 实机最终 Gate
-???**???**?Windows ???? Gate ????P2 ?????
+P2 Runtime 没有在 `ChangeMap` 之外引入另一套隐式 offset 修补规则。
 
-P2.5/P2.6 已经有多次实机反馈和修复，但最终收官清单仍需一次完整执行并记录证据：
+## 4. Windows 最终实机 Gate
+
+PR #38 已记录 Windows 真机完整 Gate 完成。收官核对覆盖：
 
 ```text
 multi-block direct input
-Microsoft Pinyin inside different blocks
+Microsoft Pinyin in different blocks
 Left / Right cross-block
-Up / Down cross-block（含中英 / emoji）
+Up / Down cross-block，含中英 / emoji
 Shift keyboard selection cross-block
 mouse drag selection cross-block
 Enter split / Backspace join
 paragraph → list
-list Enter 创建新 item
-empty list item Enter 退出 list
+list Enter creates sibling item
+empty list item Enter exits current list level
 bullet / ordered marker 可见且不同
 indent / outdent → paragraph
 undo / redo structural edits
 Ctrl+S save
-restart + load（含 marks）
+restart + load
 listener observes committed changes
 ```
 
-P2 不要求 cross-block copy / cut / delete；这些仍属于 P3。
+P2 不要求 cross-block copy / cut / delete；这些按原计划进入 P3。
 
-## 4. 关闭前文档与代码卫生
+## 5. 明确移交 P3
 
-### 4.1 进度文档应按真实状态收口
-???**???**?progress.md ?????? vs ?? Gate?Windows Gate ????
-
-`progress.md` 底部 Gate 目前落后于实现：P2.5/P2.6 已经合入，P1 session 回归也在后续 PR 中持续通过。P2.7 最终 PR 应把“实现已完成”和“实机 Gate 已完成”区分清楚后同步状态。
-
-### 4.2 `architecture.md` 顶部摘要需要同步 multi-block 事实
-???**???**?architecture.md ?????? DocumentView ?? / list marker / persistence ?????? P3 ????
-
-当前架构正文已经记录 DocumentView / multi-block，但顶部总体摘要仍主要描述单 Paragraph GPUI 闭环。P2 收官 PR 应统一为当前真实状态。
-
-### 4.3 Source-size warning 在进入 P3 前清理
-???**???**?hot module ??????session caret/resolve?document_view markers/mouse?harness store/format?`apply.rs` / `structure.rs` ?? 501?700 warning?P3 ????? clipboard / visual-line?source-size / dependency-boundary ????
-
-P2 已经出现多个高频修改文件接近 source-size review warning。P2.7 应重新运行 guard；仍处于 501–700 行 warning 且 P3 会继续增长的 hot module，优先按职责拆分。
-
-目标是避免 P3 的 cross-block clipboard / history / visual-line layout 继续堆进同一个 `mod.rs` / `actions.rs`。
-
-## 5. 明确移交 P3，不作为 P2 blocker
-
-以下能力在 P2 中有意识停损，继续留在 P3：
+以下能力有意留给 P3 或后续阶段，不构成 P2 blocker：
 
 ```text
 soft-wrap / visual-line layout
 x-preserving Up / Down
-跨视觉行 Home / End 语义
+跨视觉行 Home / End
 cross-block copy / cut / delete
 structured clipboard
 history grouping / typing coalescing
 composition / history group interaction
-persistence / focus realistic integration fixture
-accessibility text / role / selection / focus projection seam
+更真实的 persistence / focus integration fixture
+accessibility projection seam
 grapheme-cluster caret semantics
 BiDi visual affinity resolution
+atomic / extension node 的产品级 codec 表达
 ```
 
-其中 soft-wrap / visual-line navigation 应放在 P3 前部完成，因为 cross-block selection、鼠标拖选和长期 hit-test 都依赖真实视觉行几何；不建议拖到 P6 virtualization 阶段再返工。
+其中 visual-line layout 应在 P3 前部处理，避免跨块选择与 hit-test 在单视觉行模型上继续扩张。
 
-## 6. P2 最终关闭标准（审计版）
+## 6. P2 最终关闭标准
 
-P2.7 关闭时同时满足：
+全部满足：
 
-```text
-原 design.md P2 Completion Definition 全部满足
-+ vertical navigation 永远产出合法 Unicode coordinate
-+ list Enter / empty-item exit 形成真实 list editing loop
-+ bullet / ordered marker 可见且不污染 canonical text
-+ persistence load error 不被吞掉
-+ P1/P2 canonical marks 经 host fixture save/load 不丢失
-+ Windows 最终实机 Gate 有记录
-+ source-size / dependency / fmt / clippy / tests / CI Success 全绿
-+ architecture / progress 与真实实现一致
-```
+- [x] 原 P2 Completion Definition 的功能项全部完成
+- [x] vertical navigation 不产生非法 Unicode coordinate
+- [x] list Enter / empty-item exit 形成真实 list editing loop
+- [x] bullet / ordered marker 可见且不污染 canonical text
+- [x] persistence load 错误不被吞掉
+- [x] fixture round-trip 保留当前 P1/P2 marks / attrs
+- [x] unsupported atomic / custom node save 时 fail closed，不静默丢数据
+- [x] Windows 最终实机 Gate 有记录
+- [x] mapping / structural invariant 回归覆盖已补齐
+- [x] source-size / dependency boundary guard 检查通过；后续 hot module 拆分按 P3 真实增长驱动
+- [x] architecture / progress / closeout 文档与实现同步
+- [x] PR #39 收官 `CI Success` 全绿
 
-达到以上条件后进入 P3，不把已知 correctness / persistence contract 问题带入下一阶段。
+结论：**P2 正式 CLOSED。** 后续功能变更进入 P3，不继续扩张 P2 范围。
