@@ -1,12 +1,12 @@
 # P2 收官审计
 
-状态：**收官验证中，功能 Gate 已通过，仅待本收官 PR 的最终 CI Success。**
+状态：**CLOSED。功能 Gate、Windows 实机 Gate 与收官 CI 均通过。**
 
 本文档记录 P2 的最终收官判断。长期架构事实放在 `docs/architecture.md`，执行证据放在 `progress.md`，未来路线仍以 `docs/planning.md` 为准。
 
 ## 1. 最终阶段判断
 
-P2 的主体实现和 Windows 实机 Gate 已完成：
+P2 全部实现与验证切片已完成：
 
 ```text
 P2.0  Phase contract                 已完成
@@ -88,11 +88,11 @@ round-trip 断言按当前阶段 canonical semantics 等价校验，不比较分
 
 ### 2.6 Unsupported node 必须 fail closed
 
-P2 收官复核又发现一个 persistence 边角：fixture v2 尚未编码 `HorizontalRule`、`Image` 或 extension `Custom` node；原 `write_node()` 的 fallback 会让这些节点在 save 时被静默跳过。
+P2 收官复核发现 fixture v2 尚未编码 `HorizontalRule`、`Image` 或 extension `Custom` node；旧 `write_node()` fallback 会让这些节点在 save 时被静默跳过。
 
-本收官 PR 改为 fail closed：fixture 遇到当前格式不支持的 node kind 时直接返回 `PersistenceError`，不会产生一个“保存成功但丢节点”的快照。
+PR #39 将该路径改为 fail closed：fixture 遇到当前格式不支持的 node kind 时直接返回 `PersistenceError`，不会产生一个“保存成功但丢节点”的快照。
 
-新增回归测试覆盖：
+回归测试覆盖：
 
 ```text
 HorizontalRule → save Err，不允许静默丢失
@@ -174,7 +174,7 @@ atomic / extension node 的产品级 codec 表达
 
 ## 6. P2 最终关闭标准
 
-收官 PR 合入时必须同时满足：
+全部满足：
 
 - [x] 原 P2 Completion Definition 的功能项全部完成
 - [x] vertical navigation 不产生非法 Unicode coordinate
@@ -185,8 +185,8 @@ atomic / extension node 的产品级 codec 表达
 - [x] unsupported atomic / custom node save 时 fail closed，不静默丢数据
 - [x] Windows 最终实机 Gate 有记录
 - [x] mapping / structural invariant 回归覆盖已补齐
-- [x] source-size / dependency boundary guard 在 P2.7 检查通过；后续 hot module 拆分按 P3 真实增长驱动
+- [x] source-size / dependency boundary guard 检查通过；后续 hot module 拆分按 P3 真实增长驱动
 - [x] architecture / progress / closeout 文档与实现同步
-- [~] 本收官 PR 最终 `CI Success` 全绿
+- [x] PR #39 收官 `CI Success` 全绿
 
-最后一项通过后，P2 状态改为 **CLOSED**，后续功能变更进入 P3，不继续扩张 P2 范围。
+结论：**P2 正式 CLOSED。** 后续功能变更进入 P3，不继续扩张 P2 范围。
