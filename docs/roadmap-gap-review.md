@@ -166,6 +166,49 @@ focus
 
 P4 的 Image / InlineAtom 再补 alt / fallback semantics。P7 根据 GPUI 平台能力做 screen-reader smoke test。
 
+### 3.7 CodeBlock 已有节点类型，但没有专门编辑语义
+
+`NodeKind::CodeBlock` 已进入 Core，当前结构命令却仍把所有 inline-bearing block 按同一套 Paragraph 式语义处理。长期至少要明确：
+
+```text
+Enter        → code block 内换行还是 split block
+Tab          → indentation / literal spaces
+paste newline → 保留多行而不是折叠为空格
+monospace / line-height / optional no-wrap
+退出 code block 的键盘语义
+```
+
+这不应落到 P2 收官里临时补。建议放进 P3 visual-line / block-specific editing slice，与多行布局一起完成；否则 `CodeBlock` 会长期只有 schema、没有可用编辑体验。
+
+### 3.8 HardBreak / 显式换行没有 canonical 语义
+
+当前 Paragraph inline text 明确不接收换行，paste 会把 line break 折叠为空格；路线里又没有 `HardBreak` / Shift+Enter 的交付项。
+
+成熟富文本至少需要区分：
+
+```text
+Enter        → 结构性 split block
+Shift+Enter  → 当前 block 内显式 hard break
+soft-wrap    → 仅视觉换行，不改 canonical document
+```
+
+建议 P3 在建立 visual-line contract 时一并确定 HardBreak 的 canonical 表达。不要把 hard break 和 soft-wrap 混成一个概念，也不要依赖裸 `\n` 是否“恰好能画出来”来定义文档语义。
+
+### 3.9 HorizontalRule 已有 Atomic 节点，但缺少编辑闭环
+
+`HorizontalRule` 与 `Image` 都属于 `NodeContent::Atomic`，目前 GPUI 只把所有 Atomic 内容画成通用占位线，导航序列又只枚举 inline-bearing block。
+
+P4 的 atomic-node contract 应同时覆盖 HorizontalRule，至少证明：
+
+```text
+text ↔ HorizontalRule ↔ text 键盘导航
+NodeSelection
+Backspace / Delete
+copy / cut / undo
+```
+
+Image 再在同一 atomic 基线上增加 AssetService 和异步渲染。这样 P4 得到的是通用 atomic block seam，而不是图片专用分支。
+
 ## 4. 目前不建议提前加入的能力
 
 这些能力可以后置，不应打断 P2/P3/P4 主线：
@@ -197,6 +240,8 @@ P2.7  closeout correctness
 
 P3    Visual Lines + Cross-block Selection / Clipboard / History
       - soft-wrap / visual-line geometry
+      - HardBreak contract / Shift+Enter
+      - CodeBlock multi-line editing semantics
       - x-preserving vertical navigation
       - cross-block copy/cut/delete
       - structured clipboard
@@ -207,6 +252,7 @@ P3    Visual Lines + Cross-block Selection / Clipboard / History
       - realistic persistence/change/focus fixture
 
 P4    Atomic Node / Image / Extension Seam
+      - generic atomic traversal + HorizontalRule
       - block Image
       - AssetService
       - atomic NodeSelection/navigation/delete/copy
