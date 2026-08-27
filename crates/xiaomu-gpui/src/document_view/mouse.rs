@@ -20,33 +20,36 @@ impl DocumentView {
     ) {
         self.is_dragging = true;
         if let Some(point) = self.hit_test(event.position, cx) {
-            // Click-placement diagnostic: shows which block the click landed
-            // on, so mis-hits are visible during real-machine testing.
-            let clicked = {
-                let session = self.session.borrow();
-                session.document().node(point.node_id()).map(|node| {
-                    let text = node
-                        .content()
-                        .as_inline()
-                        .map(|inline| {
-                            let text: String = inline
-                                .runs()
-                                .iter()
-                                .map(|run| run.text().as_str())
-                                .collect();
-                            let preview: String = text.chars().take(8).collect();
-                            format!(" \u{201c}{preview}\u{201d}")
-                        })
-                        .unwrap_or_default();
-                    format!(
-                        "{:?}{text} at byte {}",
-                        node.kind(),
-                        point.offset().as_usize()
-                    )
-                })
-            };
-            if let Some(description) = clicked {
-                eprintln!("xiaomu: click placed caret in {description}");
+            #[cfg(debug_assertions)]
+            {
+                // Click-placement diagnostic: shows which block the click landed
+                // on, so mis-hits are visible during real-machine testing.
+                let clicked = {
+                    let session = self.session.borrow();
+                    session.document().node(point.node_id()).map(|node| {
+                        let text = node
+                            .content()
+                            .as_inline()
+                            .map(|inline| {
+                                let text: String = inline
+                                    .runs()
+                                    .iter()
+                                    .map(|run| run.text().as_str())
+                                    .collect();
+                                let preview: String = text.chars().take(8).collect();
+                                format!(" \u{201c}{preview}\u{201d}")
+                            })
+                            .unwrap_or_default();
+                        format!(
+                            "{:?}{text} at byte {}",
+                            node.kind(),
+                            point.offset().as_usize()
+                        )
+                    })
+                };
+                if let Some(description) = clicked {
+                    eprintln!("xiaomu: click placed caret in {description}");
+                }
             }
             if event.modifiers.shift {
                 self.move_focus_to(point, true, window, cx);

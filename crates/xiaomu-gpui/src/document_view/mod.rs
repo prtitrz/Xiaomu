@@ -96,6 +96,7 @@ impl DocumentView {
     /// block holding the selection focus afterwards.
     fn apply_intent(&mut self, intent: EditIntent, window: &mut Window, cx: &mut Context<Self>) {
         if self.focused_child_composing(window, cx) {
+            #[cfg(debug_assertions)]
             eprintln!("xiaomu: editing action ignored during composition");
             return;
         }
@@ -107,7 +108,11 @@ impl DocumentView {
                 }
                 if outcome == xiaomu_runtime::session::SessionOutcome::DocumentChanged {
                     self.route_focus(window, cx);
-                } else if actions::is_structural(&intent) {
+                }
+                #[cfg(debug_assertions)]
+                if outcome != xiaomu_runtime::session::SessionOutcome::DocumentChanged
+                    && actions::is_structural(&intent)
+                {
                     // Structural no-ops are position-dependent (first item,
                     // top-level item); surface them together with where the
                     // session thinks the caret is, so real-machine testing

@@ -51,6 +51,7 @@ fn tab_plan_for_plain_block(collapsed: bool, offset: usize) -> TabPlan {
 }
 
 /// Whether an intent is a structural command whose no-op is worth surfacing.
+#[cfg(debug_assertions)]
 pub(crate) fn is_structural(intent: &EditIntent) -> bool {
     matches!(
         intent,
@@ -272,7 +273,10 @@ impl DocumentView {
         let document = self.session.borrow().document().clone();
         let outcome = adapter.borrow_mut().save(&document);
         match outcome {
-            Ok(()) => eprintln!("xiaomu: snapshot saved"),
+            Ok(()) => {
+                #[cfg(debug_assertions)]
+                eprintln!("xiaomu: snapshot saved");
+            }
             Err(error) => eprintln!("xiaomu: save failed: {error}"),
         }
     }
