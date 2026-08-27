@@ -2,7 +2,7 @@
 
 状态：规划
 
-本文档补齐顶层路线中已经存在 `Image` / `Atomic` / `AssetService` 概念、但缺少明确实施阶段的问题。P4 以 built-in Image 作为第一个真实 atomic block，同时继续以 InlineAtom / custom renderer 验证 extension boundary。
+本文档补齐顶层路线中已经存在 `Image` / `HorizontalRule` / `Atomic` / `AssetService` 概念、但缺少明确实施阶段的问题。P4 先建立通用 atomic block contract，以 built-in HorizontalRule 验证无资源 atomic semantics，再以 Image 验证 asset capability，最后继续以 InlineAtom / custom renderer 验证 extension boundary。
 
 ## 1. 阶段目标
 
@@ -11,13 +11,21 @@ P4 要证明晓木可以在不把文件系统、网络、宿主数据库或 GPUI
 目标闭环：
 
 ```text
+canonical Atomic node
+        ↓
+DocumentSession selection / navigation / transaction / history
+        ↓
+frontend renderer / hit-test
+```
+
+Image 在这个通用 atomic contract 上再增加：
+
+```text
 host imports / owns asset
         ↓
 stable AssetRef / image attrs
         ↓
 Xiaomu Image node (Atomic)
-        ↓
-DocumentSession transaction / selection / history
         ↓
 AssetService resolve
         ↓
@@ -34,11 +42,13 @@ renderer registry + capability callbacks
 
 ## 2. 范围
 
-### P4.1 Built-in Image / Atomic Block
+### P4.1 Generic Atomic Block + Built-in Image
 
 必须交付：
 
 ```text
+DocumentView 从 text-only traversal 推广为 editable text + atomic sequence
+HorizontalRule keyboard traversal / NodeSelection / delete / copy / undo
 Image canonical attrs / typed accessor contract
 frontend-neutral AssetRef / ImageSource 语义
 InsertImage（或等价 atomic-node insertion command）
@@ -131,9 +141,12 @@ Frontend receives: renderable bytes/resource or typed failure
 
 ```text
 Paragraph A | caret
+HorizontalRule
 Image
 Paragraph B
 
+Right
+→ HorizontalRule NodeSelection
 Right
 → Image NodeSelection
 Right
@@ -142,13 +155,15 @@ Right
 Left
 → Image NodeSelection
 Left
+→ HorizontalRule NodeSelection
+Left
 → Paragraph A end
 ```
 
-点击 image：
+点击 atomic block：
 
 ```text
-NodeSelection(Image)
+NodeSelection(HorizontalRule | Image)
 ```
 
 删除：
@@ -156,13 +171,13 @@ NodeSelection(Image)
 ```text
 NodeSelection + Backspace/Delete
 → one transaction
-→ image node removed
+→ atomic node removed
 → selection 收敛到合法邻接位置
 ```
 
 IME 永远不能进入 atomic node interior。
 
-P4 不要求多选多个 image 或任意 node-range selection；如果 structured clipboard 需要范围表达，可复用 P3 已稳定的 document selection/clipboard seam 再扩展。
+P4 不要求多选多个 atomic node 或任意 node-range selection；如果 structured clipboard 需要范围表达，可复用 P3 已稳定的 document selection/clipboard seam 再扩展。
 
 ## 6. 图片布局与表现边界
 
@@ -208,12 +223,23 @@ P3 先建立 structured clipboard；P4 在其上增加 atomic payload。
 要求：
 
 ```text
-copy image node
+copy atomic/image node
 → structured Xiaomu payload when possible
-→ optional plain-text / URL fallback
+→ semantic plain-text / URL fallback when meaningful
 ```
 
-Markdown codec 对 built-in Image 的 import/export 应在 P4 或紧随其后的 codec slice 补齐：
+P4.5 建立真正的 Markdown baseline codec，而不是只为 Image 加一个孤立 parser。至少覆盖当时已经落地的 built-in 语义：
+
+```text
+paragraph / heading / quote
+bullet / ordered list
+basic marks / link
+code block / hard break（若 P3 已交付）
+horizontal rule
+image
+```
+
+Image 的 Markdown 映射至少覆盖：
 
 ```markdown
 ![alt](source "title")
@@ -249,16 +275,18 @@ Built-in Image 应优先走内建 renderer，但其 asset resolving 必须复用
 ### P4.0 Contract
 
 ```text
+editable text + atomic traversal model
+atomic document position / NodeSelection contract
 Image attrs / AssetRef semantics
-atomic document position / selection contract
 AssetService contract
 structured clipboard extension shape
 ```
 
-### P4.1 Image core/runtime
+### P4.1 Atomic core/runtime
 
 ```text
-insert / select / delete / undo-redo
+HorizontalRule traversal / select / delete / copy
+Image insert / select / delete / undo-redo
 mapping / selection fallback
 property / invariant tests
 ```
@@ -284,16 +312,18 @@ copy/delete/navigation
 ```text
 renderer registries
 demo atom / custom block
+LinkOpenService + link editing seam
 capability callback integration fixture
 accessibility fallback
 ```
 
-### P4.5 Codec + Gate
+### P4.5 Markdown Codec + Gate
 
 ```text
-Image Markdown round-trip or documented adapter fixture
-unknown payload preservation
-real-machine image interaction Gate
+baseline built-in Markdown round-trip
+Image / HorizontalRule / marks / links preservation
+unknown payload preservation strategy documented
+real-machine image + atomic interaction Gate
 docs / architecture sync
 ```
 
@@ -302,15 +332,17 @@ docs / architecture sync
 P4 只有在以下条件全部满足时关闭：
 
 ```text
+text ↔ HorizontalRule ↔ text 可用键盘稳定导航与 NodeSelection
 host 可通过公开 contract 插入一张图片
 canonical document 只保存 frontend-neutral / host-neutral 图片语义
 AssetService 能异步 resolve 图片且失败有占位
 图片可由鼠标和键盘选中
 方向键可在 text ↔ image ↔ text 之间稳定导航
-Backspace / Delete / copy / cut / undo / redo 对图片行为明确
+Backspace / Delete / copy / cut / undo / redo 对 atomic/image 行为明确
 structured clipboard 可承载 atomic image payload
 一个 demo InlineAtom 作为 one-caret-unit 完整操作
 一个 extension renderer/capability fixture 证明 Core 无宿主业务类型
+Markdown baseline codec 对当前 built-in 语义 round-trip 不静默丢失
 unknown extension/image attrs preservation 测试通过
 accessibility fallback seam 存在
 CI + 实机 Gate 全绿
