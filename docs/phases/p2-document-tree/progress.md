@@ -15,7 +15,7 @@
 
 ## 当前状态
 
-当前切片：**P2.6 harness 完成 + List backspace 修正已合入（实机 Gate 清单待执行，见 P2.7）**
+当前切片：**P2.7 收官进行中（list Enter / Unicode Up-Down 已开始；marker、persistence、mapping matrix、Windows Gate 待做）**
 
 前置状态：P0 已完成（PR #13）；P1 已全部完成并关闭（PR #14–#20）；P2.0–P2.5 已合入（PR #21–#27）。
 
@@ -330,6 +330,11 @@ P1 在 progress.md 与 design.md 中记录了若干"留到 P2"的事项，处置
 ### 2026-08-27（lift-out 文档顺序）
 
 - 实机：顶层第二项 Shift-Tab 后段落跑到整份 list 上方。原因是 lift 一律按 `list_index` 插入。改为按 item 在 list 中的位置选择插入点；中间项再拆尾 list，避免把后面的 item 一并提前。
+
+### 2026-08-27（P2.7 开始：list Enter + Unicode 垂直导航）
+
+- List Enter 不新增 intent：`SplitBlock` 在 list item 内解释为新 sibling item（staged SplitNode → InsertNode → RestoreSubtree），空折叠项复用 outdent / lift-out。GPUI 仍只发 SplitBlock。
+- Up/Down 在单视觉行模型下把候选 UTF-8 offset clamp 后 floor 到目标块的 scalar boundary；禁止再把 mid-scalar raw index 交给 `validated_offset` 变成静默 no-op。
 
 ### 2026-08-27（P2.6）
 

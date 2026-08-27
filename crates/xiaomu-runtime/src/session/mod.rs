@@ -16,6 +16,7 @@ mod intent;
 mod listener;
 mod outcome;
 mod selection;
+mod split;
 mod structure;
 
 pub use history::HistoryStack;
@@ -203,7 +204,7 @@ impl DocumentSession {
             }
             EditIntent::Delete => intent::plan_delete(&inline, selection)?,
             EditIntent::ToggleMark { mark } => intent::plan_toggle_mark(&inline, selection, mark)?,
-            EditIntent::SplitBlock => structure::plan_split_block(selection)?,
+            EditIntent::SplitBlock => split::plan_split_block(&self.document, selection)?,
             EditIntent::JoinWithPrevious => {
                 structure::plan_join_with_previous(&self.document, focus.node_id())?
             }
@@ -332,12 +333,24 @@ impl DocumentSession {
         let before_selection = self.selection;
         let mut current = self.document.clone();
         let mut inverse_groups: Vec<Transaction> = Vec::new();
+        let mut split_tail = None;
 
         for build in staged.stages {
             let transaction = build(&current)?;
             let applied = transaction
                 .apply_with_changes(&current)
                 .map_err(SessionError::Core)?;
+            if split_tail.is_none() {
+                split_tail = applied
+                    .changes()
+                    .steps()
+                    .iter()
+                    .rev()
+                    .find_map(|step| match step {
+                        StepMap::NodeSplit { inserted, .. } => Some(*inserted),
+                        _ => None,
+                    });
+            }
             inverse_groups.push(applied.inverse().clone());
             current = applied.into_document();
         }
@@ -357,6 +370,10 @@ impl DocumentSession {
 
         let after_selection = match staged.selection_update {
             SelectionUpdate::PreserveFocus => preserved_focus(before_selection, &current)?,
+            SelectionUpdate::CaretAtSplitTail => {
+                let inserted = split_tail.ok_or(SessionError::SelectionInvalid)?;
+                collapsed_caret(&current, inserted, 0, affinity_of(before_selection))?
+            }
             _ => return Err(SessionError::SelectionInvalid),
         };
 

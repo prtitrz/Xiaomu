@@ -44,6 +44,16 @@ fn paragraph(builder: &mut NodeStoreBuilder, text: &str) -> NodeId {
         .unwrap()
 }
 
+fn empty_paragraph(builder: &mut NodeStoreBuilder) -> NodeId {
+    builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            NodeContent::Inline(InlineContent::empty()),
+        )
+        .unwrap()
+}
+
 fn list_item(builder: &mut NodeStoreBuilder, block: NodeId) -> NodeId {
     builder
         .insert(
@@ -552,4 +562,128 @@ fn turn_into_paragraph_outside_a_list_is_a_no_op_when_already_paragraph() {
         SessionOutcome::NoChange
     );
     assert_eq!(session.history_depths(), (0, 0));
+}
+
+#[test]
+fn enter_in_a_list_item_creates_a_sibling_item_holding_the_tail() {
+    let (document, block) = one_paragraph("一二");
+    let mut session = session_with(&document, caret(&document, block, 3));
+    turn_into(&mut session, NodeKind::BulletList);
+    let before = store_snapshot(session.document());
+    let list = root_children(&session)[0];
+    let item = children_of(&session, list)[0];
+
+    session.apply_intent(&EditIntent::SplitBlock).unwrap();
+
+    let items = children_of(&session, list);
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0], item);
+    assert_eq!(children_of(&session, item), vec![block]);
+    assert_eq!(text_of(&session, block), "一");
+    let tail = children_of(&session, items[1])[0];
+    assert_eq!(text_of(&session, tail), "二");
+    assert_eq!(caret_node_and_offset(&session), (tail, 0));
+
+    session.undo().unwrap();
+    assert_eq!(store_snapshot(session.document()), before);
+    assert_eq!(caret_node_and_offset(&session), (block, 3));
+}
+
+#[test]
+fn enter_at_the_end_of_a_list_item_inserts_an_empty_sibling() {
+    let fixture = three_item_list();
+    let mut session = session_with(&fixture.document, caret(&fixture.document, fixture.a, 3));
+
+    session.apply_intent(&EditIntent::SplitBlock).unwrap();
+
+    let items = children_of(&session, fixture.list);
+    assert_eq!(items.len(), 4);
+    assert_eq!(items[0], fixture.item_a);
+    assert_eq!(items[2], fixture.item_b);
+    assert_eq!(items[3], fixture.item_c);
+    let tail = children_of(&session, items[1])[0];
+    assert_eq!(text_of(&session, fixture.a), "一");
+    assert_eq!(text_of(&session, tail), "");
+    assert_eq!(caret_node_and_offset(&session), (tail, 0));
+}
+
+#[test]
+fn enter_on_an_empty_top_level_item_lifts_out_of_the_list() {
+    let mut builder = NodeStoreBuilder::new();
+    let a = paragraph(&mut builder, "一");
+    let empty = empty_paragraph(&mut builder);
+    let item_a = list_item(&mut builder, a);
+    let item_empty = list_item(&mut builder, empty);
+    let list = builder
+        .insert(
+            NodeKind::BulletList,
+            NodeAttrs::empty(),
+            NodeContent::children([item_a, item_empty]),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([list]),
+        )
+        .unwrap();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+    let mut session = session_with(&document, caret(&document, empty, 0));
+
+    session.apply_intent(&EditIntent::SplitBlock).unwrap();
+
+    // Last empty item lifts after the remaining list.
+    assert_eq!(root_children(&session), vec![list, empty]);
+    assert_eq!(children_of(&session, list), vec![item_a]);
+    assert_eq!(kind_of(&session, empty), NodeKind::Paragraph);
+    assert_eq!(caret_node_and_offset(&session), (empty, 0));
+}
+
+#[test]
+fn enter_on_an_empty_nested_item_outdents_one_level() {
+    let mut builder = NodeStoreBuilder::new();
+    let head = paragraph(&mut builder, "头");
+    let nested = empty_paragraph(&mut builder);
+    let inner_item = list_item(&mut builder, nested);
+    let inner_list = builder
+        .insert(
+            NodeKind::BulletList,
+            NodeAttrs::empty(),
+            NodeContent::children([inner_item]),
+        )
+        .unwrap();
+    let outer_item = builder
+        .insert(
+            NodeKind::ListItem,
+            NodeAttrs::empty(),
+            NodeContent::children([head, inner_list]),
+        )
+        .unwrap();
+    let outer_list = builder
+        .insert(
+            NodeKind::BulletList,
+            NodeAttrs::empty(),
+            NodeContent::children([outer_item]),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([outer_list]),
+        )
+        .unwrap();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+    let mut session = session_with(&document, caret(&document, nested, 0));
+
+    session.apply_intent(&EditIntent::SplitBlock).unwrap();
+
+    assert_eq!(
+        children_of(&session, outer_list),
+        vec![outer_item, inner_item]
+    );
+    assert_eq!(children_of(&session, outer_item), vec![head]);
+    assert_eq!(children_of(&session, inner_item), vec![nested]);
+    assert_eq!(caret_node_and_offset(&session), (nested, 0));
 }
