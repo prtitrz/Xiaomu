@@ -167,8 +167,9 @@ pub(crate) fn line_edge(
 /// One vertical navigation step.
 ///
 /// With one visual line per block this moves to the adjacent block,
-/// clamping the byte offset into its length; returns `None` at the first
-/// or last block.
+/// clamping the byte offset into its length and snapping onto a UTF-8
+/// scalar boundary of the target; returns `None` at the first or last
+/// block.
 #[must_use]
 pub(crate) fn step_vertical(
     blocks: &[TextBlock],
@@ -181,8 +182,25 @@ pub(crate) fn step_vertical(
     } else {
         block.checked_sub(1)?
     };
-    let len = blocks.get(target)?.text().len();
-    Some((target, offset.min(len)))
+    let text = blocks.get(target)?.text();
+    Some((target, snap_to_scalar_boundary(&text, offset)))
+}
+
+/// Clamps `raw` into `text` and floors to the start of the containing
+/// Unicode scalar when the candidate lands inside a multi-byte character.
+fn snap_to_scalar_boundary(text: &str, raw: usize) -> usize {
+    let clamped = raw.min(text.len());
+    if text.is_char_boundary(clamped) {
+        return clamped;
+    }
+    let mut index = clamped;
+    while index > 0 {
+        index -= 1;
+        if text.is_char_boundary(index) {
+            return index;
+        }
+    }
+    0
 }
 
 /// Converts a raw byte index into a validated [`TextOffset`].
@@ -305,16 +323,34 @@ mod tests {
         let document = sample_document();
         let blocks = text_blocks(&document);
 
-        // Offset 2 in "one" clamps to len("deep") = 4? No: it stays 2.
-        assert_eq!(step_vertical(&blocks, 0, 2, true), Some((1, 2)));
-        // Offset 6 in "二👍三" (7 bytes) clamps into "deep" (4 bytes).
+        // Offset 2 in "one" lands inside "二" (3-byte UTF-8) and floors to 0.
+        assert_eq!(step_vertical(&blocks, 0, 2, true), Some((1, 0)));
+        assert!(validated_offset(&blocks[1], 0).is_some());
+        // Offset 6 in "二👍三" (10 bytes) clamps into "deep" (4 bytes).
         assert_eq!(step_vertical(&blocks, 1, 6, true), Some((2, 4)));
-        // Up keeps the offset when it fits.
+        // Up keeps the offset when it fits on a scalar boundary.
         assert_eq!(step_vertical(&blocks, 1, 1, false), Some((0, 1)));
 
         // First block cannot go up; last cannot go down.
         assert_eq!(step_vertical(&blocks, 0, 0, false), None);
         assert_eq!(step_vertical(&blocks, 2, 0, true), None);
+    }
+
+    #[test]
+    fn vertical_steps_always_land_on_a_valid_scalar_boundary() {
+        let document = sample_document();
+        let blocks = text_blocks(&document);
+        let target = &blocks[1];
+        // "二👍三" scalar starts: 0, 3, 7, 10.
+        for offset in 0..=blocks[0].text().len() + 2 {
+            let Some((_, raw)) = step_vertical(&blocks, 0, offset, true) else {
+                continue;
+            };
+            assert!(
+                validated_offset(target, raw).is_some(),
+                "offset {offset} snapped to illegal {raw}"
+            );
+        }
     }
 
     #[test]

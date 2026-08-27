@@ -300,7 +300,8 @@ DocumentChangeListener（frontend-neutral 通知 seam）
 编辑流为 `intent → EditPlan → Transaction::apply_with_changes → resolve after-selection → 原子替换 snapshot / selection / history 并通知`。任何失败（Core 拒绝、selection 映射为 `Deleted`、新 selection 校验失败）都让 session 状态保持不变。raw apply 与 mark 编辑在端点被删时仍返回 `SelectionDeleted`；结构命令使用显式 after-selection policy，不再依赖"Deleted 即失败"：
 
 ```text
-SplitBlock        → CaretAtSplitTail（caret 落在新 tail 兄弟起点）
+SplitBlock        → CaretAtSplitTail（caret 落在新 tail 兄弟起点；list item
+                    内同样落在新 item 的 tail 块起点）
 JoinWithPrevious  → CaretAtJoinSeam（caret 落在存活节点的接缝 offset）
 TurnInto          → MapExisting（kind 变更不移动 position，identity 保留）
 fallback 失败     → 收敛后的位置无法合法化才原子失败
@@ -326,13 +327,17 @@ IndentListItem                     item 移入前一兄弟 item；前一 item �
 OutdentListItem                    嵌套 item 移入外层 list（紧跟外层 item 之后；
                                    Core 禁止 ListItem 直接嵌套 ListItem）；被清空
                                    的内层 list 同笔删除；顶层 item 是 NoChange
+SplitBlock（list item 内）          非空：SplitNode 后把 tail 移入当前 item
+                                   之后的新 sibling ListItem（staged，caret
+                                   在 tail 起点）；空折叠 caret：嵌套 outdent，
+                                   顶层 lift out（复用既有退出命令）
 ```
 
 这些命令保留焦点块的 identity 与 offset，after-selection 为 `PreserveFocus`（caret 折叠到原 focus 点并对新 snapshot 校验）；undo / redo 复用整链 RestoreSubtree 的 identity 还原语义，与单笔命令一致。
 
 P2.2 的 selection 形态：session 持有 `DocumentSelection`，两端点可落在不同 block（`TextPoint`）或 child 边界（`NodeGap`），任何公开读取点都针对当前 snapshot 校验。跨 block 排序由 snapshot 上的 pre-order slot 分配解析（节点与 gap 各占单调槽位，文本位置以 byte offset 为子键）。单 inline node 内的 selection 可经 `text_selection()` 投影回 Core `TextSelection`（P1 单块前端继续使用）。内容编辑与 P2.3 结构命令仍要求选区整体位于一个 inline node 内；gap 端点上的 caret 移动返回 `NoChange`，跨块导航属后续切片。
 
-intent-specific after-selection：InsertText 提交后 caret 落在 replacement 之后，Backspace / Delete 落在删除起点，ToggleMark、TurnInto 与 raw apply 经 ChangeMap 向外映射（`DocumentSelection::map_through` 对非折叠选区 head/tail 分别取 Start / End bias，任一端点被删则整体失败）。Backspace 在块首且存在前一兄弟时解释为 JoinWithPrevious；SplitBlock 对非折叠选区先删除再拆分，同属一笔 history。合法空操作返回 `NoChange`：不调用 Core apply、不推进 revision、不发通知、不写 history；raw `apply` 无 no-op 检测，空 transaction 也会提交。
+intent-specific after-selection：InsertText 提交后 caret 落在 replacement 之后，Backspace / Delete 落在删除起点，ToggleMark、TurnInto 与 raw apply 经 ChangeMap 向外映射（`DocumentSelection::map_through` 对非折叠选区 head/tail 分别取 Start / End bias，任一端点被删则整体失败）。Backspace 在块首且存在前一兄弟时解释为 JoinWithPrevious；SplitBlock 对非折叠选区先删除再拆分，同属一笔 history。在 list item 内，SplitBlock 解释为“新 sibling item / 空项退出”，而不是在同一 item 下拆出两个 Paragraph。合法空操作返回 `NoChange`：不调用 Core apply、不推进 revision、不发通知、不写 history；raw `apply` 无 no-op 检测，空 transaction 也会提交。
 
 undo 重放 `AppliedTransaction::inverse()`（ADR 0003）并直接恢复记录的 before_selection；redo 重放 `inverse(inverse(T))` 而不是原始 steps，因此像 SplitNode 这样会分配 NodeId 的命令在 redo 时通过 RestoreSubtree 复用原 identity，after_selection 仍然合法。undo 后的新编辑清空 redo 栈。caret 移动按 Unicode scalar boundary，Home / End 到 paragraph 逻辑首尾。session 纯逻辑、无 GPUI 依赖，全部行为在无显示器环境测试。
 

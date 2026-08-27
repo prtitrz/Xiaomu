@@ -6,7 +6,6 @@
 //! apply a transaction themselves.
 
 use xiaomu_core::document::{Node, NodeAttrs, NodeContent, NodeId, NodeKind, XiaomuDocument};
-use xiaomu_core::selection::TextSelection;
 use xiaomu_core::text::TextRange;
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
@@ -47,7 +46,7 @@ impl StagedPlan {
     }
 }
 
-fn user_transaction() -> Transaction {
+pub(crate) fn user_transaction() -> Transaction {
     Transaction::new(TransactionOrigin::UserInput)
 }
 
@@ -56,37 +55,6 @@ fn kind_of(document: &XiaomuDocument, node: NodeId) -> Result<&NodeKind, Session
         .node(node)
         .ok_or(SessionError::Core(xiaomu_core::Error::UnknownNode))?
         .kind())
-}
-
-/// Splits the focused inline block at the caret.
-///
-/// A non-collapsed selection is deleted first so Enter-over-selection is one
-/// transaction and one history entry. After commit the caret belongs at the
-/// start of the new tail sibling ([`SelectionUpdate::CaretAtSplitTail`]).
-pub(crate) fn plan_split_block(selection: TextSelection) -> Result<PlannedAction, SessionError> {
-    let node = selection.focus().node_id();
-    let mut transaction = Transaction::new(TransactionOrigin::UserInput);
-
-    let at = if selection.is_collapsed() {
-        selection.focus().offset()
-    } else {
-        let range = selection
-            .ordered_range()
-            .map_err(|_| SessionError::SelectionInvalid)?;
-        transaction.push_step(TransactionStep::ReplaceText {
-            node,
-            range,
-            replacement: String::new(),
-        });
-        range.start()
-    };
-
-    transaction.push_step(TransactionStep::SplitNode { node, at });
-    Ok(PlannedAction::Commit(EditPlan::new(
-        transaction,
-        SelectionUpdate::CaretAtSplitTail,
-        None,
-    )))
 }
 
 /// Joins `node` into its immediately preceding sibling.
@@ -592,6 +560,7 @@ fn move_item_transaction(
 
 /// Enclosing list structure of an inline block, all resolved eagerly so
 /// planners can build transactions from stable coordinates.
+#[derive(Clone, Copy)]
 pub(crate) struct ListAncestry {
     /// The list item containing the focused block.
     pub(crate) item: NodeId,
@@ -663,7 +632,7 @@ pub(crate) fn previous_sibling_of(document: &XiaomuDocument, node: NodeId) -> Op
     index.checked_sub(1).map(|previous| children[previous])
 }
 
-fn children_of(document: &XiaomuDocument, node: NodeId) -> Vec<NodeId> {
+pub(crate) fn children_of(document: &XiaomuDocument, node: NodeId) -> Vec<NodeId> {
     document
         .node(node)
         .and_then(|node| node.content().as_children())
@@ -673,7 +642,7 @@ fn children_of(document: &XiaomuDocument, node: NodeId) -> Vec<NodeId> {
 
 /// Snapshots of every node in `root`'s subtree, for exact restoration via
 /// [`TransactionStep::RestoreSubtree`].
-fn subtree_payloads(document: &XiaomuDocument, root: NodeId) -> Vec<Node> {
+pub(crate) fn subtree_payloads(document: &XiaomuDocument, root: NodeId) -> Vec<Node> {
     let mut payloads = Vec::new();
     let mut queue = std::collections::VecDeque::from([root]);
     while let Some(current) = queue.pop_front() {
