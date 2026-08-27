@@ -13,13 +13,13 @@ P2.0  Phase contract                 已完成
 P2.1  SplitNode / JoinNodes          已完成
 P2.2  DocumentSelection              已完成
 P2.3  Structural commands            已完成
-P2.4  List editing                   已完成
+P2.4  List editing                   主体完成，Enter / marker 闭环需收官
 P2.5  GPUI multi-block               已完成实现，最终实机 Gate 待收口
 P2.6  Minimal host-contract harness  已完成实现，持久化契约需补强
 P2.7  Mapping / invariants / Gate     待完成
 ```
 
-因此 P2 已经过了“做一半”的阶段。剩余工作量主要集中在收官正确性、真实宿主契约和实机验证，不应因为功能面已经可见而提前关闭 Phase Gate。
+因此 P2 已经过了“做一半”的阶段。主体能力已经落地，但剩余工作不只是文档盖章：收官审计又发现了 list Enter / marker、Unicode navigation 和 persistence fidelity 等可见 correctness 缺口。完成度更适合判断为“主体已完成、Phase Gate 尚未关闭”，不建议用一个精确百分比替代 Gate。
 
 ## 2. P2 关闭前必须修复
 
@@ -54,7 +54,56 @@ TextOffset validation succeeds
 
 P3 的 soft-wrap / x-preserving visual-line navigation 会替换这套简化算法，但 P2 的单视觉行模型本身也不能产生非法 Core 坐标。
 
-### 2.2 `DocumentPersistence::load` 必须区分“没有文档”和“加载失败”
+### 2.2 List Enter 必须建立“新 item / 退出空 item”语义
+
+当前 GPUI 的 Enter 无条件发送 `EditIntent::SplitBlock`；runtime 的 `plan_split_block` 又只对 focused inline node 执行 `SplitNode`。在：
+
+```text
+BulletList
+└─ ListItem
+   └─ Paragraph |caret
+```
+
+中，这会把 Paragraph 拆成同一个 `ListItem` 下的两个 Paragraph，而不是创建新的 sibling `ListItem`。
+
+这不满足常规列表编辑闭环，也与顶层 native interaction harness 已经列出的 `list Enter / Backspace` 目标不一致。
+
+P2.7 要求至少定义并实现：
+
+```text
+非空 list item 中 Enter
+→ 在当前 item 后创建 sibling ListItem
+→ tail 内容进入新 item
+→ caret 到新 item 首块起点
+→ 一笔 history
+
+空 list item 中 Enter
+→ 退出当前 list level / 溶解最后空 item
+→ 形成合法 Paragraph 位置
+→ selection identity / fallback 明确
+```
+
+嵌套 list 的空项退出策略可以先采用一条确定、可测的规则，不需要在 P2 做复杂编辑器启发式。
+
+### 2.3 List 必须真正绘制 marker / ordinal
+
+当前 `DocumentView::render_block_tree` 对 BulletList / OrderedList 主要体现为 `list_depth` 缩进；inline block 的 `style_block` 没有生成 bullet marker 或 ordered ordinal。
+
+因此当前“list”在视觉上更像缩进块，BulletList 与 OrderedList 缺少最基本的可见区分。
+
+P2.7 至少补：
+
+```text
+BulletList  → bullet marker
+OrderedList → deterministic ordinal marker
+nested list → marker 与缩进层级对应
+marker 不进入 canonical text / selection offset
+marker 不破坏 block hit-test 与 selection paint
+```
+
+marker 属 frontend projection，不能伪造成 TextRun 写入 canonical document。
+
+### 2.4 `DocumentPersistence::load` 必须区分“没有文档”和“加载失败”
 
 当前接口：
 
@@ -84,7 +133,7 @@ fn load(&self) -> Result<Option<XiaomuDocument>, PersistenceError>;
 - read / parse error → `Err(PersistenceError)`；
 - harness 不允许在损坏持久化数据时静默启动一份新文档。
 
-### 2.3 P2.6 fixture round-trip 不能丢失 P1 已经支持的 marks
+### 2.5 P2.6 fixture round-trip 不能丢失 P1 已经支持的 marks
 
 `DocumentPersistence` 的契约是保存 canonical snapshot；但当前 P2.6 fixture 明确只拼接 inline text，load 时用 `MarkSet::empty()` 重建，Bold / Italic / Code / Underline / Strike 会在 save → reload 后丢失。
 
@@ -112,6 +161,7 @@ SplitNode → selection map
 JoinNodes → selection map
 RemoveNode / RestoreSubtree → Deleted / restored identity
 list wrap / lift / indent / outdent staged plans
+list Enter / empty-item exit
 undo / redo across structural edits
 cross-block anchor/focus direction preservation
 ```
@@ -142,10 +192,14 @@ Up / Down cross-block（含中英 / emoji）
 Shift keyboard selection cross-block
 mouse drag selection cross-block
 Enter split / Backspace join
-paragraph → list → indent / outdent → paragraph
+paragraph → list
+list Enter 创建新 item
+empty list item Enter 退出 list
+bullet / ordered marker 可见且不同
+indent / outdent → paragraph
 undo / redo structural edits
 Ctrl+S save
-restart + load
+restart + load（含 marks）
 listener observes committed changes
 ```
 
@@ -194,6 +248,8 @@ P2.7 关闭时同时满足：
 ```text
 原 design.md P2 Completion Definition 全部满足
 + vertical navigation 永远产出合法 Unicode coordinate
++ list Enter / empty-item exit 形成真实 list editing loop
++ bullet / ordered marker 可见且不污染 canonical text
 + persistence load error 不被吞掉
 + P1/P2 canonical marks 经 host fixture save/load 不丢失
 + Windows 最终实机 Gate 有记录
