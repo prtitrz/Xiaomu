@@ -1,8 +1,8 @@
 # P2 Document Tree / Structural Edit 设计
 
-状态：进行中
+状态：已完成
 
-本文档是 P2 的可执行设计。顶层路线以 `docs/planning.md` 为准；已经落地的架构事实记录在 `docs/architecture.md`；P0 / P1 的契约与决策见对应 `docs/phases/` 与 `docs/adr/`。
+本文档是 P2 的可执行设计。顶层路线以 `docs/planning.md` 为准；已经落地的架构事实记录在 `docs/architecture.md`；P0 / P1 的契约与决策见对应 `docs/phases/` 与 `docs/adr/`。P2 实施期间收官审计补充出的 correctness Gate 及最终处置记录在 `closeout-audit.md`。
 
 P1 让晓木在真实输入管线中编辑单个 Paragraph。P2 把编辑对象从"一个 inline node"升级为"整棵 document tree"：multi-block 文档、SplitNode / JoinNodes 等结构 transaction、heading / quote / list、跨 block 键盘导航与 document selection、position mapping 稳定化，以及第一个 minimal host-contract harness。
 
@@ -66,7 +66,7 @@ DocumentSelection
 
 ### 3.2 结构编辑的 after-selection 用显式 fallback policy 取代"Deleted 即失败"
 
-P1 的停损策略（导致当前 inline node 被删的 transaction 一律原子失败）在 P2 失效——JoinNodes 天然会删除节点。session 为结构命令定义显式、可测试的 after-selection policy：
+P1 的停损策略（导致当前 inline node 被删的 transaction 一律原子失败）在 P2 失效；JoinNodes 天然会删除节点。session 为结构命令定义显式、可测试的 after-selection policy：
 
 ```text
 JoinNodes        → caret 落在 join 点（前块的接缝 offset）
@@ -274,7 +274,7 @@ paragraph → list → paragraph 实机手动 Gate 清单执行并记入 progres
 architecture.md / progress.md 同步，标记 P2 完成
 ```
 
-Gate：planning §16 P2 Gate 满足——日常编辑闭环 + 最小宿主加载 / 监听 / 保存。
+Gate：planning §16 P2 Gate 满足，即日常编辑闭环 + 最小宿主加载 / 监听 / 保存。
 
 ## 7. 测试策略
 
@@ -293,7 +293,7 @@ Unicode fixture（中文 / emoji / combining marks）继续出现在涉及文本
 
 ## 9. P2 完成定义
 
-只有以下条件全部满足，P2 才算完成：
+以下条件均已由实现、自动化测试、Windows 实机 Gate 与 `closeout-audit.md` 的补充审计满足；最终执行证据见 `progress.md`：
 
 ```text
 SplitNode / JoinNodes 以 Core step 落地，mapping + inverse 满足随机不变量
@@ -308,4 +308,4 @@ P1 全部 session 行为保持回归通过
 CI Success 全绿
 ```
 
-P3 不能用 frontend-specific 逻辑补偿 P2 尚未解决的 selection / mapping 不变量。
+P3 不使用 frontend-specific 逻辑补偿 P2 selection / mapping 不变量；P2 收官后新增能力按后续 Phase 的边界继续演进。
