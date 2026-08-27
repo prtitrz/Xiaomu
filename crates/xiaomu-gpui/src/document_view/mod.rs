@@ -10,10 +10,12 @@
 //!
 //! Kind-driven visual distinction lives in [`Self::render_block_tree`]:
 //! headings scale with their level, quote descendants are indented behind a
-//! bar with muted text, list items indent per nesting depth.
+//! bar with muted text, list items indent per nesting depth and show a projected bullet or ordinal marker.
 
 pub(crate) mod actions;
 pub(crate) mod cache_key;
+pub(crate) mod markers;
+pub(crate) mod mouse;
 pub(crate) mod navigation;
 
 use std::cell::{Cell, RefCell};
@@ -314,7 +316,19 @@ impl DocumentView {
                 let Some((_, view)) = self.children.iter().find(|(child, _)| *child == id) else {
                     return div().into_any_element();
                 };
-                style_block(view.clone(), &kind, in_quote, list_depth, index).into_any_element()
+                let marker = {
+                    let session = self.session.borrow();
+                    markers::marker_for_block(session.document(), id)
+                };
+                markers::style_block(
+                    view.clone(),
+                    &kind,
+                    in_quote,
+                    list_depth,
+                    marker.as_ref(),
+                    index,
+                )
+                .into_any_element()
             }
             NodeContent::Children(children) => {
                 let next_quote = in_quote || matches!(kind, NodeKind::Quote);
@@ -342,34 +356,6 @@ impl DocumentView {
             _ => div().into_any_element(),
         }
     }
-}
-
-/// Wraps one block view with kind-driven visual styling.
-fn style_block(
-    view: Entity<ParagraphView>,
-    kind: &NodeKind,
-    in_quote: bool,
-    list_depth: usize,
-    index: usize,
-) -> gpui::Stateful<gpui::Div> {
-    let mut block = div().id(index).w_full();
-    if let NodeKind::Heading(level) = kind {
-        let scale = match level.as_u8() {
-            1 => 1.6,
-            2 => 1.35,
-            _ => 1.15,
-        };
-        block = block
-            .text_size(px(20.0 * scale))
-            .font_weight(gpui::FontWeight::BOLD);
-    }
-    if in_quote {
-        block = block.text_color(gpui::rgba(0x444444ff));
-    }
-    if list_depth > 0 {
-        block = block.ml(px(24.0 * list_depth as f32));
-    }
-    block.child(view)
 }
 
 impl Render for DocumentView {
