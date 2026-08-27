@@ -156,6 +156,76 @@ mod tests {
     }
 
     #[test]
+    fn save_rejects_atomic_nodes_instead_of_dropping_them() {
+        use xiaomu_core::document::{NodeAttrs, NodeContent, NodeKind, NodeStoreBuilder};
+
+        let mut builder = NodeStoreBuilder::new();
+        let rule = builder
+            .insert(
+                NodeKind::HorizontalRule,
+                NodeAttrs::empty(),
+                NodeContent::Atomic,
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([rule]),
+            )
+            .unwrap();
+        let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "xiaomu-harness-unsupported-atomic-{}.txt",
+            std::process::id()
+        ));
+        let mut adapter = FixtureStore::new(path.clone());
+
+        let error = adapter
+            .save(&document)
+            .expect_err("unsupported atomic node must fail closed");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(error.0.contains("HorizontalRule"));
+        assert!(error.0.contains("refusing to save a lossy snapshot"));
+    }
+
+    #[test]
+    fn save_rejects_custom_nodes_instead_of_dropping_them() {
+        use xiaomu_core::document::{NodeAttrs, NodeContent, NodeKind, NodeStoreBuilder};
+
+        let mut builder = NodeStoreBuilder::new();
+        let custom = builder
+            .insert(
+                NodeKind::custom("fixture-unsupported").unwrap(),
+                NodeAttrs::empty(),
+                NodeContent::Atomic,
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([custom]),
+            )
+            .unwrap();
+        let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "xiaomu-harness-unsupported-custom-{}.txt",
+            std::process::id()
+        ));
+        let mut adapter = FixtureStore::new(path.clone());
+
+        let error = adapter
+            .save(&document)
+            .expect_err("unsupported custom node must fail closed");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(error.0.contains("fixture-unsupported"));
+        assert!(error.0.contains("refusing to save a lossy snapshot"));
+    }
+
+    #[test]
     fn escapes_tabs_and_backslashes_in_leaf_text() {
         assert_eq!(escape_text("a\\b\tc"), "a\\\\b\\tc");
         assert_eq!(unescape_text("a\\\\b\\tc"), "a\\b\tc");
