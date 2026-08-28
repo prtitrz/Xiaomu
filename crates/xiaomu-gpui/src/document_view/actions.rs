@@ -311,8 +311,12 @@ impl DocumentView {
     }
 
     pub(crate) fn copy(&mut self, _: &ClipboardCopy, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = self.session.borrow().selected_text() {
-            PlatformClipboard::new(&*cx).write_text(text);
+        match self.session.borrow().clipboard_slice() {
+            Ok(Some(slice)) => {
+                PlatformClipboard::new(&*cx).write_text(slice.plain_text().to_owned());
+            }
+            Ok(None) => {}
+            Err(error) => eprintln!("xiaomu: clipboard projection failed: {error}"),
         }
     }
 
