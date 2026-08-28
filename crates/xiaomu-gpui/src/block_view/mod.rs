@@ -18,7 +18,7 @@ mod scroll;
 #[cfg(test)]
 mod tests;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
@@ -214,6 +214,7 @@ pub struct ParagraphView {
     pub(super) epoch: Rc<std::cell::Cell<u64>>,
     pub(crate) bounds_registry: BlockBoundsRegistry,
     pub(super) scroll_handle: Option<ScrollHandle>,
+    pub(super) scroll_caret_pending: Cell<bool>,
     composition: Option<CompositionState>,
     focus_out_subscription: Option<Subscription>,
 }
@@ -241,6 +242,7 @@ impl ParagraphView {
             epoch,
             bounds_registry,
             scroll_handle: None,
+            scroll_caret_pending: Cell::new(true),
             composition: None,
             focus_out_subscription: None,
         }
@@ -310,8 +312,15 @@ impl ParagraphView {
     }
 
     fn apply_intent(&mut self, intent: EditIntent, cx: &mut Context<Self>) {
-        if let Err(error) = self.session.borrow_mut().apply_intent(&intent) {
-            eprintln!("xiaomu: intent rejected: {error}");
+        let applied = match self.session.borrow_mut().apply_intent(&intent) {
+            Ok(_) => true,
+            Err(error) => {
+                eprintln!("xiaomu: intent rejected: {error}");
+                false
+            }
+        };
+        if applied {
+            self.request_caret_scroll();
         }
         self.epoch.set(self.epoch.get() + 1);
         cx.notify();
