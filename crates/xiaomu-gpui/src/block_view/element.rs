@@ -73,7 +73,6 @@ impl Element for ParagraphElement {
         let cached_key = (!composing).then_some(view.cache_key).flatten();
         let node = view.node();
         let epoch = view.epoch.get();
-        drop(view);
 
         let text_style = window.text_style();
         let font = text_style.font();
