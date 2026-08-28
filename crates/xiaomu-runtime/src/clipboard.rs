@@ -7,6 +7,10 @@
 //! inline runs so later structured transport/paste can preserve marks without
 //! re-reading the source document.
 
+mod wire;
+
+pub use wire::{ClipboardMetadataError, decode_metadata, encode_metadata};
+
 use xiaomu_core::document::{
     InlineContent, NodeAttrs, NodeContent, NodeId, NodeKind, TextRun, XiaomuDocument,
 };
