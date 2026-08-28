@@ -22,7 +22,7 @@ use std::rc::Rc;
 
 use gpui::{
     App, Bounds, Context, FocusHandle, Focusable, Pixels, Point, Subscription, Window, actions,
-    div, prelude::*,
+    div, point, prelude::*,
 };
 
 use xiaomu_core::document::{InlineContent, NodeId};
