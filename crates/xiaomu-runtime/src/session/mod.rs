@@ -12,6 +12,7 @@
 //! public read.
 
 mod caret;
+mod cross_block;
 mod history;
 mod intent;
 mod listener;
@@ -89,35 +90,18 @@ impl DocumentSession {
         self.selection.as_single_node()
     }
 
-    /// Returns the selected text as plain text, or `None` for a collapsed
-    /// selection. Runs are concatenated in logical order; marks do not
-    /// participate (plain-text clipboard, P1 scope).
+    /// Returns the selected content's plain-text fallback, or `None` for a
+    /// collapsed selection.
+    ///
+    /// Cross-block boundaries are represented by `\n`. Marks and structure
+    /// are omitted from this convenience view; callers that need them should
+    /// use [`Self::clipboard_slice`].
     #[must_use]
     pub fn selected_text(&self) -> Option<String> {
-        let selection = self.text_selection()?;
-        if selection.is_collapsed() {
-            return None;
-        }
-        let range = selection.ordered_range().ok()?;
-        let inline = self.inline_of(selection.focus().node_id()).ok()?;
-
-        let mut selected = String::new();
-        let mut cursor = 0usize;
-        for run in inline.runs() {
-            let run_start = cursor;
-            let run_end = run_start + run.len_bytes();
-            cursor = run_end;
-
-            let overlap_start = range.start().as_usize().max(run_start);
-            let overlap_end = range.end().as_usize().min(run_end);
-            if overlap_start < overlap_end {
-                selected.push_str(
-                    &run.text().as_str()[overlap_start - run_start..overlap_end - run_start],
-                );
-            }
-        }
-
-        Some(selected)
+        self.clipboard_slice()
+            .ok()
+            .flatten()
+            .map(|slice| slice.plain_text().to_owned())
     }
 
     /// Returns the `(undo, redo)` history depths.
@@ -157,8 +141,23 @@ impl DocumentSession {
             return self.set_selection(*anchor, *focus);
         }
 
-        // Content and structural intents still act from a single inline
-        // node; cross-block forms gain dedicated commands in later slices.
+        // Backspace/Delete over a document-level text selection share the
+        // same cross-block delete plan. Single-block forms continue through
+        // the normal inline planners below.
+        if matches!(intent, EditIntent::Backspace | EditIntent::Delete)
+            && self.selection.as_single_node().is_none()
+        {
+            let action = cross_block::plan_delete_selection(&self.document, self.selection)?;
+            return match action {
+                PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
+                PlannedAction::Commit(plan) => self.commit(plan),
+                PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
+            };
+        }
+
+        // Other content and structural intents in this slice still act from
+        // one inline node. Structured paste expands this boundary later in
+        // P3.3.
         let focus = self.text_focus()?;
         let inline = self.inline_of(focus.node_id())?;
         let selection = self
