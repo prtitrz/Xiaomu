@@ -96,8 +96,8 @@ impl Element for ParagraphElement {
                     _ => None,
                 });
 
-                let cache_key = wrap_width
-                    .map(|width| LayoutCacheKey::new(node, epoch, f32::from(width)));
+                let cache_key =
+                    wrap_width.map(|width| LayoutCacheKey::new(node, epoch, f32::from(width)));
                 if !composing
                     && cache_key == cached_key
                     && let Some(layout) = cached_layout.as_ref()
@@ -138,8 +138,9 @@ impl Element for ParagraphElement {
     ) -> Self::PrepaintState {
         let view = self.view.read(cx);
         let composing = view.is_composing();
-        let cache_key = (!composing)
-            .then(|| LayoutCacheKey::new(view.node(), view.epoch.get(), f32::from(bounds.size.width)));
+        let cache_key = (!composing).then(|| {
+            LayoutCacheKey::new(view.node(), view.epoch.get(), f32::from(bounds.size.width))
+        });
         let layout = request_layout
             .0
             .borrow()
