@@ -321,22 +321,21 @@ impl super::ParagraphView {
         &self,
         position: Point<Pixels>,
     ) -> Option<(usize, CursorAffinity)> {
-        let raw = self.hit_test_position(position)?;
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
-        let local = point(position.x - bounds.left(), position.y - bounds.top());
-        let (_, affinity) = layout.caret_for_position(local);
-        Some((raw, affinity))
+        Some(layout.caret_for_position(point(
+            position.x - bounds.left(),
+            position.y - bounds.top(),
+        )))
     }
 
     pub(crate) fn focus_caret(&self) -> Option<(usize, CursorAffinity)> {
-        let byte = self.focus_byte()?;
         let session = self.session.borrow();
         match session.selection().focus() {
             xiaomu_runtime::session::DocumentPosition::Text(point)
                 if point.node_id() == self.node =>
             {
-                Some((byte, point.affinity()))
+                Some((point.offset().as_usize(), point.affinity()))
             }
             _ => None,
         }
