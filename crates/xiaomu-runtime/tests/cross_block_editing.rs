@@ -15,11 +15,7 @@ fn inline(text: &str) -> InlineContent {
 
 fn point(document: &XiaomuDocument, node: NodeId, raw: usize) -> TextPoint {
     let inline = document.node(node).unwrap().content().as_inline().unwrap();
-    TextPoint::new(
-        node,
-        inline.offset_at(raw).unwrap(),
-        CursorAffinity::Before,
-    )
+    TextPoint::new(node, inline.offset_at(raw).unwrap(), CursorAffinity::Before)
 }
 
 fn text(document: &XiaomuDocument, node: NodeId) -> String {
@@ -154,7 +150,10 @@ fn cut_flow_projects_clipboard_before_one_atomic_delete() {
     let selection = cross_block_selection(&fixture);
     let mut session = DocumentSession::new(fixture.document.clone(), selection).unwrap();
 
-    let slice = session.clipboard_slice().unwrap().expect("selected content");
+    let slice = session
+        .clipboard_slice()
+        .unwrap()
+        .expect("selected content");
     assert_eq!(slice.plain_text(), "bc\n中间\n尾");
     assert_eq!(slice.blocks().len(), 3);
     assert_eq!(session.history_depths(), (0, 0));
