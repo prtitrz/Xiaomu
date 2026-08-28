@@ -21,7 +21,7 @@ mod visual_navigation;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gpui::{Context, Entity, MouseButton, Pixels, Window, div, prelude::*, px};
+use gpui::{Context, Entity, MouseButton, Pixels, ScrollHandle, Window, div, prelude::*, px};
 
 use xiaomu_core::document::{NodeContent, NodeId, NodeKind};
 use xiaomu_core::selection::TextPoint;
@@ -39,6 +39,9 @@ pub struct DocumentView {
     /// invalidate.
     epoch: Rc<Cell<u64>>,
     registry: BlockBoundsRegistry,
+    /// Shared viewport scroll state. Focused blocks use it to keep the caret
+    /// visible without leaking viewport geometry into Core or runtime.
+    scroll_handle: ScrollHandle,
     /// Child views keyed by their inline node, kept alive across renders so
     /// IME composition and focus state survive unrelated re-renders.
     children: Vec<(NodeId, Entity<ParagraphView>)>,
@@ -60,6 +63,7 @@ impl DocumentView {
             session,
             epoch: Rc::new(Cell::new(0)),
             registry: Rc::new(RefCell::new(Vec::new())),
+            scroll_handle: ScrollHandle::new(),
             children: Vec::new(),
             is_dragging: false,
             desired_x: None,
@@ -239,6 +243,12 @@ impl DocumentView {
                 }
             })
             .collect();
+
+        let scroll_handle = self.scroll_handle.clone();
+        for (_, child) in &self.children {
+            let scroll_handle = scroll_handle.clone();
+            child.update(cx, |view, _| view.attach_scroll_handle(scroll_handle));
+        }
         // Stale entries dropped with `pool`.
     }
 
@@ -329,6 +339,7 @@ impl Render for DocumentView {
             .text_color(gpui::black())
             .cursor(gpui::CursorStyle::IBeam)
             .id("xiaomu-document-scroll")
+            .track_scroll(&self.scroll_handle)
             .overflow_y_scroll()
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
