@@ -31,7 +31,6 @@ impl BlockTextLayout {
             measured.width = measured.width.max(line_size.width).ceil();
             measured.height += line_size.height;
         }
-        // An empty editable paragraph still needs one caret row.
         measured.height = measured.height.max(line_height);
         Self {
             lines,
@@ -52,10 +51,6 @@ impl BlockTextLayout {
         &self.lines
     }
 
-    /// Maps a canonical/display byte index to the default visual point.
-    ///
-    /// GPUI resolves a shared soft-wrap boundary to the upstream row. Call
-    /// [`Self::position_for_caret`] when `CursorAffinity` is available.
     pub(super) fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
         let mut logical_start = 0usize;
         let mut y = Pixels::ZERO;
@@ -68,7 +63,7 @@ impl BlockTextLayout {
                     .position_for_index(local, self.line_height)
                     .map(|position| point(position.x, position.y + y));
             }
-            logical_start = logical_end.saturating_add(1); // hard newline separator
+            logical_start = logical_end.saturating_add(1);
             y += line.size(self.line_height).height;
         }
 
@@ -79,7 +74,6 @@ impl BlockTextLayout {
         }
     }
 
-    /// Maps a logical caret plus affinity to its visual position.
     pub(crate) fn position_for_caret(
         &self,
         index: usize,
@@ -89,9 +83,6 @@ impl BlockTextLayout {
         let row_ix = row_for_caret(&rows, index, affinity)?;
         let row = &rows[row_ix];
 
-        // At a soft-wrap boundary the downstream interpretation is the
-        // beginning of the next visual row; GPUI's position_for_index returns
-        // the upstream row for the same logical byte index.
         if affinity.is_after()
             && row_ix > 0
             && row.range.start == index
@@ -103,23 +94,17 @@ impl BlockTextLayout {
         self.position_for_index(index)
     }
 
-    /// X coordinate of a logical caret in this block's local coordinate space.
     pub(crate) fn caret_x(&self, index: usize, affinity: CursorAffinity) -> Option<Pixels> {
         self.position_for_caret(index, affinity)
             .map(|position| position.x)
     }
 
-    /// Whether `index` is shared by two adjacent soft-wrapped visual rows.
     pub(crate) fn is_soft_wrap_boundary(&self, index: usize) -> bool {
         self.visual_rows()
             .windows(2)
             .any(|rows| rows[0].range.end == index && rows[1].range.start == index)
     }
 
-    /// Moves one visual row within this block, preserving `desired_x`.
-    ///
-    /// Returns `None` when the target would leave the block; the document view
-    /// then resolves the first/last row of the adjacent block.
     pub(crate) fn vertical_target(
         &self,
         index: usize,
@@ -139,7 +124,6 @@ impl BlockTextLayout {
         Some(self.target_for_row_x(&rows, target, desired_x))
     }
 
-    /// Resolves `desired_x` on this block's first or last visual row.
     pub(crate) fn edge_row_target(
         &self,
         desired_x: Pixels,
@@ -150,7 +134,6 @@ impl BlockTextLayout {
         Some(self.target_for_row_x(&rows, row_ix, desired_x))
     }
 
-    /// Returns the logical edge of the visual row containing this caret.
     pub(crate) fn visual_line_edge(
         &self,
         index: usize,
@@ -163,8 +146,7 @@ impl BlockTextLayout {
         if to_end {
             Some((row.range.end, CursorAffinity::Before))
         } else {
-            let affinity = affinity_for_row_start(&rows, row_ix);
-            Some((row.range.start, affinity))
+            Some((row.range.start, affinity_for_row_start(&rows, row_ix)))
         }
     }
 
@@ -185,7 +167,6 @@ impl BlockTextLayout {
         (index, affinity)
     }
 
-    /// Maps a point relative to this block to the nearest byte index.
     pub(super) fn closest_index_for_position(&self, position: Point<Pixels>) -> usize {
         if self.lines.is_empty() {
             return 0;
@@ -213,8 +194,6 @@ impl BlockTextLayout {
         logical_start.saturating_sub(1)
     }
 
-    /// Maps a point to the nearest byte index and preserves the visual side of
-    /// a shared soft-wrap boundary.
     pub(crate) fn caret_for_position(&self, position: Point<Pixels>) -> (usize, CursorAffinity) {
         let rows = self.visual_rows();
         let row_ix = row_for_y(&rows, position.y, self.line_height);
@@ -227,7 +206,6 @@ impl BlockTextLayout {
         (index, affinity)
     }
 
-    /// Returns one relative selection rectangle per intersected visual row.
     pub(super) fn selection_rects(&self, range: Range<usize>) -> Vec<Bounds<Pixels>> {
         if range.start >= range.end {
             return Vec::new();
@@ -298,12 +276,10 @@ impl BlockTextLayout {
 }
 
 impl super::ParagraphView {
-    /// X coordinate of this block's logical caret in the last painted layout.
     pub(crate) fn visual_caret_x(&self, index: usize, affinity: CursorAffinity) -> Option<Pixels> {
         self.last_layout.as_ref()?.caret_x(index, affinity)
     }
 
-    /// Moves to an adjacent visual row inside this block.
     pub(crate) fn visual_vertical_target(
         &self,
         index: usize,
@@ -316,7 +292,6 @@ impl super::ParagraphView {
             .vertical_target(index, affinity, desired_x, down)
     }
 
-    /// Resolves desired x on the first/last visual row of this block.
     pub(crate) fn visual_edge_row_target(
         &self,
         desired_x: Pixels,
@@ -325,7 +300,6 @@ impl super::ParagraphView {
         self.last_layout.as_ref()?.edge_row_target(desired_x, last)
     }
 
-    /// Resolves Home/End against the current visual row.
     pub(crate) fn visual_line_edge_target(
         &self,
         index: usize,
@@ -337,33 +311,32 @@ impl super::ParagraphView {
             .visual_line_edge(index, affinity, to_end)
     }
 
-    /// Whether an offset has both upstream and downstream wrapped positions.
     pub(crate) fn visual_is_soft_wrap_boundary(&self, index: usize) -> bool {
         self.last_layout
             .as_ref()
             .is_some_and(|layout| layout.is_soft_wrap_boundary(index))
     }
 
-    /// Hit-tests a window-space point while preserving wrap-boundary affinity.
     pub(crate) fn hit_test_caret_position(
         &self,
         position: Point<Pixels>,
     ) -> Option<(usize, CursorAffinity)> {
+        let raw = self.hit_test_position(position)?;
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
-        Some(
-            layout.caret_for_position(point(position.x - bounds.left(), position.y - bounds.top())),
-        )
+        let local = point(position.x - bounds.left(), position.y - bounds.top());
+        let (_, affinity) = layout.caret_for_position(local);
+        Some((raw, affinity))
     }
 
-    /// Current text focus as `(byte, affinity)` when it belongs to this block.
     pub(crate) fn focus_caret(&self) -> Option<(usize, CursorAffinity)> {
+        let byte = self.focus_byte()?;
         let session = self.session.borrow();
         match session.selection().focus() {
             xiaomu_runtime::session::DocumentPosition::Text(point)
                 if point.node_id() == self.node =>
             {
-                Some((point.offset().as_usize(), point.affinity()))
+                Some((byte, point.affinity()))
             }
             _ => None,
         }
