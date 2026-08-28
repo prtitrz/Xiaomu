@@ -7,7 +7,7 @@
 use std::ops::Range;
 
 use gpui::prelude::*;
-use gpui::{Bounds, EntityInputHandler, Pixels, Point, UTF16Selection, Window};
+use gpui::{Bounds, EntityInputHandler, Pixels, Point, UTF16Selection, Window, point, size};
 
 use xiaomu_runtime::session::EditIntent;
 
@@ -146,34 +146,38 @@ impl EntityInputHandler for ParagraphView {
         let text = self.display_content().0;
         let start = utf16::utf8_offset(&text, range_utf16.start);
         let end = utf16::utf8_offset(&text, range_utf16.end);
-        Some(Bounds::from_corners(
-            gpui::point(
-                element_bounds.left() + layout.x_for_index(start),
-                element_bounds.top(),
-            ),
-            gpui::point(
-                element_bounds.left() + layout.x_for_index(end),
-                element_bounds.bottom(),
-            ),
+        let start_position = layout.position_for_index(start)?;
+        let end_position = layout.position_for_index(end)?;
+
+        let left = start_position.x.min(end_position.x);
+        let right = start_position.x.max(end_position.x);
+        let top = start_position.y.min(end_position.y);
+        let bottom = start_position.y.max(end_position.y) + layout.line_height();
+        Some(Bounds::new(
+            point(element_bounds.left() + left, element_bounds.top() + top),
+            size((right - left).max(Pixels::from(1.0)), bottom - top),
         ))
     }
 
     fn character_index_for_point(
         &mut self,
-        point: Point<Pixels>,
+        point_in_window: Point<Pixels>,
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<usize> {
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
         let text = self.display_content().0;
-        let raw = if point.y < bounds.top() {
+        let raw = if point_in_window.y < bounds.top() {
             0
-        } else if point.y > bounds.bottom() {
+        } else if point_in_window.y > bounds.bottom() {
             text.len()
         } else {
-            layout.closest_index_for_x(point.x - bounds.left())
+            layout.closest_index_for_position(point(
+                point_in_window.x - bounds.left(),
+                point_in_window.y - bounds.top(),
+            ))
         };
-        Some(utf16::utf16_offset(&text, raw))
+        Some(utf16::utf16_offset(&text, raw.min(text.len())))
     }
 }
