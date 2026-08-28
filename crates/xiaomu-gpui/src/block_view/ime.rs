@@ -152,7 +152,9 @@ impl ParagraphView {
 
         // The preedit is a view transient: without an explicit repaint the
         // marked text would stay invisible while the IME session continues.
-        // This must fire on the first mark too, not only on updates.
+        // It is also an explicit caret movement event for viewport purposes;
+        // passive scrolling alone never sets this request.
+        self.request_caret_scroll();
         cx.notify();
     }
 
