@@ -21,6 +21,8 @@ authors = ["prtitrz"]
 # GPUI is pinned to an exact crates.io version per planning §17; upgrades
 # happen in dedicated pull requests only.
 gpui = "=0.2.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 xiaomu-core = { version = "0.1.0", path = "crates/xiaomu-core" }
 xiaomu-runtime = { version = "0.1.0", path = "crates/xiaomu-runtime" }
 xiaomu-gpui = { version = "0.1.0", path = "crates/xiaomu-gpui" }
