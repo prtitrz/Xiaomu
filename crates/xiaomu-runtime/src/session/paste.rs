@@ -7,7 +7,9 @@
 //! Source inline marks are restored explicitly so `ReplaceText` inheritance
 //! cannot leak host formatting into pasted content.
 
-use xiaomu_core::document::{InlineContent, MarkKind, NodeContent, NodeId, TextRun, XiaomuDocument};
+use xiaomu_core::document::{
+    InlineContent, MarkKind, NodeContent, NodeId, TextRun, XiaomuDocument,
+};
 use xiaomu_core::text::{TextBuffer, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionStep};
 
@@ -112,11 +114,7 @@ fn prepare_target(
     inline
         .validate_offset(head.offset())
         .map_err(SessionError::Core)?;
-    Ok((
-        working,
-        head.node_id(),
-        TextRange::empty(head.offset()),
-    ))
+    Ok((working, head.node_id(), TextRange::empty(head.offset())))
 }
 
 fn plan_single_block(
@@ -132,7 +130,12 @@ fn plan_single_block(
     let source_text = concatenated(source);
     let start = range.start().as_usize();
     let end = range.end().as_usize();
-    let post_text = format!("{}{}{}", &target_text[..start], source_text, &target_text[end..]);
+    let post_text = format!(
+        "{}{}{}",
+        &target_text[..start],
+        source_text,
+        &target_text[end..]
+    );
 
     transaction.push_step(TransactionStep::ReplaceText {
         node,
@@ -222,7 +225,9 @@ fn push_exact_marks(
     let inserted_end = inserted_start + source.len_bytes();
     let whole = buffer
         .range(
-            buffer.offset_at(inserted_start).map_err(SessionError::Core)?,
+            buffer
+                .offset_at(inserted_start)
+                .map_err(SessionError::Core)?,
             buffer.offset_at(inserted_end).map_err(SessionError::Core)?,
         )
         .map_err(SessionError::Core)?;
@@ -266,10 +271,7 @@ fn validate_inline_range(inline: &InlineContent, range: TextRange) -> Result<(),
     Ok(())
 }
 
-fn inline_of(
-    document: &XiaomuDocument,
-    node: NodeId,
-) -> Result<&InlineContent, SessionError> {
+fn inline_of(document: &XiaomuDocument, node: NodeId) -> Result<&InlineContent, SessionError> {
     document
         .node(node)
         .ok_or(SessionError::Core(xiaomu_core::Error::UnknownNode))?
