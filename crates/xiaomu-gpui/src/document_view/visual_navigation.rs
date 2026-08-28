@@ -114,9 +114,10 @@ impl DocumentView {
             _ => current.read(cx).visual_caret_x(raw, focus.affinity())?,
         };
 
-        if let Some((target_raw, affinity)) = current
-            .read(cx)
-            .visual_vertical_target(raw, focus.affinity(), desired_x, down)
+        if let Some((target_raw, affinity)) =
+            current
+                .read(cx)
+                .visual_vertical_target(raw, focus.affinity(), desired_x, down)
         {
             let point = Self::point_for_target(blocks, block, target_raw, affinity)?;
             return Some((point, desired_x));
@@ -145,9 +146,10 @@ impl DocumentView {
     ) -> Option<TextPoint> {
         let raw = focus.offset().as_usize();
         if let Some(child) = self.child_for_node(focus.node_id())
-            && let Some((target_raw, affinity)) = child
-                .read(cx)
-                .visual_line_edge_target(raw, focus.affinity(), to_end)
+            && let Some((target_raw, affinity)) =
+                child
+                    .read(cx)
+                    .visual_line_edge_target(raw, focus.affinity(), to_end)
         {
             return Self::point_for_target(blocks, block, target_raw, affinity);
         }
