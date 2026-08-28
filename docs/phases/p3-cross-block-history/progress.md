@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P3.0 Phase Contract**
+当前切片：**P3.2 Visual Navigation / Selection**
 
-前置状态：P0、P1、P2 均已 CLOSED。P2 最终收官 PR #39 已 squash merge，document tree / structural edit / minimal host-contract Gate 已完成。
+前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract 已通过 CI 并 squash merge；P3.1 Visual-line Geometry / Soft-wrap 已完成代码与 Windows 实机 Gate，等待本 PR 合并。
 
 ## P3.0 Phase Contract
 
@@ -25,22 +25,40 @@
 - [x] 创建 P3 `progress.md`
 - [x] 固化 P2 → P3 handoff
 - [x] 将 `roadmap-gap-review.md` 中 visual-line / structured clipboard / stored marks / accessibility / multiline 结论并入阶段契约
-- [ ] source-size baseline 复核
-- [ ] dependency-boundary baseline 复核
-- [ ] fmt / clippy / workspace tests / CI Success
+- [x] source-size baseline 复核
+- [x] dependency-boundary baseline 复核
+- [x] fmt / clippy / workspace tests / CI Success
 
-P3.0 不改生产代码。其 Gate 是先把 P3 的视觉布局、document-level 编辑与 history 边界定清楚，避免 P3.1 开始后边做边改阶段含义。
+P3.0 不改生产代码。其 Gate 已通过 PR #40，并 squash merge 到 `main`（`87888e25`）。
 
 ## P3.1 Visual-line Geometry / Soft-wrap
 
-- [ ] block `TextLayout` abstraction
-- [ ] soft-wrap shaping
-- [ ] visual line logical ranges
-- [ ] logical offset → visual caret geometry
-- [ ] visual point → logical offset hit-test
-- [ ] layout cache 从 single `ShapedLine` 升级
-- [ ] Unicode/CJK/emoji/combining/BiDi fixture
-- [ ] Windows 实机窄宽 paragraph soft-wrap smoke Gate
+- [x] block `TextLayout` abstraction
+- [x] soft-wrap shaping
+- [x] visual line logical ranges
+- [x] logical offset → visual caret geometry
+- [x] visual point → logical offset hit-test
+- [x] layout cache 从 single `ShapedLine` 升级
+- [~] Unicode/CJK/emoji/combining/BiDi visual 专项 fixture：canonical / coordinate regression 已由既有测试覆盖，完整 visual matrix 并入 P3.7
+- [x] Windows 实机窄宽 paragraph soft-wrap smoke Gate
+
+实现事实：
+
+```text
+ParagraphElement
+→ request_measured_layout
+→ shape_text(wrap_width)
+→ BlockTextLayout
+→ wrapped caret / selection rects / 2D hit-test / IME range geometry
+```
+
+soft-wrap 只存在于 GPUI frontend projection，Core `TextPoint / TextOffset` contract 未改变。wrapped selection 已能按视觉行绘制多矩形；pointer drag selection 使用二维 hit-test。
+
+验证证据：
+
+- PR #41 最新 head `191c64f3` 的 CI run #151：policy、fmt、clippy、workspace tests、Windows/macOS/Linux 全部通过。
+- Windows 实机 Gate：窄宽长段落 soft-wrap、caret、点击、文字拖选与 IME smoke 均未发现异常。
+- “拖选”在本 Gate 中指 pointer drag selection；拖动既有 selection 进行文本搬移（selection drag-and-drop editing）不属于 P3 必做范围，作为后续增强能力评估。
 
 ## P3.2 Visual Navigation / Selection
 
@@ -48,9 +66,10 @@ P3.0 不改生产代码。其 Gate 是先把 P3 的视觉布局、document-level
 - [ ] x-preserving Up / Down
 - [ ] 跨 block visual Up / Down
 - [ ] visual Home / End
-- [ ] wrapped selection multi-rect projection
-- [ ] wrapped mouse click / drag hit-test
+- [x] wrapped selection multi-rect projection（P3.1 已建立 geometry）
+- [x] wrapped mouse click / drag hit-test（P3.1 已建立 geometry）
 - [ ] scroll-to-caret
+- [ ] `CursorAffinity` 在 soft-wrap boundary 的视觉解析
 - [ ] Windows 长段落实机 Gate
 
 ## P3.3 Cross-block Editing / Structured Clipboard
@@ -98,7 +117,7 @@ P3.0 不改生产代码。其 Gate 是先把 P3 的视觉布局、document-level
 
 ## P3.7 Closeout
 
-- [ ] Unicode cross-block matrix
+- [ ] Unicode cross-block + visual-line matrix
 - [ ] history / mapping random invariants
 - [ ] P0/P1/P2 regressions
 - [ ] Windows 最终实机 Gate
@@ -110,8 +129,8 @@ P3.0 不改生产代码。其 Gate 是先把 P3 的视觉布局、document-level
 
 P3 只有在以下条件全部满足后才能完成：
 
-- [ ] soft-wrap 是正式 GPUI layout path
-- [ ] wrapped paragraph 的 logical/visual coordinates 分层且可双向解析
+- [x] soft-wrap 是正式 GPUI layout path
+- [x] wrapped paragraph 的 logical/visual coordinates 分层且可双向解析
 - [ ] visual navigation / selection / hit-test 实机可用
 - [ ] cross-block copy/cut/delete + structured clipboard 可 undo
 - [ ] typing history grouping 与 IME history interaction 可预测
@@ -125,4 +144,4 @@ P3 只有在以下条件全部满足后才能完成：
 
 ## Regression Log
 
-（空）
+- P3.1 初版先后暴露 GPUI wrapped-layout API、旧单行 `EntityInputHandler` geometry、rustfmt 与 private-interface / dropping-reference Clippy 问题；均在 PR #41 内修复，最终 CI run #151 全绿。
