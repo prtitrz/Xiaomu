@@ -7,6 +7,7 @@
 use std::ops::Range;
 
 use gpui::{Bounds, Pixels, Point, Size, WrappedLine, point, px, size};
+use xiaomu_core::selection::CursorAffinity;
 
 /// Measured wrapped text for one block.
 ///
@@ -51,12 +52,10 @@ impl BlockTextLayout {
         &self.lines
     }
 
-    /// Maps a canonical/display byte index to a point relative to this block.
+    /// Maps a canonical/display byte index to the default visual point.
     ///
-    /// At a soft-wrap boundary GPUI 0.2.2 resolves the shared logical index
-    /// to the upstream visual row. P3.2 will use `CursorAffinity` to choose
-    /// upstream/downstream explicitly; P3.1 keeps GPUI's deterministic base
-    /// behavior while establishing the geometry path.
+    /// GPUI resolves a shared soft-wrap boundary to the upstream row. Call
+    /// [`Self::position_for_caret`] when `CursorAffinity` is available.
     pub(super) fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
         let mut logical_start = 0usize;
         let mut y = Pixels::ZERO;
@@ -78,6 +77,114 @@ impl BlockTextLayout {
         } else {
             None
         }
+    }
+
+    /// Maps a logical caret plus affinity to its visual position.
+    pub(crate) fn position_for_caret(
+        &self,
+        index: usize,
+        affinity: CursorAffinity,
+    ) -> Option<Point<Pixels>> {
+        let rows = self.visual_rows();
+        let row_ix = row_for_caret(&rows, index, affinity)?;
+        let row = &rows[row_ix];
+
+        // At a soft-wrap boundary the downstream interpretation is the
+        // beginning of the next visual row; GPUI's position_for_index returns
+        // the upstream row for the same logical byte index.
+        if affinity.is_after()
+            && row_ix > 0
+            && row.range.start == index
+            && rows[row_ix - 1].range.end == index
+        {
+            return Some(point(Pixels::ZERO, row.y));
+        }
+
+        self.position_for_index(index)
+    }
+
+    /// X coordinate of a logical caret in this block's local coordinate space.
+    pub(crate) fn caret_x(&self, index: usize, affinity: CursorAffinity) -> Option<Pixels> {
+        self.position_for_caret(index, affinity)
+            .map(|position| position.x)
+    }
+
+    /// Whether `index` is shared by two adjacent soft-wrapped visual rows.
+    pub(crate) fn is_soft_wrap_boundary(&self, index: usize) -> bool {
+        self.visual_rows()
+            .windows(2)
+            .any(|rows| rows[0].range.end == index && rows[1].range.start == index)
+    }
+
+    /// Moves one visual row within this block, preserving `desired_x`.
+    ///
+    /// Returns `None` when the target would leave the block; the document view
+    /// then resolves the first/last row of the adjacent block.
+    pub(crate) fn vertical_target(
+        &self,
+        index: usize,
+        affinity: CursorAffinity,
+        desired_x: Pixels,
+        down: bool,
+    ) -> Option<(usize, CursorAffinity)> {
+        let rows = self.visual_rows();
+        let current = row_for_caret(&rows, index, affinity)?;
+        let target = if down {
+            current.checked_add(1).filter(|target| *target < rows.len())?
+        } else {
+            current.checked_sub(1)?
+        };
+        Some(self.target_for_row_x(&rows, target, desired_x))
+    }
+
+    /// Resolves `desired_x` on this block's first or last visual row.
+    pub(crate) fn edge_row_target(
+        &self,
+        desired_x: Pixels,
+        last: bool,
+    ) -> Option<(usize, CursorAffinity)> {
+        let rows = self.visual_rows();
+        let row_ix = if last {
+            rows.len().checked_sub(1)?
+        } else {
+            0
+        };
+        Some(self.target_for_row_x(&rows, row_ix, desired_x))
+    }
+
+    /// Returns the logical edge of the visual row containing this caret.
+    pub(crate) fn visual_line_edge(
+        &self,
+        index: usize,
+        affinity: CursorAffinity,
+        to_end: bool,
+    ) -> Option<(usize, CursorAffinity)> {
+        let rows = self.visual_rows();
+        let row_ix = row_for_caret(&rows, index, affinity)?;
+        let row = &rows[row_ix];
+        if to_end {
+            Some((row.range.end, CursorAffinity::Before))
+        } else {
+            let affinity = affinity_for_row_start(&rows, row_ix);
+            Some((row.range.start, affinity))
+        }
+    }
+
+    fn target_for_row_x(
+        &self,
+        rows: &[VisualRow],
+        row_ix: usize,
+        x: Pixels,
+    ) -> (usize, CursorAffinity) {
+        let row = &rows[row_ix];
+        let y = row.y + self.line_height * 0.5;
+        let index = self.closest_index_for_position(point(x, y));
+        let affinity = if index == row.range.start {
+            affinity_for_row_start(rows, row_ix)
+        } else {
+            CursorAffinity::Before
+        };
+        (index, affinity)
     }
 
     /// Maps a point relative to this block to the nearest byte index.
@@ -106,6 +213,23 @@ impl BlockTextLayout {
         }
 
         logical_start.saturating_sub(1)
+    }
+
+    /// Maps a point to the nearest byte index and preserves the visual side of
+    /// a shared soft-wrap boundary.
+    pub(crate) fn caret_for_position(
+        &self,
+        position: Point<Pixels>,
+    ) -> (usize, CursorAffinity) {
+        let rows = self.visual_rows();
+        let row_ix = row_for_y(&rows, position.y, self.line_height);
+        let index = self.closest_index_for_position(position);
+        let affinity = if index == rows[row_ix].range.start {
+            affinity_for_row_start(&rows, row_ix)
+        } else {
+            CursorAffinity::Before
+        };
+        (index, affinity)
     }
 
     /// Returns one relative selection rectangle per intersected visual row.
@@ -178,6 +302,40 @@ impl BlockTextLayout {
     }
 }
 
+fn row_for_caret(
+    rows: &[VisualRow],
+    index: usize,
+    affinity: CursorAffinity,
+) -> Option<usize> {
+    if affinity.is_after() {
+        for row_ix in 1..rows.len() {
+            if rows[row_ix].range.start == index && rows[row_ix - 1].range.end == index {
+                return Some(row_ix);
+            }
+        }
+    }
+
+    rows.iter()
+        .position(|row| index >= row.range.start && index <= row.range.end)
+}
+
+fn affinity_for_row_start(rows: &[VisualRow], row_ix: usize) -> CursorAffinity {
+    if row_ix > 0 && rows[row_ix - 1].range.end == rows[row_ix].range.start {
+        CursorAffinity::After
+    } else {
+        CursorAffinity::Before
+    }
+}
+
+fn row_for_y(rows: &[VisualRow], y: Pixels, line_height: Pixels) -> usize {
+    if y <= Pixels::ZERO {
+        return 0;
+    }
+    let raw = (f32::from(y) / f32::from(line_height)).floor() as usize;
+    raw.min(rows.len().saturating_sub(1))
+}
+
+#[derive(Clone, Debug)]
 struct VisualRow {
     range: Range<usize>,
     y: Pixels,
