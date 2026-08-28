@@ -1,0 +1,123 @@
+//! P3.3 versioned structured clipboard metadata regressions.
+
+use std::collections::BTreeMap;
+
+use xiaomu_core::document::{
+    AttrValue, HeadingLevel, InlineContent, LinkMark, Mark, MarkKind, MarkSet, NodeAttrs,
+    NodeContent, NodeKind, NodeStoreBuilder, TextRun, XiaomuDocument,
+};
+use xiaomu_core::selection::{CursorAffinity, TextPoint};
+use xiaomu_runtime::clipboard::{decode_metadata, encode_metadata};
+use xiaomu_runtime::session::{DocumentSelection, DocumentSession};
+
+#[test]
+fn metadata_round_trip_preserves_kind_attrs_runs_and_marks() {
+    let mut attrs = BTreeMap::new();
+    attrs.insert("level-note".to_owned(), AttrValue::String("保留".to_owned()));
+    attrs.insert("flag".to_owned(), AttrValue::Bool(true));
+    let attrs = NodeAttrs::new(attrs).unwrap();
+
+    let mut builder = NodeStoreBuilder::new();
+    let heading = builder
+        .insert(
+            NodeKind::Heading(HeadingLevel::new(3).unwrap()),
+            attrs,
+            NodeContent::Inline(
+                InlineContent::new([
+                    TextRun::new("前", MarkSet::new([Mark::Bold]).unwrap()).unwrap(),
+                    TextRun::new(
+                        "链接",
+                        MarkSet::new([Mark::Link(LinkMark::new(
+                            "https://example.invalid/x",
+                            Some("title".to_owned()),
+                        ))])
+                        .unwrap(),
+                    )
+                    .unwrap(),
+                ])
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([heading]),
+        )
+        .unwrap();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+    let inline = document.node(heading).unwrap().content().as_inline().unwrap();
+    let selection = DocumentSelection::new(
+        TextPoint::new(
+            heading,
+            inline.offset_at(0).unwrap(),
+            CursorAffinity::Before,
+        ),
+        TextPoint::new(
+            heading,
+            inline.offset_at(inline.len_bytes()).unwrap(),
+            CursorAffinity::Before,
+        ),
+    );
+    let session = DocumentSession::new(document, selection).unwrap();
+    let slice = session.clipboard_slice().unwrap().unwrap();
+
+    let metadata = encode_metadata(&slice).unwrap();
+    let decoded = decode_metadata(slice.plain_text(), &metadata).expect("xiaomu metadata");
+
+    assert_eq!(decoded, slice);
+    assert!(matches!(decoded.blocks()[0].kind(), NodeKind::Heading(level) if level.as_u8() == 3));
+    assert_eq!(
+        decoded.blocks()[0].attrs().get("level-note"),
+        Some(&AttrValue::String("保留".to_owned()))
+    );
+    let runs = decoded.blocks()[0].inline().runs();
+    assert!(runs[0].marks().contains(MarkKind::Bold));
+    assert!(runs[1].marks().contains(MarkKind::Link));
+}
+
+#[test]
+fn foreign_stale_and_unknown_metadata_fall_back_instead_of_parsing() {
+    let mut builder = NodeStoreBuilder::new();
+    let paragraph = builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            NodeContent::Inline(
+                InlineContent::new([TextRun::new("abc", MarkSet::empty()).unwrap()]).unwrap(),
+            ),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([paragraph]),
+        )
+        .unwrap();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+    let inline = document.node(paragraph).unwrap().content().as_inline().unwrap();
+    let selection = DocumentSelection::new(
+        TextPoint::new(
+            paragraph,
+            inline.offset_at(0).unwrap(),
+            CursorAffinity::Before,
+        ),
+        TextPoint::new(
+            paragraph,
+            inline.offset_at(3).unwrap(),
+            CursorAffinity::Before,
+        ),
+    );
+    let session = DocumentSession::new(document, selection).unwrap();
+    let slice = session.clipboard_slice().unwrap().unwrap();
+    let metadata = encode_metadata(&slice).unwrap();
+
+    assert!(decode_metadata("changed", &metadata).is_none());
+    assert!(decode_metadata("abc", "{\"format\":\"other\"}").is_none());
+    assert!(decode_metadata("abc", "not-json").is_none());
+
+    let unknown_version = metadata.replacen("\"version\":1", "\"version\":999", 1);
+    assert!(decode_metadata("abc", &unknown_version).is_none());
+}
