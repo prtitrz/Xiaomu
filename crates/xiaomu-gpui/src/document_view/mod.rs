@@ -21,7 +21,7 @@ mod visual_navigation;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gpui::{Context, Entity, MouseButton, Pixels, ScrollHandle, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, MouseButton, Pixels, ScrollHandle, Window, div, prelude::*, px};
 
 use xiaomu_core::document::{NodeContent, NodeId, NodeKind};
 use xiaomu_core::selection::TextPoint;
@@ -101,7 +101,14 @@ impl DocumentView {
                     self.epoch.set(self.epoch.get() + 1);
                 }
                 if outcome == xiaomu_runtime::session::SessionOutcome::DocumentChanged {
+                    // Structural edits such as SplitBlock may move the
+                    // selection onto a newly-created node. Materialize the
+                    // matching ParagraphView before trying to transfer native
+                    // focus; otherwise the old block remains focused while the
+                    // document selection already points at the new block.
+                    self.sync_children(cx);
                     self.route_focus(window, cx);
+                    self.request_focus_scroll(cx);
                 }
                 #[cfg(debug_assertions)]
                 if outcome != xiaomu_runtime::session::SessionOutcome::DocumentChanged
@@ -172,7 +179,10 @@ impl DocumentView {
         let outcome = self.session.borrow_mut().apply_intent(&intent);
         match outcome {
             Ok(xiaomu_runtime::session::SessionOutcome::NoChange) => {}
-            Ok(_) => self.route_focus(window, cx),
+            Ok(_) => {
+                self.route_focus(window, cx);
+                self.request_focus_scroll(cx);
+            }
             Err(error) => eprintln!("xiaomu: selection rejected: {error}"),
         }
         cx.notify();
@@ -204,6 +214,17 @@ impl DocumentView {
         match anchor {
             Some(anchor) => self.set_selection(anchor, point, window, cx),
             None => self.place(point, window, cx),
+        }
+    }
+
+    /// Marks the block holding the document focus for one keep-visible pass.
+    fn request_focus_scroll(&self, cx: &App) {
+        let node = match self.session.borrow().selection().focus() {
+            DocumentPosition::Text(point) => point.node_id(),
+            DocumentPosition::Gap(_) => return,
+        };
+        if let Some((_, view)) = self.children.iter().find(|(id, _)| *id == node) {
+            view.read(cx).request_caret_scroll();
         }
     }
 
