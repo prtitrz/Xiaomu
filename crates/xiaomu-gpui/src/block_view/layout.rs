@@ -130,7 +130,9 @@ impl BlockTextLayout {
         let rows = self.visual_rows();
         let current = row_for_caret(&rows, index, affinity)?;
         let target = if down {
-            current.checked_add(1).filter(|target| *target < rows.len())?
+            current
+                .checked_add(1)
+                .filter(|target| *target < rows.len())?
         } else {
             current.checked_sub(1)?
         };
@@ -144,11 +146,7 @@ impl BlockTextLayout {
         last: bool,
     ) -> Option<(usize, CursorAffinity)> {
         let rows = self.visual_rows();
-        let row_ix = if last {
-            rows.len().checked_sub(1)?
-        } else {
-            0
-        };
+        let row_ix = if last { rows.len().checked_sub(1)? } else { 0 };
         Some(self.target_for_row_x(&rows, row_ix, desired_x))
     }
 
@@ -217,10 +215,7 @@ impl BlockTextLayout {
 
     /// Maps a point to the nearest byte index and preserves the visual side of
     /// a shared soft-wrap boundary.
-    pub(crate) fn caret_for_position(
-        &self,
-        position: Point<Pixels>,
-    ) -> (usize, CursorAffinity) {
+    pub(crate) fn caret_for_position(&self, position: Point<Pixels>) -> (usize, CursorAffinity) {
         let rows = self.visual_rows();
         let row_ix = row_for_y(&rows, position.y, self.line_height);
         let index = self.closest_index_for_position(position);
@@ -304,11 +299,7 @@ impl BlockTextLayout {
 
 impl super::ParagraphView {
     /// X coordinate of this block's logical caret in the last painted layout.
-    pub(crate) fn visual_caret_x(
-        &self,
-        index: usize,
-        affinity: CursorAffinity,
-    ) -> Option<Pixels> {
+    pub(crate) fn visual_caret_x(&self, index: usize, affinity: CursorAffinity) -> Option<Pixels> {
         self.last_layout.as_ref()?.caret_x(index, affinity)
     }
 
@@ -360,17 +351,18 @@ impl super::ParagraphView {
     ) -> Option<(usize, CursorAffinity)> {
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
-        Some(layout.caret_for_position(point(
-            position.x - bounds.left(),
-            position.y - bounds.top(),
-        )))
+        Some(
+            layout.caret_for_position(point(position.x - bounds.left(), position.y - bounds.top())),
+        )
     }
 
     /// Current text focus as `(byte, affinity)` when it belongs to this block.
     pub(crate) fn focus_caret(&self) -> Option<(usize, CursorAffinity)> {
         let session = self.session.borrow();
         match session.selection().focus() {
-            xiaomu_runtime::session::DocumentPosition::Text(point) if point.node_id() == self.node => {
+            xiaomu_runtime::session::DocumentPosition::Text(point)
+                if point.node_id() == self.node =>
+            {
                 Some((point.offset().as_usize(), point.affinity()))
             }
             _ => None,
@@ -378,11 +370,7 @@ impl super::ParagraphView {
     }
 }
 
-fn row_for_caret(
-    rows: &[VisualRow],
-    index: usize,
-    affinity: CursorAffinity,
-) -> Option<usize> {
+fn row_for_caret(rows: &[VisualRow], index: usize, affinity: CursorAffinity) -> Option<usize> {
     if affinity.is_after() {
         for row_ix in 1..rows.len() {
             if rows[row_ix].range.start == index && rows[row_ix - 1].range.end == index {
