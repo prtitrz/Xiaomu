@@ -17,6 +17,7 @@ mod history;
 mod intent;
 mod listener;
 mod outcome;
+mod paste;
 mod resolve;
 mod selection;
 mod split;
@@ -140,6 +141,14 @@ impl DocumentSession {
         if let EditIntent::SetSelection { anchor, focus } = intent {
             return self.set_selection(*anchor, *focus);
         }
+        if let EditIntent::PasteSlice { slice } = intent {
+            let action = paste::plan_paste_slice(&self.document, self.selection, slice)?;
+            return match action {
+                PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
+                PlannedAction::Commit(plan) => self.commit(plan),
+                PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
+            };
+        }
 
         // Backspace/Delete over a document-level text selection share the
         // same cross-block delete plan. Single-block forms continue through
@@ -155,9 +164,8 @@ impl DocumentSession {
             };
         }
 
-        // Other content and structural intents in this slice still act from
-        // one inline node. Structured paste expands this boundary later in
-        // P3.3.
+        // Remaining content and structural intents in this slice act from one
+        // inline node.
         let focus = self.text_focus()?;
         let inline = self.inline_of(focus.node_id())?;
         let selection = self
@@ -220,6 +228,7 @@ impl DocumentSession {
             }
             EditIntent::MoveCaret { .. }
             | EditIntent::PlaceCaret { .. }
+            | EditIntent::PasteSlice { .. }
             | EditIntent::SetSelection { .. } => unreachable!("handled above"),
         };
 
