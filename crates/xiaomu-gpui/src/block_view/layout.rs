@@ -323,10 +323,9 @@ impl super::ParagraphView {
     ) -> Option<(usize, CursorAffinity)> {
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
-        Some(layout.caret_for_position(point(
-            position.x - bounds.left(),
-            position.y - bounds.top(),
-        )))
+        Some(
+            layout.caret_for_position(point(position.x - bounds.left(), position.y - bounds.top())),
+        )
     }
 
     pub(crate) fn focus_caret(&self) -> Option<(usize, CursorAffinity)> {
