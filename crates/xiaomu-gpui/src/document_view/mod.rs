@@ -2,11 +2,10 @@
 //!
 //! Owns the shared [`DocumentSession`] handle and renders one
 //! [`ParagraphView`] per inline-bearing block in document order inside a
-//! scrollable column. All keyboard actions are registered here and bubble up
-//! from the focused block; cross-block navigation translates keys into
-//! document positions via pure logic ([`navigation`]) applied as runtime
-//! [`EditIntent::SetSelection`]s. Mouse drag selection hit-tests against the
-//! per-block bounds published during paint.
+//! scrollable column. Keyboard navigation translates visual gestures through
+//! the most recent block layouts and applies the resulting Core positions as
+//! runtime [`EditIntent::SetSelection`]s. Mouse drag selection hit-tests
+//! against the per-block bounds published during paint.
 //!
 //! Kind-driven visual distinction lives in [`Self::render_block_tree`]:
 //! headings scale with their level, quote descendants are indented behind a
@@ -17,36 +16,20 @@ pub(crate) mod cache_key;
 pub(crate) mod markers;
 pub(crate) mod mouse;
 pub(crate) mod navigation;
+mod visual_navigation;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gpui::{Context, Entity, MouseButton, Window, div, prelude::*, px};
+use gpui::{Context, Entity, MouseButton, Pixels, Window, div, prelude::*, px};
 
 use xiaomu_core::document::{NodeContent, NodeId, NodeKind};
-use xiaomu_core::selection::{CursorAffinity, TextPoint};
+use xiaomu_core::selection::TextPoint;
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
 use xiaomu_runtime::persistence::DocumentPersistence;
 
 use crate::block_view::{BlockBoundsRegistry, ParagraphView, SharedSession};
-
-/// One navigation step direction for the caret focus.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NavStep {
-    /// One scalar left, wrapping into the previous block at the start.
-    Left,
-    /// One scalar right, wrapping into the next block at the end.
-    Right,
-    /// One visual line up (the previous block in this slice).
-    Up,
-    /// One visual line down (the next block in this slice).
-    Down,
-    /// Logical start of the current block.
-    LineStart,
-    /// Logical end of the current block.
-    LineEnd,
-}
 
 /// A multi-block editor view over one shared session.
 pub struct DocumentView {
@@ -59,6 +42,10 @@ pub struct DocumentView {
     /// IME composition and focus state survive unrelated re-renders.
     children: Vec<(NodeId, Entity<ParagraphView>)>,
     is_dragging: bool,
+    /// The focus point produced by the previous vertical move plus the x
+    /// column to preserve. Pairing x with its anchor makes direct IME/text
+    /// edits invalidate stale vertical-navigation state automatically.
+    desired_x: Option<(TextPoint, Pixels)>,
     /// Host adapter for the create → load → edit → save contract; absent
     /// when the host persists through its own channel.
     persistence: Option<Rc<RefCell<dyn DocumentPersistence>>>,
@@ -74,6 +61,7 @@ impl DocumentView {
             registry: Rc::new(RefCell::new(Vec::new())),
             children: Vec::new(),
             is_dragging: false,
+            desired_x: None,
             persistence: None,
         }
     }
@@ -100,6 +88,7 @@ impl DocumentView {
             eprintln!("xiaomu: editing action ignored during composition");
             return;
         }
+        self.desired_x = None;
         let outcome = self.session.borrow_mut().apply_intent(&intent);
         match outcome {
             Ok(outcome) => {
@@ -173,6 +162,7 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.desired_x = None;
         let intent = EditIntent::SetSelection { anchor, focus };
         let outcome = self.session.borrow_mut().apply_intent(&intent);
         match outcome {
@@ -210,52 +200,6 @@ impl DocumentView {
             Some(anchor) => self.set_selection(anchor, point, window, cx),
             None => self.place(point, window, cx),
         }
-    }
-
-    // ---- navigation ----
-
-    /// Resolves the current focus as `(blocks, block index, raw byte)`.
-    fn focus_location(&self) -> Option<(Vec<navigation::TextBlock>, usize, usize)> {
-        let session = self.session.borrow();
-        let blocks = navigation::text_blocks(session.document());
-        let focus = match session.selection().focus() {
-            DocumentPosition::Text(point) => point,
-            DocumentPosition::Gap(_) => return None,
-        };
-        let index = navigation::block_index(&blocks, focus.node_id())?;
-        Some((blocks, index, focus.offset().as_usize()))
-    }
-
-    /// Translates one navigation step into a selection update.
-    fn navigate(
-        &mut self,
-        step: NavStep,
-        extend: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.focused_child_composing(window, cx) {
-            return;
-        }
-        let Some((blocks, index, offset)) = self.focus_location() else {
-            return;
-        };
-        let target = match step {
-            NavStep::Left => navigation::step_horizontal(&blocks, index, offset, false),
-            NavStep::Right => navigation::step_horizontal(&blocks, index, offset, true),
-            NavStep::Up => navigation::step_vertical(&blocks, index, offset, false),
-            NavStep::Down => navigation::step_vertical(&blocks, index, offset, true),
-            NavStep::LineStart => navigation::line_edge(&blocks, index, false),
-            NavStep::LineEnd => navigation::line_edge(&blocks, index, true),
-        };
-        let Some((block, raw)) = target else {
-            return;
-        };
-        let Some(offset) = navigation::validated_offset(&blocks[block], raw) else {
-            return;
-        };
-        let point = TextPoint::new(blocks[block].node, offset, CursorAffinity::Before);
-        self.move_focus_to(point, extend, window, cx);
     }
 
     // ---- rendering ----
