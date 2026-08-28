@@ -80,17 +80,9 @@ pub(crate) fn plan_delete_selection(
         });
     }
 
-    // Keep only the unselected suffix of the last block. The node itself is
-    // moved and joined below so its run/mark segmentation survives exactly.
-    let tail_start = tail_inline.offset_at(0).map_err(SessionError::Core)?;
-    if tail.offset() != tail_start {
-        transaction.push_step(TransactionStep::ReplaceText {
-            node: tail.node_id(),
-            range: TextRange::new(tail_start, tail.offset()).map_err(SessionError::Core)?,
-            replacement: String::new(),
-        });
-    }
-
+    // Move the last block before editing its prefix. RestoreSubtree payloads
+    // are values captured from the planning snapshot, so editing `tail`
+    // before remove/restore would accidentally restore the old full text.
     let tail_payloads = subtree_payloads(document, tail.node_id());
     transaction.push_step(TransactionStep::RemoveNode {
         node: tail.node_id(),
@@ -101,6 +93,17 @@ pub(crate) fn plan_delete_selection(
         root: tail.node_id(),
         nodes: tail_payloads,
     });
+
+    // Keep only the unselected suffix in the now-relocated tail. Joining it
+    // next preserves the suffix run/mark segmentation exactly.
+    let tail_start = tail_inline.offset_at(0).map_err(SessionError::Core)?;
+    if tail.offset() != tail_start {
+        transaction.push_step(TransactionStep::ReplaceText {
+            node: tail.node_id(),
+            range: TextRange::new(tail_start, tail.offset()).map_err(SessionError::Core)?,
+            replacement: String::new(),
+        });
+    }
     transaction.push_step(TransactionStep::JoinNodes {
         first: head.node_id(),
         second: tail.node_id(),
@@ -299,7 +302,8 @@ mod tests {
             )
             .unwrap();
         let document = XiaomuDocument::new(root, builder.finish()).unwrap();
-        let selection = DocumentSelection::new(point(&document, first, 1), point(&document, last, 1));
+        let selection =
+            DocumentSelection::new(point(&document, first, 1), point(&document, last, 1));
         let action = plan_delete_selection(&document, selection).unwrap();
         let PlannedAction::Commit(plan) = action else {
             panic!("cross-block delete must commit");
