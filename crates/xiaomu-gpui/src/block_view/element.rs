@@ -14,6 +14,7 @@ use gpui::{
     StrikethroughStyle, Style, TextAlign, TextRun, UnderlineStyle, Window, fill, point, px,
     relative, rgba, size,
 };
+use xiaomu_core::selection::CursorAffinity;
 
 use super::layout::BlockTextLayout;
 use super::{ParagraphView, SelectionProjection};
@@ -146,7 +147,10 @@ impl Element for ParagraphElement {
             .clone()
             .unwrap_or_else(|| BlockTextLayout::new(Vec::new(), window.line_height()));
 
-        let caret_byte = view.composing_caret_byte().or_else(|| view.focus_byte());
+        let caret = view
+            .composing_caret_byte()
+            .map(|byte| (byte, CursorAffinity::Before))
+            .or_else(|| view.focus_caret());
         let projection = if composing {
             SelectionProjection::None
         } else {
@@ -180,8 +184,8 @@ impl Element for ParagraphElement {
         };
 
         let cursor = if focused && selection.is_empty() {
-            caret_byte.and_then(|caret| {
-                layout.position_for_index(caret).map(|position| {
+            caret.and_then(|(byte, affinity)| {
+                layout.position_for_caret(byte, affinity).map(|position| {
                     fill(
                         Bounds::new(
                             point(bounds.left() + position.x, bounds.top() + position.y),
