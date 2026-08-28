@@ -127,7 +127,7 @@ fn plan_single_block(
     transaction: &mut Transaction,
 ) -> Result<(), SessionError> {
     let target = inline_of(document, node)?;
-    target.validate_range(range).map_err(SessionError::Core)?;
+    validate_inline_range(target, range)?;
     let target_text = concatenated(target);
     let source_text = concatenated(source);
     let start = range.start().as_usize();
@@ -150,7 +150,7 @@ fn plan_multiple_blocks(
     transaction: &mut Transaction,
 ) -> Result<(), SessionError> {
     let target = inline_of(document, node)?;
-    target.validate_range(range).map_err(SessionError::Core)?;
+    validate_inline_range(target, range)?;
     let parent = document
         .parent_of(node)
         .ok_or(SessionError::SelectionInvalid)?;
@@ -253,6 +253,16 @@ fn push_exact_marks(
             });
         }
     }
+    Ok(())
+}
+
+fn validate_inline_range(inline: &InlineContent, range: TextRange) -> Result<(), SessionError> {
+    inline
+        .validate_offset(range.start())
+        .map_err(SessionError::Core)?;
+    inline
+        .validate_offset(range.end())
+        .map_err(SessionError::Core)?;
     Ok(())
 }
 
