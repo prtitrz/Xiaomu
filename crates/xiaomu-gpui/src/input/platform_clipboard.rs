@@ -7,9 +7,7 @@
 
 use gpui::App;
 
-use xiaomu_runtime::clipboard::{
-    ClipboardSlice, TextClipboard, decode_metadata, encode_metadata,
-};
+use xiaomu_runtime::clipboard::{ClipboardSlice, TextClipboard, decode_metadata, encode_metadata};
 
 /// Content read from the platform clipboard.
 pub(crate) enum PlatformClipboardContent {
