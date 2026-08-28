@@ -1,18 +1,21 @@
-//! Custom element for the single-block view.
+//! Custom element for one inline-bearing block.
 //!
-//! The element shapes the block's displayed text into one line, paints the
-//! selection highlight and caret (projected from the document-level
-//! selection), registers the platform input handler, publishes painted
-//! bounds to the document view's hit-test registry, and reuses the cached
-//! shaped line while the layout cache key is unchanged.
+//! P3.1 upgrades the P2 single-`ShapedLine` path to GPUI's measured
+//! `WrappedLine` layout. Soft-wrap stays entirely in the frontend: canonical
+//! byte positions are projected into visual rows for caret, selection and
+//! pointer geometry.
+
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, Element, ElementId, ElementInputHandler, Entity, FontStyle, FontWeight,
-    GlobalElementId, IntoElement, LayoutId, PaintQuad, Pixels, ShapedLine, SharedString,
-    StrikethroughStyle, Style, TextRun, UnderlineStyle, Window, fill, point, px, relative, rgba,
-    size,
+    App, AvailableSpace, Bounds, Element, ElementId, ElementInputHandler, Entity, FontStyle,
+    FontWeight, GlobalElementId, IntoElement, LayoutId, PaintQuad, Pixels, SharedString, Size,
+    StrikethroughStyle, Style, TextAlign, TextRun, UnderlineStyle, Window, fill, point, px,
+    relative, rgba, size,
 };
 
+use super::layout::BlockTextLayout;
 use super::{ParagraphView, SelectionProjection};
 use crate::document_view::cache_key::LayoutCacheKey;
 
@@ -21,14 +24,18 @@ pub struct ParagraphElement {
     pub(super) view: Entity<ParagraphView>,
 }
 
+/// Measured block layout shared between GPUI's layout and prepaint phases.
+#[derive(Clone, Default)]
+pub struct RequestLayoutState(Rc<RefCell<Option<BlockTextLayout>>>);
+
 /// Layout results computed during prepaint and consumed during paint.
 ///
 /// This is an internal detail of the element pipeline; it is public only
 /// because it appears as an associated type of the `Element` impl.
 pub struct PrepaintState {
-    line: Option<ShapedLine>,
+    layout: Option<BlockTextLayout>,
     cursor: Option<PaintQuad>,
-    selection: Option<PaintQuad>,
+    selection: Vec<PaintQuad>,
     cache_key: Option<LayoutCacheKey>,
 }
 
@@ -41,7 +48,7 @@ impl IntoElement for ParagraphElement {
 }
 
 impl Element for ParagraphElement {
-    type RequestLayoutState = ();
+    type RequestLayoutState = RequestLayoutState;
     type PrepaintState = PrepaintState;
 
     fn id(&self) -> Option<ElementId> {
@@ -59,10 +66,64 @@ impl Element for ParagraphElement {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
+        let view = self.view.read(cx);
+        let (display_text, segments) = view.display_content();
+        let composing = view.is_composing();
+        let cached_layout = (!composing).then(|| view.last_layout.clone()).flatten();
+        let cached_key = (!composing).then_some(view.cache_key).flatten();
+        let node = view.node();
+        let epoch = view.epoch.get();
+
+        let text_style = window.text_style();
+        let font = text_style.font();
+        let font_size = text_style.font_size.to_pixels(window.rem_size());
+        let color = text_style.color;
+        let line_height = window.line_height();
+        let runs = text_runs(&segments, font, color);
+        let text = SharedString::new(display_text.as_ref());
+
         let mut style = Style::default();
         style.size.width = relative(1.0).into();
-        style.size.height = window.line_height().into();
-        (window.request_layout(style, [], cx), ())
+
+        let state = RequestLayoutState::default();
+        let measured_state = state.clone();
+        let layout_id = window.request_measured_layout(
+            style,
+            move |known_dimensions, available_space, window, _cx| {
+                let wrap_width = known_dimensions.width.or(match available_space.width {
+                    AvailableSpace::Definite(width) => Some(width),
+                    _ => None,
+                });
+
+                let cache_key =
+                    wrap_width.map(|width| LayoutCacheKey::new(node, epoch, f32::from(width)));
+                if !composing
+                    && cache_key == cached_key
+                    && let Some(layout) = cached_layout.as_ref()
+                {
+                    measured_state.0.borrow_mut().replace(layout.clone());
+                    return measured_size(layout, wrap_width);
+                }
+
+                let layout = match window.text_system().shape_text(
+                    text.clone(),
+                    font_size,
+                    &runs,
+                    wrap_width,
+                    None,
+                ) {
+                    Ok(lines) => BlockTextLayout::new(lines.into_iter().collect(), line_height),
+                    Err(error) => {
+                        eprintln!("xiaomu: wrapped text layout failed: {error}");
+                        BlockTextLayout::new(Vec::new(), line_height)
+                    }
+                };
+                let size = measured_size(&layout, wrap_width);
+                measured_state.0.borrow_mut().replace(layout);
+                size
+            },
+        );
+        (layout_id, state)
     }
 
     fn prepaint(
@@ -70,35 +131,20 @@ impl Element for ParagraphElement {
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
+        request_layout: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
         let view = self.view.read(cx);
-        let style = window.text_style();
-        let font = style.font();
-        let font_size = style.font_size.to_pixels(window.rem_size());
-        let color = style.color;
-
-        // Composition transients bypass the cache: the virtual projection
-        // changes without an epoch bump.
         let composing = view.is_composing();
-        let cache_key = (!composing)
-            .then(|| LayoutCacheKey::new(view.node(), view.epoch.get(), bounds.size.width.into()));
-        let cached_hit = !composing && view.cache_key == cache_key && view.last_layout.is_some();
-
-        let line: ShapedLine = if cached_hit {
-            view.last_layout.clone().expect("checked above")
-        } else {
-            let (display_text, segments) = view.display_content();
-            let runs = text_runs(&segments, font.clone(), color);
-            window.text_system().shape_line(
-                SharedString::new(display_text.as_ref()),
-                font_size,
-                &runs,
-                None,
-            )
-        };
+        let cache_key = (!composing).then(|| {
+            LayoutCacheKey::new(view.node(), view.epoch.get(), f32::from(bounds.size.width))
+        });
+        let layout = request_layout
+            .0
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| BlockTextLayout::new(Vec::new(), window.line_height()));
 
         let caret_byte = view.composing_caret_byte().or_else(|| view.focus_byte());
         let projection = if composing {
@@ -115,37 +161,42 @@ impl Element for ParagraphElement {
             view.projected_selection(&order)
         };
 
-        // A non-collapsed highlight wins over the caret; the caret shows
-        // only when this block holds the selection focus.
-        let focused = self.view.read(cx).focus_handle.is_focused(window);
-        let (selection, cursor) = match projection {
-            SelectionProjection::Highlight { start, end } => (
-                Some(fill(
-                    Bounds::from_corners(
-                        point(bounds.left() + line.x_for_index(start), bounds.top()),
-                        point(bounds.left() + line.x_for_index(end), bounds.bottom()),
-                    ),
-                    rgba(0x3377cc44),
-                )),
-                None,
-            ),
-            _ => match (focused, caret_byte) {
-                (true, Some(caret)) => (
-                    None,
-                    Some(fill(
+        let focused = view.focus_handle.is_focused(window);
+        let selection = match projection {
+            SelectionProjection::Highlight { start, end } => layout
+                .selection_rects(start..end)
+                .into_iter()
+                .map(|rect| {
+                    fill(
                         Bounds::new(
-                            point(bounds.left() + line.x_for_index(caret), bounds.top()),
-                            size(px(2.0), bounds.bottom() - bounds.top()),
+                            point(bounds.left() + rect.origin.x, bounds.top() + rect.origin.y),
+                            rect.size,
+                        ),
+                        rgba(0x3377cc44),
+                    )
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+
+        let cursor = if focused && selection.is_empty() {
+            caret_byte.and_then(|caret| {
+                layout.position_for_index(caret).map(|position| {
+                    fill(
+                        Bounds::new(
+                            point(bounds.left() + position.x, bounds.top() + position.y),
+                            size(px(2.0), layout.line_height()),
                         ),
                         gpui::blue(),
-                    )),
-                ),
-                _ => (None, None),
-            },
+                    )
+                })
+            })
+        } else {
+            None
         };
 
         PrepaintState {
-            line: Some(line),
+            layout: Some(layout),
             cursor,
             selection,
             cache_key,
@@ -169,13 +220,27 @@ impl Element for ParagraphElement {
             cx,
         );
 
-        if let Some(selection) = prepaint.selection.take() {
+        for selection in prepaint.selection.drain(..) {
             window.paint_quad(selection);
         }
 
-        let line = prepaint.line.take().unwrap();
-        if let Err(error) = line.paint(bounds.origin, window.line_height(), window, cx) {
-            eprintln!("xiaomu: line paint failed: {error}");
+        let layout = prepaint
+            .layout
+            .take()
+            .unwrap_or_else(|| BlockTextLayout::new(Vec::new(), window.line_height()));
+        let mut origin = bounds.origin;
+        for line in layout.lines() {
+            if let Err(error) = line.paint(
+                origin,
+                layout.line_height(),
+                TextAlign::default(),
+                Some(bounds),
+                window,
+                cx,
+            ) {
+                eprintln!("xiaomu: wrapped line paint failed: {error}");
+            }
+            origin.y += line.size(layout.line_height()).height;
         }
 
         if focus_handle.is_focused(window)
@@ -189,11 +254,19 @@ impl Element for ParagraphElement {
         registry.borrow_mut().push((node_id, bounds));
 
         self.view.update(cx, |view, _| {
-            view.last_layout = Some(line);
+            view.last_layout = Some(layout);
             view.last_bounds = Some(bounds);
             view.cache_key = prepaint.cache_key;
         });
     }
+}
+
+fn measured_size(layout: &BlockTextLayout, wrap_width: Option<Pixels>) -> Size<Pixels> {
+    let mut measured = layout.size();
+    if let Some(width) = wrap_width {
+        measured.width = width;
+    }
+    measured
 }
 
 fn text_runs(

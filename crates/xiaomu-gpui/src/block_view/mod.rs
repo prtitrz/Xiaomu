@@ -13,6 +13,7 @@
 mod element;
 mod ime;
 mod input_handler;
+mod layout;
 #[cfg(test)]
 mod tests;
 
@@ -20,8 +21,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, Context, FocusHandle, Focusable, Pixels, ShapedLine, Subscription, Window,
-    actions, div, prelude::*,
+    App, Bounds, Context, FocusHandle, Focusable, Pixels, Point, Subscription, Window, actions,
+    div, point, prelude::*,
 };
 
 use xiaomu_core::document::{InlineContent, NodeId};
@@ -29,6 +30,7 @@ use xiaomu_runtime::session::{DocumentPosition, DocumentSession, EditIntent};
 
 use crate::document_view::cache_key::LayoutCacheKey;
 use crate::input::composition::CompositionState;
+use layout::BlockTextLayout;
 
 pub use element::ParagraphElement;
 
@@ -56,21 +58,21 @@ actions!(
         SelectLeft,
         /// Extend the selection one scalar to the right.
         SelectRight,
-        /// Move up one visual line (one block in this slice).
+        /// Move up one visual line.
         Up,
-        /// Move down one visual line (one block in this slice).
+        /// Move down one visual line.
         Down,
-        /// Extend the selection one line up.
+        /// Extend the selection one visual line up.
         SelectUp,
-        /// Extend the selection one line down.
+        /// Extend the selection one visual line down.
         SelectDown,
-        /// Collapse to the paragraph's logical start.
+        /// Collapse to the current visual line start.
         Home,
-        /// Collapse to the paragraph's logical end.
+        /// Collapse to the current visual line end.
         End,
-        /// Extend the selection to the paragraph's logical start.
+        /// Extend the selection to the current visual line start.
         SelectHome,
-        /// Extend the selection to the paragraph's logical end.
+        /// Extend the selection to the current visual line end.
         SelectEnd,
         /// Select the whole document.
         SelectAll,
@@ -204,7 +206,7 @@ pub struct ParagraphView {
     pub(super) session: SharedSession,
     node: NodeId,
     focus_handle: FocusHandle,
-    pub(super) last_layout: Option<ShapedLine>,
+    pub(super) last_layout: Option<BlockTextLayout>,
     pub(super) last_bounds: Option<Bounds<Pixels>>,
     pub(super) cache_key: Option<LayoutCacheKey>,
     /// Render generation shared with the owning document view.
@@ -307,13 +309,15 @@ impl ParagraphView {
         cx.notify();
     }
 
-    /// Maps an x coordinate inside this block's last painted bounds to the
-    /// closest valid raw byte index. Used by the document view for mouse
-    /// hit testing.
-    pub(crate) fn hit_test_x(&self, x: Pixels) -> Option<usize> {
+    /// Maps a window-space point inside this block's last painted bounds to
+    /// the closest raw byte index in its wrapped layout.
+    pub(crate) fn hit_test_position(&self, position: Point<Pixels>) -> Option<usize> {
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
-        Some(layout.closest_index_for_x(x - bounds.left()))
+        Some(layout.closest_index_for_position(point(
+            position.x - bounds.left(),
+            position.y - bounds.top(),
+        )))
     }
 
     /// Projects the document selection onto this block's displayed text.

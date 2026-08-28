@@ -78,8 +78,8 @@ impl DocumentView {
     }
 
     /// Maps a window-space point to a validated caret point via the paint
-    /// registry: nearest block by vertical position, then x hit-testing
-    /// within that block's shaped line.
+    /// registry: nearest block by vertical position, then two-dimensional
+    /// hit-testing inside that block's wrapped text layout.
     fn hit_test(&self, position: Point<Pixels>, cx: &App) -> Option<TextPoint> {
         let registry = self.registry.borrow();
         let mut nearest: Option<(NodeId, Pixels)> = None;
@@ -106,7 +106,7 @@ impl DocumentView {
             .iter()
             .find(|(id, _)| *id == node)
             .map(|(_, view)| view.clone())?;
-        let raw = child.read(cx).hit_test_x(position.x)?;
+        let raw = child.read(cx).hit_test_position(position)?;
         let clamped = raw.min(block.text().len());
         let offset = navigation::validated_offset(block, clamped)
             .or_else(|| navigation::validated_offset(block, block.text().len()))?;
