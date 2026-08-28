@@ -14,6 +14,7 @@ use gpui::{
     StrikethroughStyle, Style, TextAlign, TextRun, UnderlineStyle, Window, fill, point, px,
     relative, rgba, size,
 };
+use xiaomu_core::selection::CursorAffinity;
 
 use super::layout::BlockTextLayout;
 use super::{ParagraphView, SelectionProjection};
@@ -146,7 +147,10 @@ impl Element for ParagraphElement {
             .clone()
             .unwrap_or_else(|| BlockTextLayout::new(Vec::new(), window.line_height()));
 
-        let caret_byte = view.composing_caret_byte().or_else(|| view.focus_byte());
+        let caret = view
+            .composing_caret_byte()
+            .map(|byte| (byte, CursorAffinity::Before))
+            .or_else(|| view.focus_caret());
         let projection = if composing {
             SelectionProjection::None
         } else {
@@ -179,18 +183,25 @@ impl Element for ParagraphElement {
             _ => Vec::new(),
         };
 
-        let cursor = if focused && selection.is_empty() {
-            caret_byte.and_then(|caret| {
-                layout.position_for_index(caret).map(|position| {
-                    fill(
-                        Bounds::new(
-                            point(bounds.left() + position.x, bounds.top() + position.y),
-                            size(px(2.0), layout.line_height()),
-                        ),
-                        gpui::blue(),
+        let caret_bounds = if focused {
+            caret.and_then(|(byte, affinity)| {
+                layout.position_for_caret(byte, affinity).map(|position| {
+                    Bounds::new(
+                        point(bounds.left() + position.x, bounds.top() + position.y),
+                        size(px(2.0), layout.line_height()),
                     )
                 })
             })
+        } else {
+            None
+        };
+
+        if let Some(caret_bounds) = caret_bounds.as_ref() {
+            view.keep_caret_visible(caret_bounds, window);
+        }
+
+        let cursor = if selection.is_empty() {
+            caret_bounds.map(|bounds| fill(bounds, gpui::blue()))
         } else {
             None
         };

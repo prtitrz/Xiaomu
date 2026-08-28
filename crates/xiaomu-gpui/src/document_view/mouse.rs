@@ -41,9 +41,10 @@ impl DocumentView {
                             })
                             .unwrap_or_default();
                         format!(
-                            "{:?}{text} at byte {}",
+                            "{:?}{text} at byte {} ({:?})",
                             node.kind(),
-                            point.offset().as_usize()
+                            point.offset().as_usize(),
+                            point.affinity()
                         )
                     })
                 };
@@ -106,10 +107,15 @@ impl DocumentView {
             .iter()
             .find(|(id, _)| *id == node)
             .map(|(_, view)| view.clone())?;
-        let raw = child.read(cx).hit_test_position(position)?;
+        let (raw, affinity) = child.read(cx).hit_test_caret_position(position)?;
         let clamped = raw.min(block.text().len());
         let offset = navigation::validated_offset(block, clamped)
             .or_else(|| navigation::validated_offset(block, block.text().len()))?;
-        Some(TextPoint::new(node, offset, CursorAffinity::Before))
+        let affinity = if clamped == raw {
+            affinity
+        } else {
+            CursorAffinity::Before
+        };
+        Some(TextPoint::new(node, offset, affinity))
     }
 }

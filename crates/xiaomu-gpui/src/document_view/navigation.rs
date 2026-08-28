@@ -1,15 +1,9 @@
-//! Cross-block caret navigation translation.
+//! Document-order navigation helpers shared by the GPUI frontend.
 //!
-//! Pure logic over Core types only: given the document's inline-bearing
-//! blocks in document order and the current focus, compute the target
-//! position for a navigation key. The GPUI layer converts the result into a
-//! [`xiaomu_core::selection::TextPoint`] and a runtime
-//! [`xiaomu_runtime::session::EditIntent::SetSelection`].
-//!
-//! Blocks are single visual lines in this slice (no soft wrapping yet), so
-//! Up/Down move to the adjacent block and clamp the horizontal byte index;
-//! x-preserving vertical movement needs shaped-line geometry and lands with
-//! real layout in the harness gate.
+//! This module owns layout-independent traversal only: collecting inline
+//! blocks, Unicode-scalar horizontal stepping and validating raw byte targets.
+//! Visual Up/Down and Home/End live in `visual_navigation`, where the current
+//! wrapped GPUI layout is available.
 
 use xiaomu_core::document::{InlineContent, NodeContent, NodeId, XiaomuDocument};
 use xiaomu_core::text::TextOffset;
@@ -86,7 +80,8 @@ pub(crate) fn next_boundary(text: &str, offset: usize) -> Option<usize> {
 ///
 /// Left at a block start wraps to the previous block's end; Right at a
 /// block end wraps to the next block's start. Returns `(block, raw byte)`
-/// or `None` at the document edges.
+/// or `None` at the document edges. Soft-wrap affinity is handled by the
+/// visual navigation controller before this logical step runs.
 #[must_use]
 pub(crate) fn step_horizontal(
     blocks: &[TextBlock],
@@ -112,7 +107,10 @@ pub(crate) fn step_horizontal(
     }
 }
 
-/// Start/end of one block as `(block, raw byte)` targets.
+/// Start/end of one logical block as `(block, raw byte)` targets.
+///
+/// This is the layout-unavailable fallback used before a block has painted;
+/// the normal P3 path resolves Home/End against the current visual row.
 #[must_use]
 pub(crate) fn line_edge(
     blocks: &[TextBlock],
@@ -123,45 +121,6 @@ pub(crate) fn line_edge(
         true => (block, b.text().len()),
         false => (block, 0),
     })
-}
-
-/// One vertical navigation step.
-///
-/// With one visual line per block this moves to the adjacent block,
-/// clamping the byte offset into its length and snapping onto a UTF-8
-/// scalar boundary of the target; returns `None` at the first or last
-/// block.
-#[must_use]
-pub(crate) fn step_vertical(
-    blocks: &[TextBlock],
-    block: usize,
-    offset: usize,
-    down: bool,
-) -> Option<(usize, usize)> {
-    let target = if down {
-        block + 1
-    } else {
-        block.checked_sub(1)?
-    };
-    let text = blocks.get(target)?.text();
-    Some((target, snap_to_scalar_boundary(&text, offset)))
-}
-
-/// Clamps `raw` into `text` and floors to the start of the containing
-/// Unicode scalar when the candidate lands inside a multi-byte character.
-fn snap_to_scalar_boundary(text: &str, raw: usize) -> usize {
-    let clamped = raw.min(text.len());
-    if text.is_char_boundary(clamped) {
-        return clamped;
-    }
-    let mut index = clamped;
-    while index > 0 {
-        index -= 1;
-        if text.is_char_boundary(index) {
-            return index;
-        }
-    }
-    0
 }
 
 /// Converts a raw byte index into a validated [`TextOffset`].
@@ -269,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn line_edges_reach_both_ends() {
+    fn line_edges_reach_both_ends_as_layout_fallback() {
         let document = sample_document();
         let blocks = text_blocks(&document);
 
@@ -280,42 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn vertical_steps_clamp_into_adjacent_block_length() {
-        let document = sample_document();
-        let blocks = text_blocks(&document);
-
-        // Offset 2 in "one" lands inside "二" (3-byte UTF-8) and floors to 0.
-        assert_eq!(step_vertical(&blocks, 0, 2, true), Some((1, 0)));
-        assert!(validated_offset(&blocks[1], 0).is_some());
-        // Offset 6 in "二👍三" (10 bytes) clamps into "deep" (4 bytes).
-        assert_eq!(step_vertical(&blocks, 1, 6, true), Some((2, 4)));
-        // Up keeps the offset when it fits on a scalar boundary.
-        assert_eq!(step_vertical(&blocks, 1, 1, false), Some((0, 1)));
-
-        // First block cannot go up; last cannot go down.
-        assert_eq!(step_vertical(&blocks, 0, 0, false), None);
-        assert_eq!(step_vertical(&blocks, 2, 0, true), None);
-    }
-
-    #[test]
-    fn vertical_steps_always_land_on_a_valid_scalar_boundary() {
-        let document = sample_document();
-        let blocks = text_blocks(&document);
-        let target = &blocks[1];
-        // "二👍三" scalar starts: 0, 3, 7, 10.
-        for offset in 0..=blocks[0].text().len() + 2 {
-            let Some((_, raw)) = step_vertical(&blocks, 0, offset, true) else {
-                continue;
-            };
-            assert!(
-                validated_offset(target, raw).is_some(),
-                "offset {offset} snapped to illegal {raw}"
-            );
-        }
-    }
-
-    #[test]
-    fn empty_blocks_participate_in_wrap_around() {
+    fn empty_blocks_participate_in_horizontal_wrap_around() {
         let mut builder = NodeStoreBuilder::new();
         let empty = builder
             .insert(
@@ -343,8 +267,6 @@ mod tests {
         let document = XiaomuDocument::new(root, builder.finish()).unwrap();
         let blocks = text_blocks(&document);
 
-        // Left at the start of the empty block reaches the end of nothing —
-        // it is already both edges; Right wraps into the next block.
         assert_eq!(step_horizontal(&blocks, 0, 0, true), Some((1, 0)));
         assert_eq!(step_horizontal(&blocks, 1, 2, false), Some((1, 1)));
         let _ = empty;

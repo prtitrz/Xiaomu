@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前阶段事实：P0 Core contract 已完成，P1 native single-block input 已完成，P2 document tree / structural edit 的功能实现与 Windows 实机 Gate 已完成。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step；Runtime session 已升级为跨 block `DocumentSelection` 并编排 split / join / list Enter / wrap / lift / indent / outdent；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 提供 multi-block 渲染、跨块导航、selection 投影、鼠标 hit-test、IME composition 与 list marker projection；宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
+当前阶段事实：P0 Core contract 已完成，P1 native single-block input 已完成，P2 document tree / structural edit 的功能实现与 Windows 实机 Gate 已完成，P3.1 visual-line geometry / soft-wrap 已完成并合入 `main`，P3.2 visual navigation / selection 正在实现与验证。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step；Runtime session 已升级为跨 block `DocumentSelection` 并编排 split / join / list Enter / wrap / lift / indent / outdent；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、wrapped geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret 与 list marker projection；宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
 
 ## Core 边界
 
@@ -356,12 +356,15 @@ input/platform_clipboard.rs
 
 document_view/
     DocumentView multi-block 容器
-    navigation.rs 纯逻辑跨块导航 / selection translation
+    navigation.rs document-order / horizontal scalar navigation helper
+    visual_navigation.rs wrapped visual-row navigation + desired_x translation
     cache_key.rs layout cache key
 
 block_view/
     ParagraphView：单 inline block 的 input / layout / paint
-    ParagraphElement：shape_line、selection/caret paint、hit-test handle
+    ParagraphElement：wrapped selection/caret paint + input handle
+    layout.rs：BlockTextLayout、soft-wrap visual rows、caret affinity、2D hit-test
+    scroll.rs：shared ScrollHandle 上的最小 scroll-to-caret 调整
 
 editor.rs
     window / key binding / EditorHooks 装配
@@ -379,11 +382,13 @@ IME composition 的 preedit 保持 frontend-local，不推进 document revision�
 
 `DocumentView` 持有共享 session，并按文档序为 inline-bearing block 挂载 `ParagraphView`。焦点跟随 `DocumentSelection` focus node 路由。
 
-跨块 Left / Right / Home / End / Up / Down 与 Shift selection 由 container 层翻译为 `SetSelection`。P2 Up / Down 使用单视觉行模型；目标 byte offset 先 clamp，再 floor 到合法 Unicode scalar boundary。x-preserving visual-line navigation 留给 P3。
+Left / Right 保持 Unicode scalar navigation，并在 soft-wrap 共享 logical offset 上先通过 `CursorAffinity` 跨越上一视觉行末尾 / 下一视觉行开头两个 caret state。Home / End 解析当前 visual row 首尾。Up / Down 读取最近一次 `BlockTextLayout` 的 wrapped geometry；`desired_x` 只保存在 `DocumentView` frontend transient state，连续纵向移动保持视觉列，越过 block 边界时在相邻 inline block 的首 / 末 visual row 上按同一 x 求最近合法 Core offset。Shift 版本只改变 selection focus，anchor 继续由 Runtime document selection 持有。
 
-鼠标点击 / 拖选使用 paint 期发布的 block bounds 注册表，先确定目标 block，再用 shaped line x hit-test 得到合法 text position。
+鼠标点击 / 拖选使用 paint 期发布的 block bounds 注册表，先确定目标 block，再用 wrapped layout 二维 hit-test 得到合法 text position；命中 soft-wrap boundary 时同时保留对应 `CursorAffinity`。
 
-选区绘制按 `DocumentSelection::ordered` 逐块投影：端点块画局部 range，中间块全选；caret 只绘制在 focus block。
+选区绘制按 `DocumentSelection::ordered` 逐块投影：端点块画局部 range，中间块全选。collapsed selection 绘制 focus caret；非 collapsed selection 虽不绘制 caret，仍使用 focus endpoint 的 wrapped caret geometry 驱动 scroll-to-caret。
+
+`DocumentView` 持有一个 GPUI `ScrollHandle` 并绑定在 document scroll viewport。每个 `ParagraphView` 共享该 handle；focused block 在 prepaint 中根据 canonical focus 或 IME virtual caret 计算 window-space caret bounds，只请求保持 focus 可见所需的最小纵向滚动。滚动写入延迟到 next frame，避免同一 prepaint / paint pass 内各 child 观察到不同 scroll offset。
 
 layout cache key = `(node, editing epoch, rounded width)`；composition 期因虚拟文本不经过 document epoch 而绕过缓存。
 
@@ -403,7 +408,7 @@ list marker 只存在于 frontend projection，不进入 canonical text、TextOf
 
 ### Clipboard 与键绑定
 
-GPUI 已绑定 Left / Right / Home / End、Shift selection、Backspace / Delete、SelectAll、Undo / Redo、Copy / Cut / Paste、Bold / Italic / Code / Underline / Strike，以及结构编辑 Enter / Tab / Shift-Tab。macOS / Windows 使用平台对应组合键。
+GPUI 已绑定 Left / Right / visual Home / End / Up / Down、Shift visual selection、Backspace / Delete、SelectAll、Undo / Redo、Copy / Cut / Paste、Bold / Italic / Code / Underline / Strike，以及结构编辑 Enter / Tab / Shift-Tab。macOS / Windows 使用平台对应组合键。
 
 ### Host hooks
 
