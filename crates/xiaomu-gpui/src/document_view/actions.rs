@@ -341,24 +341,24 @@ impl DocumentView {
         let Some(content) = PlatformClipboard::new(&*cx).read_content() else {
             return;
         };
-        // The transport can already recognize Xiaomu structured metadata.
-        // Until the PasteSlice planner lands, both branches deliberately use
-        // the same plain fallback so this commit changes transport only.
-        let text = match content {
-            PlatformClipboardContent::Structured(slice) => slice.plain_text().to_owned(),
-            PlatformClipboardContent::Text(text) => text,
-        };
-        // Line breaks cannot exist inside inline text in the plain fallback;
-        // pasted breaks become spaces. Empty text must not clear selection.
-        let text = normalize_paste_text(&text);
-        if !text.is_empty() {
-            self.apply_intent(
-                EditIntent::InsertText {
-                    text: text.to_owned(),
-                },
-                window,
-                cx,
-            );
+        match content {
+            PlatformClipboardContent::Structured(slice) => {
+                self.apply_intent(EditIntent::PasteSlice { slice }, window, cx);
+            }
+            PlatformClipboardContent::Text(text) => {
+                // Plain platform text has no document structure. Line breaks
+                // collapse to spaces for the current single-block fallback.
+                let text = normalize_paste_text(&text);
+                if !text.is_empty() {
+                    self.apply_intent(
+                        EditIntent::InsertText {
+                            text: text.to_owned(),
+                        },
+                        window,
+                        cx,
+                    );
+                }
+            }
         }
     }
 
