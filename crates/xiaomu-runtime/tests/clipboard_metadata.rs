@@ -13,7 +13,10 @@ use xiaomu_runtime::session::{DocumentSelection, DocumentSession};
 #[test]
 fn metadata_round_trip_preserves_kind_attrs_runs_and_marks() {
     let mut attrs = BTreeMap::new();
-    attrs.insert("level-note".to_owned(), AttrValue::String("保留".to_owned()));
+    attrs.insert(
+        "level-note".to_owned(),
+        AttrValue::String("保留".to_owned()),
+    );
     attrs.insert("flag".to_owned(), AttrValue::Bool(true));
     let attrs = NodeAttrs::new(attrs).unwrap();
 
@@ -47,7 +50,12 @@ fn metadata_round_trip_preserves_kind_attrs_runs_and_marks() {
         )
         .unwrap();
     let document = XiaomuDocument::new(root, builder.finish()).unwrap();
-    let inline = document.node(heading).unwrap().content().as_inline().unwrap();
+    let inline = document
+        .node(heading)
+        .unwrap()
+        .content()
+        .as_inline()
+        .unwrap();
     let selection = DocumentSelection::new(
         TextPoint::new(
             heading,
@@ -97,7 +105,12 @@ fn foreign_stale_and_unknown_metadata_fall_back_instead_of_parsing() {
         )
         .unwrap();
     let document = XiaomuDocument::new(root, builder.finish()).unwrap();
-    let inline = document.node(paragraph).unwrap().content().as_inline().unwrap();
+    let inline = document
+        .node(paragraph)
+        .unwrap()
+        .content()
+        .as_inline()
+        .unwrap();
     let selection = DocumentSelection::new(
         TextPoint::new(
             paragraph,
