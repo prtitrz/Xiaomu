@@ -30,6 +30,18 @@ pub(super) fn resolve_selection(
             };
             collapsed_caret(document, edit.node(), raw, affinity_of(before))
         }
+        SelectionUpdate::CaretAtLastInsertedOffset { offset } => {
+            let inserted = changes
+                .steps()
+                .iter()
+                .rev()
+                .find_map(|step| match step {
+                    StepMap::NodeInserted { inserted, .. } => Some(*inserted),
+                    _ => None,
+                })
+                .ok_or(SessionError::SelectionInvalid)?;
+            collapsed_caret(document, inserted, *offset, affinity_of(before))
+        }
         SelectionUpdate::CaretAtJoinPoint => {
             let edit = plan.primary_edit().ok_or(SessionError::SelectionInvalid)?;
             collapsed_caret(
