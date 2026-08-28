@@ -30,6 +30,7 @@ use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 use xiaomu_runtime::persistence::DocumentPersistence;
 
 use crate::block_view::{BlockBoundsRegistry, ParagraphView, SharedSession};
+use visual_navigation::NavStep;
 
 /// A multi-block editor view over one shared session.
 pub struct DocumentView {
@@ -52,7 +53,7 @@ pub struct DocumentView {
 }
 
 impl DocumentView {
-    /// Creates the document view over a shared session.
+    /// Creates the document view over one shared session.
     #[must_use]
     pub fn new(session: SharedSession) -> Self {
         Self {
