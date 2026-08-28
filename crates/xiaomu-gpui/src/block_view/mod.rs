@@ -14,6 +14,7 @@ mod element;
 mod ime;
 mod input_handler;
 mod layout;
+mod scroll;
 #[cfg(test)]
 mod tests;
 
@@ -21,8 +22,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, Context, FocusHandle, Focusable, Pixels, Point, Subscription, Window, actions,
-    div, point, prelude::*,
+    App, Bounds, Context, FocusHandle, Focusable, Pixels, ScrollHandle, Subscription, Window,
+    actions, div, prelude::*,
 };
 
 use xiaomu_core::document::{InlineContent, NodeId};
@@ -212,6 +213,7 @@ pub struct ParagraphView {
     /// Render generation shared with the owning document view.
     pub(super) epoch: Rc<std::cell::Cell<u64>>,
     pub(crate) bounds_registry: BlockBoundsRegistry,
+    pub(super) scroll_handle: Option<ScrollHandle>,
     composition: Option<CompositionState>,
     focus_out_subscription: Option<Subscription>,
 }
@@ -238,9 +240,15 @@ impl ParagraphView {
             cache_key: None,
             epoch,
             bounds_registry,
+            scroll_handle: None,
             composition: None,
             focus_out_subscription: None,
         }
+    }
+
+    /// Attaches the owning document viewport's scroll handle.
+    pub(crate) fn attach_scroll_handle(&mut self, scroll_handle: ScrollHandle) {
+        self.scroll_handle = Some(scroll_handle);
     }
 
     /// Returns the shared session rendered by this view.
@@ -309,17 +317,6 @@ impl ParagraphView {
         cx.notify();
     }
 
-    /// Maps a window-space point inside this block's last painted bounds to
-    /// the closest raw byte index in its wrapped layout.
-    pub(crate) fn hit_test_position(&self, position: Point<Pixels>) -> Option<usize> {
-        let bounds = self.last_bounds?;
-        let layout = self.last_layout.as_ref()?;
-        Some(layout.closest_index_for_position(point(
-            position.x - bounds.left(),
-            position.y - bounds.top(),
-        )))
-    }
-
     /// Projects the document selection onto this block's displayed text.
     ///
     /// `order` lists the document's inline-bearing nodes in document order;
@@ -372,19 +369,6 @@ impl ParagraphView {
                 start,
                 end: end.min(text_len),
             }
-        }
-    }
-
-    /// Displayed-text byte offset of the selection focus when it lives in
-    /// this block.
-    #[must_use]
-    pub(crate) fn focus_byte(&self) -> Option<usize> {
-        let session = self.session.borrow();
-        match session.selection().focus() {
-            DocumentPosition::Text(point) if point.node_id() == self.node => {
-                Some(point.offset().as_usize())
-            }
-            _ => None,
         }
     }
 
