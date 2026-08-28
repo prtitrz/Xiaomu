@@ -216,8 +216,7 @@ fn slice_inline(
             continue;
         }
 
-        let text = &run.text().as_str()
-            [overlap_start - run_start..overlap_end - run_start];
+        let text = &run.text().as_str()[overlap_start - run_start..overlap_end - run_start];
         pieces.push(TextRun::new(text, run.marks().clone()).map_err(SessionError::Core)?);
     }
 
@@ -289,10 +288,7 @@ mod tests {
                 NodeKind::Heading(xiaomu_core::document::HeadingLevel::new(2).unwrap()),
                 NodeAttrs::empty(),
                 NodeContent::Inline(
-                    InlineContent::new([
-                        TextRun::new("cd", MarkSet::empty()).unwrap(),
-                    ])
-                    .unwrap(),
+                    InlineContent::new([TextRun::new("cd", MarkSet::empty()).unwrap()]).unwrap(),
                 ),
             )
             .unwrap();
@@ -302,7 +298,7 @@ mod tests {
                 NodeAttrs::empty(),
                 NodeContent::Inline(
                     InlineContent::new([
-                        TextRun::new("尾", MarkSet::new([Mark::Italic]).unwrap()).unwrap(),
+                        TextRun::new("尾", MarkSet::new([Mark::Italic]).unwrap()).unwrap()
                     ])
                     .unwrap(),
                 ),
@@ -338,17 +334,8 @@ mod tests {
     }
 
     fn point(document: &XiaomuDocument, node: NodeId, raw: usize) -> TextPoint {
-        let inline = document
-            .node(node)
-            .unwrap()
-            .content()
-            .as_inline()
-            .unwrap();
-        TextPoint::new(
-            node,
-            inline.offset_at(raw).unwrap(),
-            CursorAffinity::Before,
-        )
+        let inline = document.node(node).unwrap().content().as_inline().unwrap();
+        TextPoint::new(node, inline.offset_at(raw).unwrap(), CursorAffinity::Before)
     }
 
     #[test]
@@ -370,7 +357,11 @@ mod tests {
         let first = slice.blocks()[0].inline();
         assert_eq!(concatenated(first), "b中");
         assert_eq!(first.runs().len(), 2);
-        assert!(first.runs()[0].marks().contains(xiaomu_core::document::MarkKind::Bold));
+        assert!(
+            first.runs()[0]
+                .marks()
+                .contains(xiaomu_core::document::MarkKind::Bold)
+        );
         assert!(first.runs()[1].marks().is_empty());
     }
 
@@ -386,9 +377,11 @@ mod tests {
             .unwrap();
         assert_eq!(slice.plain_text(), "b中\ncd\n尾");
         assert_eq!(slice.blocks().len(), 3);
-        assert!(slice.blocks()[2].inline().runs()[0]
-            .marks()
-            .contains(xiaomu_core::document::MarkKind::Italic));
+        assert!(
+            slice.blocks()[2].inline().runs()[0]
+                .marks()
+                .contains(xiaomu_core::document::MarkKind::Italic)
+        );
     }
 
     #[test]
