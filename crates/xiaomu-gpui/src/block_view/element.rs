@@ -183,18 +183,25 @@ impl Element for ParagraphElement {
             _ => Vec::new(),
         };
 
-        let cursor = if focused && selection.is_empty() {
+        let caret_bounds = if focused {
             caret.and_then(|(byte, affinity)| {
                 layout.position_for_caret(byte, affinity).map(|position| {
-                    fill(
-                        Bounds::new(
-                            point(bounds.left() + position.x, bounds.top() + position.y),
-                            size(px(2.0), layout.line_height()),
-                        ),
-                        gpui::blue(),
+                    Bounds::new(
+                        point(bounds.left() + position.x, bounds.top() + position.y),
+                        size(px(2.0), layout.line_height()),
                     )
                 })
             })
+        } else {
+            None
+        };
+
+        if let Some(caret_bounds) = caret_bounds.as_ref() {
+            view.keep_caret_visible(caret_bounds, window);
+        }
+
+        let cursor = if selection.is_empty() {
+            caret_bounds.map(|bounds| fill(bounds, gpui::blue()))
         } else {
             None
         };
