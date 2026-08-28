@@ -302,6 +302,82 @@ impl BlockTextLayout {
     }
 }
 
+impl super::ParagraphView {
+    /// X coordinate of this block's logical caret in the last painted layout.
+    pub(crate) fn visual_caret_x(
+        &self,
+        index: usize,
+        affinity: CursorAffinity,
+    ) -> Option<Pixels> {
+        self.last_layout.as_ref()?.caret_x(index, affinity)
+    }
+
+    /// Moves to an adjacent visual row inside this block.
+    pub(crate) fn visual_vertical_target(
+        &self,
+        index: usize,
+        affinity: CursorAffinity,
+        desired_x: Pixels,
+        down: bool,
+    ) -> Option<(usize, CursorAffinity)> {
+        self.last_layout
+            .as_ref()?
+            .vertical_target(index, affinity, desired_x, down)
+    }
+
+    /// Resolves desired x on the first/last visual row of this block.
+    pub(crate) fn visual_edge_row_target(
+        &self,
+        desired_x: Pixels,
+        last: bool,
+    ) -> Option<(usize, CursorAffinity)> {
+        self.last_layout.as_ref()?.edge_row_target(desired_x, last)
+    }
+
+    /// Resolves Home/End against the current visual row.
+    pub(crate) fn visual_line_edge_target(
+        &self,
+        index: usize,
+        affinity: CursorAffinity,
+        to_end: bool,
+    ) -> Option<(usize, CursorAffinity)> {
+        self.last_layout
+            .as_ref()?
+            .visual_line_edge(index, affinity, to_end)
+    }
+
+    /// Whether an offset has both upstream and downstream wrapped positions.
+    pub(crate) fn visual_is_soft_wrap_boundary(&self, index: usize) -> bool {
+        self.last_layout
+            .as_ref()
+            .is_some_and(|layout| layout.is_soft_wrap_boundary(index))
+    }
+
+    /// Hit-tests a window-space point while preserving wrap-boundary affinity.
+    pub(crate) fn hit_test_caret_position(
+        &self,
+        position: Point<Pixels>,
+    ) -> Option<(usize, CursorAffinity)> {
+        let bounds = self.last_bounds?;
+        let layout = self.last_layout.as_ref()?;
+        Some(layout.caret_for_position(point(
+            position.x - bounds.left(),
+            position.y - bounds.top(),
+        )))
+    }
+
+    /// Current text focus as `(byte, affinity)` when it belongs to this block.
+    pub(crate) fn focus_caret(&self) -> Option<(usize, CursorAffinity)> {
+        let session = self.session.borrow();
+        match session.selection().focus() {
+            xiaomu_runtime::session::DocumentPosition::Text(point) if point.node_id() == self.node => {
+                Some((point.offset().as_usize(), point.affinity()))
+            }
+            _ => None,
+        }
+    }
+}
+
 fn row_for_caret(
     rows: &[VisualRow],
     index: usize,
