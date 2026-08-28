@@ -173,10 +173,7 @@ fn inline_blocks(document: &XiaomuDocument) -> Vec<NodeId> {
 
 /// Finds highest container roots that become empty when `removed` leaves are
 /// detached from their original positions.
-fn empty_container_roots(
-    document: &XiaomuDocument,
-    removed: &BTreeSet<NodeId>,
-) -> Vec<NodeId> {
+fn empty_container_roots(document: &XiaomuDocument, removed: &BTreeSet<NodeId>) -> Vec<NodeId> {
     fn analyze(
         document: &XiaomuDocument,
         id: NodeId,
@@ -288,10 +285,7 @@ mod tests {
             .insert(
                 NodeKind::Paragraph,
                 NodeAttrs::empty(),
-                NodeContent::Inline(inline(
-                    "xyz",
-                    MarkSet::new([Mark::Italic]).unwrap(),
-                )),
+                NodeContent::Inline(inline("xyz", MarkSet::new([Mark::Italic]).unwrap())),
             )
             .unwrap();
         let root = builder
@@ -433,10 +427,8 @@ mod tests {
             )
             .unwrap();
         let document = XiaomuDocument::new(root, builder.finish()).unwrap();
-        let selection = DocumentSelection::new(
-            point(&document, first, 3),
-            point(&document, second, 0),
-        );
+        let selection =
+            DocumentSelection::new(point(&document, first, 3), point(&document, second, 0));
         let PlannedAction::Commit(plan) = plan_delete_selection(&document, selection).unwrap()
         else {
             panic!("boundary delete must commit");
