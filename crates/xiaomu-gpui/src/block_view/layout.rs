@@ -16,7 +16,7 @@ use gpui::{Bounds, Pixels, Point, Size, WrappedLine, point, px, size};
 /// ready avoids rebuilding the geometry layer when CodeBlock gains newline
 /// semantics later in P3.
 #[derive(Clone, Debug)]
-pub(super) struct BlockTextLayout {
+pub(crate) struct BlockTextLayout {
     lines: Vec<WrappedLine>,
     line_height: Pixels,
     size: Size<Pixels>,
