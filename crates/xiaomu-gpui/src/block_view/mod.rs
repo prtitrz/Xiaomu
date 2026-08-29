@@ -26,10 +26,9 @@ use gpui::{
     actions, div, prelude::*,
 };
 
-use xiaomu_core::document::{InlineContent, NodeId, NodeKind};
+use xiaomu_core::document::{InlineContent, NodeId};
 use xiaomu_runtime::session::{DocumentPosition, DocumentSession, EditIntent};
 
-use crate::accessibility::{element_id, heading_level, platform_role};
 use crate::document_view::cache_key::LayoutCacheKey;
 use crate::input::composition::CompositionState;
 use layout::BlockTextLayout;
@@ -398,15 +397,6 @@ impl ParagraphView {
             .map(|state| (state.base_range(), state.preedit()));
         project_display_content(&inline, composition)
     }
-
-    fn node_kind(&self) -> NodeKind {
-        self.session
-            .borrow()
-            .document()
-            .node(self.node)
-            .map(|node| node.kind().clone())
-            .unwrap_or(NodeKind::Paragraph)
-    }
 }
 
 impl Focusable for ParagraphView {
@@ -429,20 +419,11 @@ impl Render for ParagraphView {
                 );
         }
 
-        let kind = self.node_kind();
-        let text = self.canonical_text();
-        let level = heading_level(&kind);
-        let mut element = div()
-            .id(element_id(self.node))
-            .role(platform_role(&kind))
-            .aria_value(text)
+        div()
             .key_context("XiaomuParagraph")
             .track_focus(&self.focus_handle(cx))
             .w_full()
-            .cursor(gpui::CursorStyle::IBeam);
-        if let Some(level) = level {
-            element = element.aria_level(level);
-        }
-        element.child(ParagraphElement { view: cx.entity() })
+            .cursor(gpui::CursorStyle::IBeam)
+            .child(ParagraphElement { view: cx.entity() })
     }
 }
