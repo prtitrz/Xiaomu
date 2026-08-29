@@ -363,15 +363,16 @@ impl DocumentSession {
                         _ => None,
                     });
             }
-            if let Some(inserted) = applied
-                .changes()
-                .steps()
-                .iter()
-                .rev()
-                .find_map(|step| match step {
-                    StepMap::NodeInserted { inserted, .. } => Some(*inserted),
-                    _ => None,
-                })
+            if let Some(inserted) =
+                applied
+                    .changes()
+                    .steps()
+                    .iter()
+                    .rev()
+                    .find_map(|step| match step {
+                        StepMap::NodeInserted { inserted, .. } => Some(*inserted),
+                        _ => None,
+                    })
             {
                 last_inserted = Some(inserted);
             }
@@ -400,12 +401,7 @@ impl DocumentSession {
             }
             SelectionUpdate::CaretAtLastInsertedOffset { offset } => {
                 let inserted = last_inserted.ok_or(SessionError::SelectionInvalid)?;
-                collapsed_caret(
-                    &current,
-                    inserted,
-                    offset,
-                    affinity_of(before_selection),
-                )?
+                collapsed_caret(&current, inserted, offset, affinity_of(before_selection))?
             }
             _ => return Err(SessionError::SelectionInvalid),
         };
