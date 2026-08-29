@@ -227,3 +227,144 @@ pub fn run_editor_instance(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+    use xiaomu_core::document::{
+        InlineContent, MarkSet, NodeAttrs, NodeContent, NodeStoreBuilder, TextRun,
+    };
+    use xiaomu_core::selection::{CursorAffinity, TextPoint};
+    use xiaomu_runtime::session::{EditIntent, SessionOutcome};
+
+    struct CountListener(Rc<Cell<u32>>);
+
+    impl DocumentChangeListener for CountListener {
+        fn document_changed(
+            &mut self,
+            _document: &XiaomuDocument,
+            _selection: DocumentSelection,
+        ) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    fn two_paragraph_document(
+        first: &str,
+        second: &str,
+    ) -> (XiaomuDocument, [NodeId; 2]) {
+        let mut builder = NodeStoreBuilder::new();
+        let mut leaf = |text: &str| {
+            builder
+                .insert(
+                    xiaomu_core::document::NodeKind::Paragraph,
+                    NodeAttrs::empty(),
+                    NodeContent::Inline(
+                        InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()]).unwrap(),
+                    ),
+                )
+                .unwrap()
+        };
+        let first_id = leaf(first);
+        let second_id = leaf(second);
+        let root = builder
+            .insert(
+                xiaomu_core::document::NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([first_id, second_id]),
+            )
+            .unwrap();
+        (
+            XiaomuDocument::new(root, builder.finish()).unwrap(),
+            [first_id, second_id],
+        )
+    }
+
+    fn point(document: &XiaomuDocument, node: NodeId, raw: usize) -> TextPoint {
+        let inline = document.node(node).unwrap().content().as_inline().unwrap();
+        TextPoint::new(
+            node,
+            inline.offset_at(raw).unwrap(),
+            CursorAffinity::Before,
+        )
+    }
+
+    fn text(document: &XiaomuDocument, node: NodeId) -> String {
+        document
+            .node(node)
+            .unwrap()
+            .content()
+            .as_inline()
+            .unwrap()
+            .runs()
+            .iter()
+            .map(|run| run.text().as_str())
+            .collect()
+    }
+
+    #[test]
+    fn editor_instance_restores_cross_block_selection_without_frontend_state() {
+        let (document, [first, second]) = two_paragraph_document("alpha", "beta");
+        let selection = DocumentSelection::new(
+            xiaomu_runtime::session::DocumentPosition::Text(point(&document, first, 2)),
+            xiaomu_runtime::session::DocumentPosition::Text(point(&document, second, 3)),
+        );
+
+        let instance = EditorInstance::new(document, selection, EditorHooks::default()).unwrap();
+        assert_eq!(instance.session().borrow().selection(), selection);
+    }
+
+    #[test]
+    fn two_editor_instances_keep_document_selection_history_and_listeners_isolated() {
+        let (document_a, [a_first, _]) = two_paragraph_document("a", "tail-a");
+        let selection_a = DocumentSelection::collapsed(point(&document_a, a_first, 1));
+        let (document_b, [_, b_second]) = two_paragraph_document("head-b", "b");
+        let selection_b = DocumentSelection::collapsed(point(&document_b, b_second, 0));
+        let a_changes = Rc::new(Cell::new(0));
+        let b_changes = Rc::new(Cell::new(0));
+
+        let instance_a = EditorInstance::new(
+            document_a,
+            selection_a,
+            EditorHooks {
+                persistence: None,
+                listener: Some(Box::new(CountListener(a_changes.clone()))),
+            },
+        )
+        .unwrap();
+        let instance_b = EditorInstance::new(
+            document_b,
+            selection_b,
+            EditorHooks {
+                persistence: None,
+                listener: Some(Box::new(CountListener(b_changes.clone()))),
+            },
+        )
+        .unwrap();
+
+        let outcome = instance_a
+            .session()
+            .borrow_mut()
+            .apply_intent(&EditIntent::InsertText {
+                text: "!".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(outcome, SessionOutcome::DocumentChanged);
+
+        assert_eq!(
+            text(instance_a.session().borrow().document(), a_first),
+            "a!"
+        );
+        assert_eq!(
+            text(instance_b.session().borrow().document(), b_second),
+            "b"
+        );
+        assert_eq!(instance_b.session().borrow().selection(), selection_b);
+        assert_eq!(instance_a.session().borrow().history_depths(), (1, 0));
+        assert_eq!(instance_b.session().borrow().history_depths(), (0, 0));
+        assert_eq!(a_changes.get(), 1);
+        assert_eq!(b_changes.get(), 0);
+    }
+}
