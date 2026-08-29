@@ -228,6 +228,35 @@ mod tests {
     }
 
     #[test]
+    fn hard_newline_has_distinct_before_and_after_caret_boundaries() {
+        let mut builder = NodeStoreBuilder::new();
+        let code = builder
+            .insert(
+                xiaomu_core::document::NodeKind::CodeBlock,
+                NodeAttrs::empty(),
+                NodeContent::Inline(
+                    InlineContent::new([TextRun::new("a\nb", MarkSet::empty()).unwrap()]).unwrap(),
+                ),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                xiaomu_core::document::NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([code]),
+            )
+            .unwrap();
+        let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+        let blocks = text_blocks(&document);
+
+        assert_eq!(blocks[0].text(), "a\nb");
+        assert!(validated_offset(&blocks[0], 1).is_some());
+        assert!(validated_offset(&blocks[0], 2).is_some());
+        assert_eq!(step_horizontal(&blocks, 0, 1, true), Some((0, 2)));
+        assert_eq!(step_horizontal(&blocks, 0, 2, false), Some((0, 1)));
+    }
+
+    #[test]
     fn line_edges_reach_both_ends_as_layout_fallback() {
         let document = sample_document();
         let blocks = text_blocks(&document);
