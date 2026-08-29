@@ -26,9 +26,10 @@ use gpui::{
     actions, div, prelude::*,
 };
 
-use xiaomu_core::document::{InlineContent, NodeId};
+use xiaomu_core::document::{InlineContent, NodeId, NodeKind};
 use xiaomu_runtime::session::{DocumentPosition, DocumentSession, EditIntent};
 
+use crate::accessibility::{platform_heading_level, platform_role_for_kind};
 use crate::document_view::cache_key::LayoutCacheKey;
 use crate::input::composition::CompositionState;
 use layout::BlockTextLayout;
@@ -290,6 +291,15 @@ impl ParagraphView {
             .cloned()
     }
 
+    fn node_kind(&self) -> NodeKind {
+        self.session
+            .borrow()
+            .document()
+            .node(self.node)
+            .map(|node| node.kind().clone())
+            .unwrap_or(NodeKind::Paragraph)
+    }
+
     /// Returns the canonical concatenated text of the inline node.
     pub(crate) fn canonical_text(&self) -> String {
         self.inline()
@@ -419,11 +429,19 @@ impl Render for ParagraphView {
                 );
         }
 
-        div()
+        let kind = self.node_kind();
+        let text = self.display_content().0;
+        let mut root = div()
+            .id(format!("xiaomu-block-{:?}", cx.entity_id()))
+            .role(platform_role_for_kind(&kind))
+            .aria_label(text)
             .key_context("XiaomuParagraph")
             .track_focus(&self.focus_handle(cx))
             .w_full()
-            .cursor(gpui::CursorStyle::IBeam)
-            .child(ParagraphElement { view: cx.entity() })
+            .cursor(gpui::CursorStyle::IBeam);
+        if let Some(level) = platform_heading_level(&kind) {
+            root = root.aria_level(level);
+        }
+        root.child(ParagraphElement { view: cx.entity() })
     }
 }
