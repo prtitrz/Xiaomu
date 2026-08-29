@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gpui::TestAppContext;
+use gpui::{AppContext as _, TestAppContext};
 use xiaomu_core::document::{
     InlineContent, MarkSet, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStoreBuilder, TextRun,
     XiaomuDocument,
