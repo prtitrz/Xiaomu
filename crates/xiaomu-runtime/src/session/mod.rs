@@ -18,6 +18,7 @@ mod intent;
 mod listener;
 mod outcome;
 mod paste;
+mod paste_hierarchy;
 mod resolve;
 mod selection;
 mod split;
@@ -344,6 +345,7 @@ impl DocumentSession {
         let mut current = self.document.clone();
         let mut inverse_groups: Vec<Transaction> = Vec::new();
         let mut split_tail = None;
+        let mut last_inserted = None;
 
         for build in staged.stages {
             let transaction = build(&current)?;
@@ -360,6 +362,18 @@ impl DocumentSession {
                         StepMap::NodeSplit { inserted, .. } => Some(*inserted),
                         _ => None,
                     });
+            }
+            if let Some(inserted) = applied
+                .changes()
+                .steps()
+                .iter()
+                .rev()
+                .find_map(|step| match step {
+                    StepMap::NodeInserted { inserted, .. } => Some(*inserted),
+                    _ => None,
+                })
+            {
+                last_inserted = Some(inserted);
             }
             inverse_groups.push(applied.inverse().clone());
             current = applied.into_document();
@@ -383,6 +397,15 @@ impl DocumentSession {
             SelectionUpdate::CaretAtSplitTail => {
                 let inserted = split_tail.ok_or(SessionError::SelectionInvalid)?;
                 collapsed_caret(&current, inserted, 0, affinity_of(before_selection))?
+            }
+            SelectionUpdate::CaretAtLastInsertedOffset { offset } => {
+                let inserted = last_inserted.ok_or(SessionError::SelectionInvalid)?;
+                collapsed_caret(
+                    &current,
+                    inserted,
+                    offset,
+                    affinity_of(before_selection),
+                )?
             }
             _ => return Err(SessionError::SelectionInvalid),
         };
