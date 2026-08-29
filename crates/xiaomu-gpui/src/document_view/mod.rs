@@ -378,6 +378,7 @@ impl Render for DocumentView {
             .on_action(cx.listener(Self::select_end))
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::enter))
+            .on_action(cx.listener(Self::hard_break))
             .on_action(cx.listener(Self::tab_indent))
             .on_action(cx.listener(Self::shift_tab_indent))
             .on_action(cx.listener(Self::undo_entry))
