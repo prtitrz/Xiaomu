@@ -351,7 +351,7 @@ impl DocumentView {
                 let text = normalize_paste_text(&text);
                 if !text.is_empty() {
                     self.apply_intent(
-                        EditIntent::InsertText {
+                        EditIntent::PasteText {
                             text: text.to_owned(),
                         },
                         window,
