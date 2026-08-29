@@ -1,11 +1,9 @@
 //! Structured clipboard paste planning.
 //!
-//! A Xiaomu clipboard slice is compiled into ordinary Core transaction steps.
-//! The first clipboard block merges into the target block at the selection
-//! seam. With multiple source blocks, later blocks become fresh siblings and
-//! the target block's unselected suffix moves to the final inserted block.
-//! Source inline marks are restored explicitly so `ReplaceText` inheritance
-//! cannot leak host formatting into pasted content.
+//! Flat leaf-only slices merge through the target seam in one Core
+//! transaction. Slices that retain container hierarchy are delegated to the
+//! staged hierarchy planner so list/quote semantics survive reconstruction
+//! while the whole paste remains one history entry.
 
 use xiaomu_core::document::{
     InlineContent, MarkKind, NodeContent, NodeId, TextRun, XiaomuDocument,
@@ -13,10 +11,11 @@ use xiaomu_core::document::{
 use xiaomu_core::text::{TextBuffer, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionStep};
 
-use crate::clipboard::{ClipboardBlock, ClipboardSlice};
+use crate::clipboard::{ClipboardBlock, ClipboardNodeContent, ClipboardSlice};
 
 use super::cross_block;
 use super::intent::{EditPlan, PlannedAction, PrimaryEdit, SelectionUpdate, concatenated};
+use super::paste_hierarchy;
 use super::structure::{children_of, user_transaction};
 use super::{DocumentPosition, DocumentSelection, SessionError};
 
@@ -41,6 +40,14 @@ pub(crate) fn plan_paste_slice(
         .map_err(|_| SessionError::SelectionInvalid)?;
     if slice.blocks().is_empty() {
         return Ok(PlannedAction::NoChange);
+    }
+
+    if slice
+        .roots()
+        .iter()
+        .any(|root| matches!(root.content(), ClipboardNodeContent::Children(_)))
+    {
+        return paste_hierarchy::plan_paste_hierarchy(document, selection, slice);
     }
 
     let mut transaction = user_transaction();
