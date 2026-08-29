@@ -27,16 +27,11 @@
 //! path, so it is treated as a cancel: real IME results are never empty, and
 //! an empty insertion over the base range would wrongly delete a selection.
 
-use xiaomu_core::selection::TextSelection;
-
 use super::utf16;
 
 /// Transient IME composition state for one inline node.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompositionState {
-    /// Canonical selection captured before composition began; restored on
-    /// cancel.
-    base_selection: TextSelection,
     /// Half-open canonical byte range the committed text will replace.
     base_range: core::ops::Range<usize>,
     /// Current marked text.
@@ -51,8 +46,8 @@ pub(crate) struct CompositionState {
 pub(crate) enum PreeditUpdate {
     /// Keep composing with the new preedit.
     Continue,
-    /// The composition ended without committing (empty marked text);
-    /// the view must restore the base selection.
+    /// The composition ended without committing (empty marked text); the
+    /// frontend drops its transient projection.
     Cancelled,
 }
 
@@ -78,20 +73,18 @@ fn utf16_len(text: &str) -> usize {
 }
 
 impl CompositionState {
-    /// Begins composition: captures the base selection and installs the
-    /// first preedit over `base_range` (canonical byte offsets).
+    /// Begins composition and installs the first preedit over `base_range`
+    /// (canonical byte offsets).
     ///
     /// `preedit_selected_utf16` is the platform-provided selection inside
     /// the preedit; `None` collapses to the end of the preedit.
     pub(crate) fn begin(
-        base_selection: TextSelection,
         base_range: core::ops::Range<usize>,
         preedit: &str,
         preedit_selected_utf16: Option<core::ops::Range<usize>>,
     ) -> Self {
         Self::apply_update(
             Self {
-                base_selection,
                 base_range,
                 preedit: String::new(),
                 preedit_selected_utf16: 0..0,
@@ -124,12 +117,6 @@ impl CompositionState {
         state
     }
 
-    /// Returns the canonical selection to restore when the composition ends
-    /// without committing.
-    pub(crate) const fn base_selection(&self) -> &TextSelection {
-        &self.base_selection
-    }
-
     /// Returns the canonical half-open byte range the commit replaces.
     #[must_use]
     pub(crate) fn base_range(&self) -> core::ops::Range<usize> {
@@ -143,7 +130,7 @@ impl CompositionState {
     }
 
     /// Builds the virtual projection: canonical text with the preedit
-    // spliced over the base range.
+    /// spliced over the base range.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn project(&self, canonical: &str) -> String {
@@ -184,8 +171,7 @@ pub(crate) enum CompositionEnd {
     /// The platform committed `text`; the view inserts it over the base
     /// range as one undo unit.
     Committed(String),
-    /// The composition ended without text; the view restores the base
-    /// selection.
+    /// The composition ended without text; the frontend drops the preedit.
     Cancelled,
 }
 
@@ -204,41 +190,17 @@ pub(crate) fn resolve_commit_signal(text: &str) -> CompositionEnd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xiaomu_core::selection::{CursorAffinity, TextPoint};
-    use xiaomu_core::text::TextBuffer;
 
     // Canonical fixture: "你好world" (你=0..3 好=3..6 w=6..7 ... d=10..11).
     const CANONICAL: &str = "你好world";
 
-    fn offset(raw: usize) -> xiaomu_core::text::TextOffset {
-        const SCRATCH: &str = "00000000000000000000000000000000000000";
-        TextBuffer::from(SCRATCH)
-            .offset_at(raw)
-            .expect("scratch covers test offsets")
-    }
-
-    fn selection(at: usize) -> TextSelection {
-        // NodeId is opaque across crates; allocate one deterministically.
-        let mut builder = xiaomu_core::document::NodeStoreBuilder::new();
-        let node = builder
-            .insert(
-                xiaomu_core::document::NodeKind::Paragraph,
-                xiaomu_core::document::NodeAttrs::empty(),
-                xiaomu_core::document::NodeContent::empty_inline(),
-            )
-            .expect("fixture node always inserts");
-        let point = |raw| TextPoint::new(node, offset(raw), CursorAffinity::Before);
-        TextSelection::collapsed(point(at))
-    }
-
     fn state_with_base(start: usize, end: usize) -> CompositionState {
-        CompositionState::begin(selection(start), start..end, "", None)
+        CompositionState::begin(start..end, "", None)
     }
 
     #[test]
     fn begin_captures_base_and_installs_preedit() {
         let state = CompositionState::begin(
-            selection(6),
             6..6,
             "nihao",
             Some(2..3), // caret inside pinyin, like Microsoft Pinyin
@@ -259,7 +221,7 @@ mod tests {
         // Continuous composition: candidates narrow the pinyin.
         let state = state.update("nihao", None);
         assert_eq!(state.project(CANONICAL), "你好nihaoworld");
-        assert_eq!(state.base_selection(), &selection(6));
+        assert_eq!(state.base_range(), 6..6);
     }
 
     #[test]
@@ -274,7 +236,7 @@ mod tests {
     #[test]
     fn projection_over_a_non_collapsed_base_replaces_the_range() {
         // Base covers "你好" [0, 6): preedit splices over the whole run.
-        let state = CompositionState::begin(selection(0), 0..6, "ABC", None);
+        let state = CompositionState::begin(0..6, "ABC", None);
         assert_eq!(state.project(CANONICAL), "ABCworld");
         assert_eq!(state.marked_range_virtual_utf16(CANONICAL), 0..3);
     }
