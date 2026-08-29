@@ -188,7 +188,27 @@ impl DocumentSession {
                 self.stored_marks.as_ref(),
                 HistoryPolicy::Typing,
             )?,
-            EditIntent::CommitComposition { text } => {
+            EditIntent::CommitComposition { range, text } => {
+                self.history.break_group();
+                inline
+                    .validate_offset(range.start())
+                    .map_err(SessionError::Core)?;
+                inline
+                    .validate_offset(range.end())
+                    .map_err(SessionError::Core)?;
+                let ime_selection = TextSelection::new(
+                    TextPoint::new(focus.node_id(), range.start(), focus.affinity()),
+                    TextPoint::new(focus.node_id(), range.end(), focus.affinity()),
+                );
+                intent::plan_insert_text(
+                    &inline,
+                    ime_selection,
+                    text,
+                    self.stored_marks.as_ref(),
+                    HistoryPolicy::Isolated,
+                )?
+            }
+            EditIntent::PasteText { text } => {
                 self.history.break_group();
                 intent::plan_insert_text(
                     &inline,
@@ -276,6 +296,7 @@ impl DocumentSession {
             }
             EditIntent::MoveCaret { .. }
             | EditIntent::PlaceCaret { .. }
+            | EditIntent::PasteText { .. }
             | EditIntent::PasteSlice { .. }
             | EditIntent::SetSelection { .. } => unreachable!("handled above"),
         };
