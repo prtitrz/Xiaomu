@@ -52,13 +52,23 @@ pub enum EditIntent {
         /// Replacement text; may be empty (deletes the selection).
         text: String,
     },
-    /// Commit one native IME composition over the current selection.
+    /// Commit one native IME composition over an explicit canonical range.
     ///
     /// Composition updates remain frontend-transient. The final committed
     /// text uses the same StoredMarks semantics as normal typing but owns one
     /// isolated history entry rather than joining an adjacent typing group.
     CommitComposition {
+        /// Replacement range in the focused inline node.
+        range: TextRange,
         /// Final composition text.
+        text: String,
+    },
+    /// Paste unstructured platform text over the current selection.
+    ///
+    /// Plain text inherits the current typing marks but always owns an
+    /// isolated history entry, so paste never coalesces with adjacent typing.
+    PasteText {
+        /// Normalized platform text.
         text: String,
     },
     /// Paste a detached Xiaomu structured clipboard fragment.
@@ -332,7 +342,7 @@ pub(crate) fn concatenated(inline: &InlineContent) -> String {
         .collect()
 }
 
-/// Builds the plan for inserting text at the current selection.
+/// Builds a text replacement plan using optional explicit StoredMarks.
 pub(crate) fn plan_insert_text(
     inline: &InlineContent,
     selection: TextSelection,
