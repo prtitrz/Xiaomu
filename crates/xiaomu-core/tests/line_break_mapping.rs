@@ -27,19 +27,12 @@ fn document_with(kind: NodeKind, text: &str) -> (XiaomuDocument, NodeId) {
             NodeContent::children([block]),
         )
         .unwrap();
-    (
-        XiaomuDocument::new(root, builder.finish()).unwrap(),
-        block,
-    )
+    (XiaomuDocument::new(root, builder.finish()).unwrap(), block)
 }
 
 fn point(document: &XiaomuDocument, node: NodeId, raw: usize) -> TextPoint {
     let inline = document.node(node).unwrap().content().as_inline().unwrap();
-    TextPoint::new(
-        node,
-        inline.offset_at(raw).unwrap(),
-        CursorAffinity::Before,
-    )
+    TextPoint::new(node, inline.offset_at(raw).unwrap(), CursorAffinity::Before)
 }
 
 fn collapsed_range(document: &XiaomuDocument, node: NodeId, raw: usize) -> TextRange {
@@ -85,12 +78,8 @@ fn lf_insertion_maps_before_after_and_following_positions_as_one_byte() {
     assert_eq!(text(applied.document(), paragraph), "a\nb");
 
     let at_seam = point(&document, paragraph, 1);
-    let before = applied
-        .changes()
-        .map_text_point(at_seam, MapBias::Start);
-    let after = applied
-        .changes()
-        .map_text_point(at_seam, MapBias::End);
+    let before = applied.changes().map_text_point(at_seam, MapBias::Start);
+    let after = applied.changes().map_text_point(at_seam, MapBias::End);
     match before {
         MappedPosition::Mapped(point) => assert_eq!(point.offset().as_usize(), 1),
         MappedPosition::Deleted => panic!("insertion seam must remain mappable"),
@@ -131,5 +120,8 @@ fn lf_is_a_valid_single_byte_text_boundary() {
     let buffer = TextBuffer::from("a\nb");
     assert!(buffer.offset_at(1).is_ok());
     assert!(buffer.offset_at(2).is_ok());
-    assert_eq!(buffer.offset_at(2).unwrap().as_usize() - buffer.offset_at(1).unwrap().as_usize(), 1);
+    assert_eq!(
+        buffer.offset_at(2).unwrap().as_usize() - buffer.offset_at(1).unwrap().as_usize(),
+        1
+    );
 }
