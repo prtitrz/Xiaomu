@@ -252,12 +252,18 @@ mod tests {
             &AccessibilityRole::Heading { level: 2 }
         );
         assert_eq!(projection.root().children()[0].text(), Some("Title"));
-        assert_eq!(projection.root().children()[1].role(), &AccessibilityRole::List);
+        assert_eq!(
+            projection.root().children()[1].role(),
+            &AccessibilityRole::List
+        );
         assert_eq!(
             projection.root().children()[1].children()[0].role(),
             &AccessibilityRole::ListItem
         );
-        assert_eq!(projection.root().children()[2].role(), &AccessibilityRole::CodeBlock);
+        assert_eq!(
+            projection.root().children()[2].role(),
+            &AccessibilityRole::CodeBlock
+        );
         assert_eq!(projection.root().children()[2].text(), Some("a\nb"));
         assert!(projection.root().children()[2].editable());
     }
