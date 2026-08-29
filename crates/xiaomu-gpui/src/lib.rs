@@ -5,17 +5,20 @@
 //! editor.
 //!
 //! This crate owns everything GPUI-specific: input translation, block views,
-//! layout, paint, hit testing, clipboard bindings, and IME composition state.
-//! GPUI types never leak into `xiaomu-core` or `xiaomu-runtime`, and platform
-//! coordinates (UTF-16 ranges, physical pixels) are converted to Core types at
-//! this boundary.
+//! layout, paint, hit testing, clipboard bindings, accessibility projection,
+//! and IME composition state. GPUI types never leak into `xiaomu-core` or
+//! `xiaomu-runtime`, and platform coordinates (UTF-16 ranges, physical pixels)
+//! are converted to Core types at this boundary.
 //!
 //! Modules:
+//! - [`accessibility`]: frontend-readable semantic/text/selection/focus
+//!   projection plus platform accessibility adapter helpers.
 //! - [`input`]: UTF-16 ↔ Core-offset conversion for the platform input path.
-//! - [`block_view`]: the single-paragraph view and its custom element
-//!   (rendering, caret/selection drawing, hit testing, `InputHandler`).
-//! - [`editor`]: application assembly for the single-block editor harness.
+//! - [`block_view`]: one inline-bearing block view and its custom element.
+//! - [`document_view`]: multi-block editor projection and interaction owner.
+//! - [`editor`]: reusable editor-instance and application assembly helpers.
 
+pub mod accessibility;
 pub mod block_view;
 pub mod document_view;
 pub mod editor;
