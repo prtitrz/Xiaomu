@@ -17,10 +17,9 @@ use crate::block_view::{
     SelectRight, SelectUp, ShiftTabIndent, TabIndent, ToggleBold, ToggleCode, ToggleItalic,
     ToggleStrike, ToggleUnderline, Undo, Up,
 };
-use xiaomu_runtime::clipboard::TextClipboard;
 
 use crate::block_view::ParagraphView;
-use crate::input::platform_clipboard::PlatformClipboard;
+use crate::input::platform_clipboard::{PlatformClipboard, PlatformClipboardContent};
 
 use super::{DocumentView, NavStep, markers, navigation};
 
@@ -311,18 +310,25 @@ impl DocumentView {
     }
 
     pub(crate) fn copy(&mut self, _: &ClipboardCopy, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = self.session.borrow().selected_text() {
-            PlatformClipboard::new(&*cx).write_text(text);
+        match self.session.borrow().clipboard_slice() {
+            Ok(Some(slice)) => PlatformClipboard::new(&*cx).write_slice(&slice),
+            Ok(None) => {}
+            Err(error) => eprintln!("xiaomu: clipboard projection failed: {error}"),
         }
     }
 
     pub(crate) fn cut(&mut self, _: &ClipboardCut, window: &mut Window, cx: &mut Context<Self>) {
-        let selected = self.session.borrow().selected_text();
-        let Some(text) = selected else {
-            return;
+        let slice = match self.session.borrow().clipboard_slice() {
+            Ok(Some(slice)) => slice,
+            Ok(None) => return,
+            Err(error) => {
+                eprintln!("xiaomu: clipboard projection failed: {error}");
+                return;
+            }
         };
-        PlatformClipboard::new(&*cx).write_text(text);
-        // A non-collapsed selection deletes as a whole; one undo unit.
+        PlatformClipboard::new(&*cx).write_slice(&slice);
+        // Clipboard projection is read-only; Delete remains the one history
+        // mutation for the whole cut command.
         self.apply_intent(EditIntent::Delete, window, cx);
     }
 
@@ -332,20 +338,27 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(text) = PlatformClipboard::new(&*cx).read_text() else {
+        let Some(content) = PlatformClipboard::new(&*cx).read_content() else {
             return;
         };
-        // Line breaks cannot exist inside inline text; pasted breaks become
-        // spaces. Empty text must not clear the selection.
-        let text = normalize_paste_text(&text);
-        if !text.is_empty() {
-            self.apply_intent(
-                EditIntent::InsertText {
-                    text: text.to_owned(),
-                },
-                window,
-                cx,
-            );
+        match content {
+            PlatformClipboardContent::Structured(slice) => {
+                self.apply_intent(EditIntent::PasteSlice { slice }, window, cx);
+            }
+            PlatformClipboardContent::Text(text) => {
+                // Plain platform text has no document structure. Line breaks
+                // collapse to spaces for the current single-block fallback.
+                let text = normalize_paste_text(&text);
+                if !text.is_empty() {
+                    self.apply_intent(
+                        EditIntent::InsertText {
+                            text: text.to_owned(),
+                        },
+                        window,
+                        cx,
+                    );
+                }
+            }
         }
     }
 

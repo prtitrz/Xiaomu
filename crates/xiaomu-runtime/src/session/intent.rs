@@ -9,6 +9,8 @@ use xiaomu_core::selection::{TextPoint, TextSelection};
 use xiaomu_core::text::{TextOffset, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
+use crate::clipboard::ClipboardSlice;
+
 use super::SessionError;
 
 /// One caret movement direction over the paragraph's logical text.
@@ -26,10 +28,11 @@ pub enum CaretMove {
 
 /// A typed editing intent.
 ///
-/// Text intents act inside one inline node. Structural intents
+/// Text intents act inside one inline node unless their contract explicitly
+/// carries a document-level fragment. Structural intents
 /// ([`EditIntent::SplitBlock`], [`EditIntent::JoinWithPrevious`],
 /// [`EditIntent::TurnInto`]) still require a single-node text selection in
-/// this phase; cross-block structural commands belong to later slices.
+/// this phase.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EditIntent {
@@ -38,6 +41,14 @@ pub enum EditIntent {
     InsertText {
         /// Replacement text; may be empty (deletes the selection).
         text: String,
+    },
+    /// Paste a detached Xiaomu structured clipboard fragment.
+    ///
+    /// Marks and multi-block boundaries are preserved. A cross-block target
+    /// selection is replaced atomically as part of the same history entry.
+    PasteSlice {
+        /// Structured clipboard value to insert.
+        slice: ClipboardSlice,
     },
     /// Delete one Unicode scalar before the caret, or the whole selection.
     ///
@@ -128,8 +139,16 @@ pub enum EditIntent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SelectionUpdate {
     /// Collapse the caret right after the replacement text of the primary
-    /// edit (InsertText / paste / IME commit).
+    /// edit (InsertText / single-block paste / IME commit).
     CaretAfterReplacement,
+    /// Collapse inside the last node inserted by a transaction at `offset`.
+    ///
+    /// Multi-block structured paste uses this to place the caret after the
+    /// pasted portion but before the target block's relocated suffix.
+    CaretAtLastInsertedOffset {
+        /// UTF-8 byte offset in the last inserted inline-bearing node.
+        offset: usize,
+    },
     /// Collapse the caret at the start of the primary edit
     /// (Backspace / Delete).
     CaretAtEditStart,
