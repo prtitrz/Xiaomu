@@ -13,10 +13,14 @@ use xiaomu_core::document::{
     AttrValue, HeadingLevel, InlineContent, LinkMark, Mark, MarkSet, NodeAttrs, NodeKind, TextRun,
 };
 
-use super::{ClipboardBlock, ClipboardSlice};
+use super::fragment::{
+    ClipboardNode, ClipboardNodeContent, ClipboardSlice, validate_roots,
+};
 
 const FORMAT: &str = "xiaomu.clipboard";
-const VERSION: u32 = 1;
+// v1 carried only a flat leaf list. v2 carries the detached fragment tree so
+// list/quote/container semantics survive Xiaomu-to-Xiaomu copy/paste.
+const VERSION: u32 = 2;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -31,7 +35,7 @@ pub struct ClipboardMetadataError {
 impl ClipboardMetadataError {
     const fn unsupported() -> Self {
         Self {
-            message: "clipboard slice contains a value unsupported by metadata v1",
+            message: "clipboard slice contains a value unsupported by metadata v2",
         }
     }
 
@@ -61,15 +65,15 @@ impl std::error::Error for ClipboardMetadataError {}
 /// The plain-text fallback is deliberately not duplicated in the metadata;
 /// callers put [`ClipboardSlice::plain_text`] in the platform text flavor.
 pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetadataError> {
-    let blocks = slice
-        .blocks()
+    let roots = slice
+        .roots()
         .iter()
-        .map(WireBlock::from_block)
+        .map(WireNode::from_node)
         .collect::<Result<Vec<_>, _>>()?;
     serde_json::to_string(&WireEnvelope {
         format: FORMAT.to_owned(),
         version: VERSION,
-        blocks,
+        roots,
     })
     .map_err(|_| ClipboardMetadataError::serialization())
 }
@@ -77,25 +81,25 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
 /// Decodes Xiaomu metadata when it matches `plain_text` exactly.
 ///
 /// Unknown versions, malformed/foreign metadata, unsupported canonical
-/// values, and stale metadata whose computed fallback differs from the
-/// platform text all return `None`. The caller should then paste the supplied
-/// plain text normally.
+/// values, invalid fragment trees, and stale metadata whose computed fallback
+/// differs from the platform text all return `None`. The caller should then
+/// paste the supplied plain text normally.
 #[must_use]
 pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlice> {
     let envelope: WireEnvelope = serde_json::from_str(metadata).ok()?;
     if envelope.format != FORMAT || envelope.version != VERSION {
         return None;
     }
-    let blocks = envelope
-        .blocks
+    let roots = envelope
+        .roots
         .into_iter()
-        .map(WireBlock::into_block)
+        .map(WireNode::into_node)
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
-    if blocks.is_empty() {
+    if roots.is_empty() || validate_roots(&roots).is_err() {
         return None;
     }
-    let slice = ClipboardSlice::new(blocks);
+    let slice = ClipboardSlice::from_roots(roots);
     (slice.plain_text() == plain_text).then_some(slice)
 }
 
@@ -103,51 +107,80 @@ pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlic
 struct WireEnvelope {
     format: String,
     version: u32,
-    blocks: Vec<WireBlock>,
+    roots: Vec<WireNode>,
 }
 
 #[derive(Serialize, Deserialize)]
-struct WireBlock {
+struct WireNode {
     kind: WireKind,
     attrs: BTreeMap<String, WireAttr>,
-    runs: Vec<WireRun>,
+    content: WireContent,
 }
 
-impl WireBlock {
-    fn from_block(block: &ClipboardBlock) -> Result<Self, ClipboardMetadataError> {
+impl WireNode {
+    fn from_node(node: &ClipboardNode) -> Result<Self, ClipboardMetadataError> {
+        let content = match node.content() {
+            ClipboardNodeContent::Inline(inline) => WireContent::Inline {
+                runs: inline
+                    .runs()
+                    .iter()
+                    .map(WireRun::from_run)
+                    .collect::<Result<_, _>>()?,
+            },
+            ClipboardNodeContent::Children(children) => WireContent::Children {
+                children: children
+                    .iter()
+                    .map(Self::from_node)
+                    .collect::<Result<_, _>>()?,
+            },
+        };
         Ok(Self {
-            kind: WireKind::from_kind(block.kind())?,
-            attrs: block
+            kind: WireKind::from_kind(node.kind())?,
+            attrs: node
                 .attrs()
                 .iter()
                 .map(|(key, value)| Ok((key.to_owned(), WireAttr::from_attr(value)?)))
                 .collect::<Result<_, ClipboardMetadataError>>()?,
-            runs: block
-                .inline()
-                .runs()
-                .iter()
-                .map(WireRun::from_run)
-                .collect::<Result<_, _>>()?,
+            content,
         })
     }
 
-    fn into_block(self) -> Result<ClipboardBlock, ClipboardMetadataError> {
+    fn into_node(self) -> Result<ClipboardNode, ClipboardMetadataError> {
         let attrs = self
             .attrs
             .into_iter()
             .map(|(key, value)| Ok((key, value.into_attr()?)))
             .collect::<Result<BTreeMap<_, _>, ClipboardMetadataError>>()?;
-        let runs = self
-            .runs
-            .into_iter()
-            .map(WireRun::into_run)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(ClipboardBlock::new(
+        let content = match self.content {
+            WireContent::Inline { runs } => ClipboardNodeContent::Inline(
+                InlineContent::new(
+                    runs
+                        .into_iter()
+                        .map(WireRun::into_run)
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+                .map_err(|_| ClipboardMetadataError::invalid())?,
+            ),
+            WireContent::Children { children } => ClipboardNodeContent::Children(
+                children
+                    .into_iter()
+                    .map(Self::into_node)
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+        };
+        Ok(ClipboardNode::new(
             self.kind.into_kind()?,
             NodeAttrs::new(attrs).map_err(|_| ClipboardMetadataError::invalid())?,
-            InlineContent::new(runs).map_err(|_| ClipboardMetadataError::invalid())?,
+            content,
         ))
     }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum WireContent {
+    Inline { runs: Vec<WireRun> },
+    Children { children: Vec<WireNode> },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -155,6 +188,10 @@ impl WireBlock {
 enum WireKind {
     Paragraph,
     Heading(u8),
+    Quote,
+    BulletList,
+    OrderedList,
+    ListItem,
     CodeBlock,
     Custom(String),
 }
@@ -164,9 +201,15 @@ impl WireKind {
         match kind {
             NodeKind::Paragraph => Ok(Self::Paragraph),
             NodeKind::Heading(level) => Ok(Self::Heading(level.as_u8())),
+            NodeKind::Quote => Ok(Self::Quote),
+            NodeKind::BulletList => Ok(Self::BulletList),
+            NodeKind::OrderedList => Ok(Self::OrderedList),
+            NodeKind::ListItem => Ok(Self::ListItem),
             NodeKind::CodeBlock => Ok(Self::CodeBlock),
             NodeKind::Custom(key) => Ok(Self::Custom(key.clone())),
-            _ => Err(ClipboardMetadataError::unsupported()),
+            NodeKind::Document | NodeKind::HorizontalRule | NodeKind::Image => {
+                Err(ClipboardMetadataError::unsupported())
+            }
         }
     }
 
@@ -176,6 +219,10 @@ impl WireKind {
             Self::Heading(level) => HeadingLevel::new(level)
                 .map(NodeKind::Heading)
                 .map_err(|_| ClipboardMetadataError::invalid()),
+            Self::Quote => Ok(NodeKind::Quote),
+            Self::BulletList => Ok(NodeKind::BulletList),
+            Self::OrderedList => Ok(NodeKind::OrderedList),
+            Self::ListItem => Ok(NodeKind::ListItem),
             Self::CodeBlock => Ok(NodeKind::CodeBlock),
             Self::Custom(key) => {
                 NodeKind::custom(key).map_err(|_| ClipboardMetadataError::invalid())
