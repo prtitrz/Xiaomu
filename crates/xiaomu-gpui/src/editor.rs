@@ -242,19 +242,12 @@ mod tests {
     struct CountListener(Rc<Cell<u32>>);
 
     impl DocumentChangeListener for CountListener {
-        fn document_changed(
-            &mut self,
-            _document: &XiaomuDocument,
-            _selection: DocumentSelection,
-        ) {
+        fn document_changed(&mut self, _document: &XiaomuDocument, _selection: DocumentSelection) {
             self.0.set(self.0.get() + 1);
         }
     }
 
-    fn two_paragraph_document(
-        first: &str,
-        second: &str,
-    ) -> (XiaomuDocument, [NodeId; 2]) {
+    fn two_paragraph_document(first: &str, second: &str) -> (XiaomuDocument, [NodeId; 2]) {
         let mut builder = NodeStoreBuilder::new();
         let mut leaf = |text: &str| {
             builder
@@ -262,7 +255,8 @@ mod tests {
                     xiaomu_core::document::NodeKind::Paragraph,
                     NodeAttrs::empty(),
                     NodeContent::Inline(
-                        InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()]).unwrap(),
+                        InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()])
+                            .unwrap(),
                     ),
                 )
                 .unwrap()
@@ -284,11 +278,7 @@ mod tests {
 
     fn point(document: &XiaomuDocument, node: NodeId, raw: usize) -> TextPoint {
         let inline = document.node(node).unwrap().content().as_inline().unwrap();
-        TextPoint::new(
-            node,
-            inline.offset_at(raw).unwrap(),
-            CursorAffinity::Before,
-        )
+        TextPoint::new(node, inline.offset_at(raw).unwrap(), CursorAffinity::Before)
     }
 
     fn text(document: &XiaomuDocument, node: NodeId) -> String {
