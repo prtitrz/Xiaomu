@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 均已完成；P3.1 visual-line geometry / soft-wrap、P3.2 visual navigation / selection 与 P3.3 cross-block editing / structured clipboard 已合入 `main`；P3.4 已建立 Runtime typing history grouping、explicit history boundary、collapsed `StoredMarks` 与独立 IME commit contract，当前进入阶段收口。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection、structured paste 与 local history grouping；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、wrapped geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret 与 list marker projection；宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
+当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 均已完成；P3.1 visual-line geometry / soft-wrap、P3.2 visual navigation / selection、P3.3 cross-block editing / structured clipboard 与 P3.4 history grouping / StoredMarks / IME 均已合入 `main`；P3.5 已建立 canonical LF HardBreak / CodeBlock multi-line contract，并完成 Runtime/GPUI 实现与自动化 Gate。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step，并继续用 `ReplaceText` 承载 canonical LF；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection、structured paste、local history grouping 与 semantic line-break command；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、soft-wrap / multi-logical-line geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret、list marker 与 CodeBlock multi-line input；宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
 
 ## Core 边界
 
@@ -101,6 +101,8 @@ XiaomuDocument
 `MarkSet` 使用确定性顺序，完全相同的重复 mark 自动规范化，同一 semantic kind 的冲突值被拒绝。`TextRun` 将非空 `TextBuffer` 与 normalized `MarkSet` 绑定。Run segmentation 不属于 document coordinate。
 
 `InlineContent` 在构造时规范化相邻且 `MarkSet` 相同的 `TextRun`。`NodeAttrs` 使用确定性 key 顺序并 preservation-first 保存未知属性值。
+
+ADR 0004 固化了当前 line-break contract：LF `\n`（U+000A）是晓木唯一赋予 line-break 语义的 inline scalar。Paragraph / Heading 等普通富文本 inline node 中 LF 表示 HardBreak；CodeBlock 中 LF 表示代码 newline；soft-wrap 不产生 canonical byte。LF 继续使用普通 UTF-8 `TextOffset`，因此无需 HardBreak 专用 Core content variant 或 position system。Core 原始 construction 当前仍容忍 CR 作为普通 scalar；平台 adapter / codec 表达 line break 时负责 `CRLF / CR → LF` 规范化。
 
 ### Canonical Node Tree 与 Snapshot
 
@@ -214,7 +216,7 @@ SplitNode     → JoinNodes
 JoinNodes     → 删除追加文本 + RestoreSubtree
 ```
 
-多 step inverse 按 step 反序组合。随机 valid transaction 测试持续验证 document validity、position mapping validity、单笔 round-trip 与整链 undo。
+多 step inverse 按 step 反序组合。随机 valid transaction 测试持续验证 document validity、position mapping validity、单笔 round-trip 与整链 undo。LF 插入不增加专用 step：它是普通 `ReplaceText`，mapping seam 使用 Start / End bias 区分 LF 前后，并由同一 inverse contract 精确恢复。
 
 ## Runtime 边界
 
@@ -259,6 +261,8 @@ IndentListItem
 OutdentListItem
 SetSelection
 ```
+
+此外提供 `EditIntent::insert_line_break()` 语义构造器。调用方表达 HardBreak / CodeBlock newline 时不依赖其当前内部 variant；P3.5 当前将它编译为 isolated text replacement。
 
 编辑流：
 
@@ -318,6 +322,21 @@ collapsed caret 的 `ToggleMark` 更新 session-local `StoredMarks`，不写入 
 
 StoredMarks 生命周期已经明确：真实 caret / selection movement、undo / redo 与不继承格式的结构命令会清除；`SplitBlock` 保留 pending marks 到新 tail block，但同时关闭旧 typing group；collapsed mark toggle 本身也关闭 typing group，因此切换格式后的后续输入属于新的 undo unit。IME preedit/cancel 不改变 Runtime selection 或 StoredMarks，只有最终 commit 进入 Runtime history。
 
+### HardBreak / CodeBlock line break
+
+Runtime 不建立第二套 line editing engine：
+
+```text
+EditIntent::insert_line_break()
+→ isolated text replacement
+→ ReplaceText("\n")
+→ existing mapping / inverse / StoredMarks
+```
+
+line break command 与前后普通 typing 明确断组，并在 replacement 后把 caret 放到 LF 后的合法 byte boundary。ordinary rich-text 的结构 Enter 仍使用 `SplitBlock`；是否把 Enter 翻译为 structural split 还是 line break 由 frontend 根据目标 node kind 决定。
+
+Runtime 提供 `normalize_multiline_paste_text` 作为 frontend-neutral line-ending adapter helper：`CRLF / CR → LF`，已有 LF 保持不变。`normalize_paste_text` 则是普通 rich-text 的当前 plain fallback，在先规范化后把 LF 折叠为空格。两者是输入策略，不改变 Core 能表示 LF 的事实。
+
 ### List 与结构命令
 
 P2 list 编辑不增加 Core 专用 step，使用通用 Core 原语与 Runtime staged plan：
@@ -360,7 +379,7 @@ DocumentSelection
 
 `ClipboardSlice` 是 detached value，不携带 canonical `NodeId`。单一 inline leaf 只保留所选 inline fragment；跨多个 inline leaf 时，projection 从 canonical tree 剪出覆盖 selection 的最小 fragment tree，因此 list / quote 等 container 可以保留，同时不会携带未选择的 sibling。
 
-`plain_text` 始终存在，并用 `\n` 表达所选 inline block boundary。Runtime metadata codec 当前格式为 `xiaomu.clipboard` v2；它使用私有 serde wire DTO，不给 Core canonical value 增加 serde 依赖。decode 会重新构造临时 document 校验 fragment tree；foreign、malformed、unknown-version 或与系统文本不一致的 stale metadata 均视为不可识别，由 frontend 回退到 plain text。
+`plain_text` 始终存在，并用 `\n` 表达所选 inline block boundary；若某个 leaf 自身包含 canonical HardBreak / code newline，其 LF 同样原样保留。Runtime metadata codec 当前格式为 `xiaomu.clipboard` v2；它使用私有 serde wire DTO，不给 Core canonical value 增加 serde 依赖。decode 会重新构造临时 document 校验 fragment tree；foreign、malformed、unknown-version 或与系统文本不一致的 stale metadata 均视为不可识别，由 frontend 回退到 plain text。
 
 cross-block Delete / Cut 由 Runtime 统一编排。Delete 保留首个 inline block identity 与未选 prefix，把末 block 未选 suffix 接到 seam，删除覆盖的中间 leaves，并清理因本次操作而变空的 container；Cut 的 clipboard projection 是只读步骤，文档侧仍只提交一次 Delete history change。
 
@@ -429,7 +448,7 @@ document_view/
 block_view/
     ParagraphView：单 inline block 的 input / layout / paint
     ParagraphElement：wrapped selection/caret paint + input handle
-    layout.rs：BlockTextLayout、soft-wrap visual rows、caret affinity、2D hit-test
+    layout.rs：BlockTextLayout、soft-wrap / multi logical-line visual rows、caret affinity、2D hit-test
     scroll.rs：shared ScrollHandle 上的最小 scroll-to-caret 调整
 
 editor.rs
@@ -442,7 +461,7 @@ editor.rs
 
 所有文档 mutation 经 Runtime intent 提交。平台 `EntityInputHandler` 的 UTF-16 range 在 GPUI adapter 转换为合法 Core UTF-8 coordinate。
 
-IME composition 的 preedit 保持 frontend-local，不推进 document revision，也不移动 Runtime canonical selection。composition state 只保存待替换的 canonical byte range、当前 preedit 与 preedit 内 UTF-16 selection；更新与 cancel 都不写 history。cancel 只丢弃 transient projection，因此 pending StoredMarks 不会因伪 caret movement 被清除。最终 commit 通过单个 `EditIntent::CommitComposition { range, text }` 进入 Runtime，使用与普通 typing 相同的 StoredMarks 规则，并形成恰好一个独立 undo unit。P3 composition 仍限制在单 block 内启动。
+IME composition 的 preedit 保持 frontend-local，不推进 document revision，也不移动 Runtime canonical selection。composition state 只保存待替换的 canonical byte range、当前 preedit 与 preedit 内 UTF-16 selection；更新与 cancel 都不写 history。cancel 只丢弃 transient projection，因此 pending StoredMarks 不会因伪 caret movement 被清除。最终 commit 通过单个 `EditIntent::CommitComposition { range, text }` 进入 Runtime，使用与普通 typing 相同的 StoredMarks 规则，并形成恰好一个独立 undo unit。P3 composition 仍限制在单 block 内启动；该 byte-range / UTF-16 adapter 按完整 display text 工作，因此 canonical LF 不引入单独平台坐标系。
 
 ### Multi-block DocumentView
 
@@ -450,7 +469,9 @@ IME composition 的 preedit 保持 frontend-local，不推进 document revision�
 
 Left / Right 保持 Unicode scalar navigation，并在 soft-wrap 共享 logical offset 上先通过 `CursorAffinity` 跨越上一视觉行末尾 / 下一视觉行开头两个 caret state。Home / End 解析当前 visual row 首尾。Up / Down 读取最近一次 `BlockTextLayout` 的 wrapped geometry；`desired_x` 只保存在 `DocumentView` frontend transient state，连续纵向移动保持视觉列，越过 block 边界时在相邻 inline block 的首 / 末 visual row 上按同一 x 求最近合法 Core offset。Shift 版本只改变 selection focus，anchor 继续由 Runtime document selection 持有。
 
-鼠标点击 / 拖选使用 paint 期发布的 block bounds 注册表，先确定目标 block，再用 wrapped layout 二维 hit-test 得到合法 text position；命中 soft-wrap boundary 时同时保留对应 `CursorAffinity`。
+`BlockTextLayout` 同时承载 soft-wrapped visual rows 与 canonical LF 分隔的多个 logical lines。相邻 logical `WrappedLine` 的 coordinate 起点按 `previous.len() + 1` 推进，那个 `+1` 对应真实 LF byte；因此 `a\nb` 的 offset 1 / 2 分别是 LF 前 / 后两个独立 caret。soft-wrap 则没有 canonical byte，只有在前后 visual row 共享同一 offset 时才由 `CursorAffinity` 区分两个视觉位置。
+
+鼠标点击 / 拖选使用 paint 期发布的 block bounds 注册表，先确定目标 block，再用 wrapped layout 二维 hit-test 得到合法 text position；命中 soft-wrap boundary 时同时保留对应 `CursorAffinity`。hard newline 的 hit-test / selection 继续返回 LF 两侧各自的真实 byte boundary。
 
 选区绘制按 `DocumentSelection::ordered` 逐块投影：端点块画局部 range，中间块全选。collapsed selection 绘制 focus caret；非 collapsed selection 虽不绘制 caret，仍使用 focus endpoint 的 wrapped caret geometry 驱动 scroll-to-caret。
 
@@ -474,9 +495,11 @@ list marker 只存在于 frontend projection，不进入 canonical text、TextOf
 
 ### Clipboard 与键绑定
 
-GPUI 已绑定 Left / Right / visual Home / End / Up / Down、Shift visual selection、Backspace / Delete、SelectAll、Undo / Redo、Copy / Cut / Paste、Bold / Italic / Code / Underline / Strike，以及结构编辑 Enter / Tab / Shift-Tab。macOS / Windows 使用平台对应组合键。
+GPUI 已绑定 Left / Right / visual Home / End / Up / Down、Shift visual selection、Backspace / Delete、SelectAll、Undo / Redo、Copy / Cut / Paste、Bold / Italic / Code / Underline / Strike，以及 Enter / Shift+Enter / Tab / Shift-Tab。macOS / Windows 使用平台对应组合键。
 
-Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 Xiaomu v2 structured metadata。外部应用按普通文本消费；晓木 Paste 优先验证并使用 structured metadata，metadata 缺失、过期或非法时自动走 `PasteText` plain-text fallback。structured paste 与 plain-text paste 都是显式 history boundary；平台 adapter 只负责 transport，不解释 canonical document mutation。
+普通 rich-text `Enter` 继续结构 `SplitBlock`，`Shift+Enter` 插入 canonical LF HardBreak。CodeBlock 的 Enter / Shift+Enter 都插入 LF；Tab 插入四个可见空格，并绕开 list conversion / list indent，Shift-Tab 当前只保证不触发 list structural command。
+
+Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 Xiaomu v2 structured metadata。外部应用按普通文本消费；晓木 Paste 优先验证 structured metadata，metadata 缺失、过期或非法时自动走 `PasteText` plain-text fallback。普通 rich-text plain paste 当前把 line break 折叠为空格；CodeBlock plain paste 保留多行并规范化为 LF。若剪贴板带有效 Xiaomu structured metadata但目标是 CodeBlock，frontend 主动使用 `ClipboardSlice::plain_text` 而不重建 rich structure，使代码块保持 plain-code destination semantics。structured paste 与 plain-text paste 都是显式 history boundary；平台 adapter 只负责 transport，不进入 Core 类型系统。
 
 ### Host hooks
 
@@ -493,7 +516,7 @@ create editor
 → restart / load
 ```
 
-fixture v2 当前保存 tree shape、inline runs、MarkSet（含 Link attrs）与 NodeAttrs。它不是公共 codec；`HorizontalRule`、`Image`、`Custom` 等尚未编码的 node kind 会返回 `PersistenceError`，不会静默跳过。
+fixture v2 当前保存 tree shape、inline runs、MarkSet（含 Link attrs）与 NodeAttrs，并对 inline LF 使用转义后 round-trip，因此 Paragraph HardBreak / CodeBlock newline 不会在保存时丢失。它不是公共 codec；`HorizontalRule`、`Image`、`Custom` 等尚未编码的 node kind 会返回 `PersistenceError`，不会静默跳过。
 
 ## Codec 边界
 
@@ -507,7 +530,7 @@ codec crate
 xiaomu-core document model
 ```
 
-Core 永远不反向依赖 codec。
+Core 永远不反向依赖 codec。ADR 0004 只规定 canonical LF 语义；Markdown 后续如何把 Paragraph LF 编码为 hard break、如何保留 CodeBlock LF，属于 codec 自身 contract。
 
 ## Host 边界
 
