@@ -203,3 +203,62 @@ pub fn canonical_semantics_equal(a: &XiaomuDocument, b: &XiaomuDocument) -> bool
 pub fn structurally_equal(a: &XiaomuDocument, b: &XiaomuDocument) -> bool {
     canonical_semantics_equal(a, b)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn multiline_fixture() -> XiaomuDocument {
+        let mut builder = NodeStoreBuilder::new();
+        let paragraph = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::Inline(
+                    InlineContent::new([TextRun::new("alpha\nbeta", MarkSet::empty()).unwrap()])
+                        .unwrap(),
+                ),
+            )
+            .unwrap();
+        let code = builder
+            .insert(
+                NodeKind::CodeBlock,
+                NodeAttrs::empty(),
+                NodeContent::Inline(
+                    InlineContent::new([TextRun::new(
+                        "fn main() {\n    println!(\"ok\");\n}",
+                        MarkSet::empty(),
+                    )
+                    .unwrap()])
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([paragraph, code]),
+            )
+            .unwrap();
+        XiaomuDocument::new(root, builder.finish()).unwrap()
+    }
+
+    #[test]
+    fn fixture_v2_round_trips_hard_breaks_and_code_newlines() {
+        let document = multiline_fixture();
+        let mut encoded = String::from("xiaomu-fixture-doc v2\n");
+        write_node(&document, document.root(), &mut encoded).unwrap();
+
+        assert!(encoded.contains("alpha\\nbeta"));
+        assert!(encoded.contains("fn main() {\\n    println!"));
+        let decoded = parse_document(&encoded).unwrap();
+        assert!(canonical_semantics_equal(&document, &decoded));
+    }
+
+    #[test]
+    fn fixture_text_escape_preserves_lf_round_trip() {
+        let source = "a\nb\n";
+        assert_eq!(unescape_text(&escape_text(source)), source);
+    }
+}
