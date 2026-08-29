@@ -60,3 +60,36 @@ fn idle_projection_preserves_text_and_run_styles() {
     assert!(!segments[0].underline);
     assert!(segments[1].underline);
 }
+
+#[test]
+fn multiline_projection_preserves_canonical_lf_and_segment_offsets() {
+    let bold = MarkSet::new([Mark::Bold]).unwrap();
+    let content = inline(&[("alpha\n", MarkSet::empty()), ("beta", bold)]);
+
+    let (text, segments) = project_display_content(&content, None);
+
+    assert_eq!(text, "alpha\nbeta");
+    assert_eq!(segments.len(), 2);
+    assert_eq!(segments[0].start, 0);
+    assert_eq!(segments[0].text, "alpha\n");
+    assert_eq!(segments[1].start, 6);
+    assert_eq!(segments[1].text, "beta");
+    assert!(segments[1].bold);
+}
+
+#[test]
+fn composition_after_hard_break_keeps_lf_in_virtual_projection() {
+    let content = inline(&[("a\nb", MarkSet::empty())]);
+
+    let (text, segments) = project_display_content(&content, Some((2..2, "中")));
+
+    assert_eq!(text, "a\n中b");
+    assert_eq!(
+        segments
+            .iter()
+            .map(|segment| (segment.start, segment.text.as_str()))
+            .collect::<Vec<_>>(),
+        [(0, "a\n"), (2, "中"), (5, "b")]
+    );
+    assert!(segments[1].underline);
+}

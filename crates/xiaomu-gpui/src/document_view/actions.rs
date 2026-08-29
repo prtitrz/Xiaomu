@@ -4,11 +4,11 @@
 //! handlers translate GPUI events into runtime intents or pure navigation
 //! steps; the session remains the single mutation point.
 
-use gpui::{App, Context, Entity, Focusable as _, Window};
+use gpui::{App, Context, Entity, Focusable as _, Window, actions};
 
-use xiaomu_core::document::Mark;
+use xiaomu_core::document::{Mark, NodeKind};
 use xiaomu_core::selection::{CursorAffinity, TextPoint};
-use xiaomu_runtime::clipboard::normalize_paste_text;
+use xiaomu_runtime::clipboard::{normalize_multiline_paste_text, normalize_paste_text};
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
 use crate::block_view::{
@@ -23,29 +23,60 @@ use crate::input::platform_clipboard::{PlatformClipboard, PlatformClipboardConte
 
 use super::{DocumentView, NavStep, markers, navigation};
 
+actions!(
+    xiaomu_gpui,
+    [
+        /// Insert one canonical LF without structurally splitting the block.
+        HardBreak,
+    ]
+);
+
 /// Soft tab inserted when Tab is pressed inside a plain block away from
-/// offset 0. A literal U+0009 has no glyph advance in GPUI's shaper, so it
-/// looks like a no-op; four ASCII spaces match the usual editor tab size
-/// without needing tab-stop layout. Two spaces is a common indent unit,
-/// not a tab stop.
+/// offset 0 or anywhere inside a CodeBlock. A literal U+0009 has no glyph
+/// advance in GPUI's shaper, so it looks like a no-op; four ASCII spaces
+/// match the usual editor tab size without needing tab-stop layout.
 const SOFT_TAB: &str = "    ";
 
-/// What Tab should do given the caret context of a plain block. A caret
-/// inside a list never reaches this decision and keeps the item-indent
-/// intent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EnterPlan {
+    SplitBlock,
+    InsertLineBreak,
+}
+
+fn enter_plan_for_kind(kind: &NodeKind) -> EnterPlan {
+    if matches!(kind, NodeKind::CodeBlock) {
+        EnterPlan::InsertLineBreak
+    } else {
+        EnterPlan::SplitBlock
+    }
+}
+
+/// What Tab should do given the focused inline block. A non-CodeBlock inside
+/// a list returns `None` so the caller keeps the list-item indent intent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TabPlan {
-    /// Collapsed caret at the block start: gesture for "make this a list".
+    /// Collapsed caret at an ordinary block start: gesture for "make list".
     ConvertToList,
-    /// Anywhere else: insert a visible soft tab (four spaces).
+    /// Insert a visible soft tab (four spaces).
     InsertSoftTab,
 }
 
-fn tab_plan_for_plain_block(collapsed: bool, offset: usize) -> TabPlan {
+fn tab_plan_for_block(
+    kind: &NodeKind,
+    in_list: bool,
+    collapsed: bool,
+    offset: usize,
+) -> Option<TabPlan> {
+    if matches!(kind, NodeKind::CodeBlock) {
+        return Some(TabPlan::InsertSoftTab);
+    }
+    if in_list {
+        return None;
+    }
     if collapsed && offset == 0 {
-        TabPlan::ConvertToList
+        Some(TabPlan::ConvertToList)
     } else {
-        TabPlan::InsertSoftTab
+        Some(TabPlan::InsertSoftTab)
     }
 }
 
@@ -162,7 +193,26 @@ impl DocumentView {
     }
 
     pub(crate) fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
-        self.apply_intent(EditIntent::SplitBlock, window, cx);
+        let plan = self
+            .focused_node_kind()
+            .as_ref()
+            .map(enter_plan_for_kind)
+            .unwrap_or(EnterPlan::SplitBlock);
+        match plan {
+            EnterPlan::SplitBlock => self.apply_intent(EditIntent::SplitBlock, window, cx),
+            EnterPlan::InsertLineBreak => {
+                self.apply_intent(EditIntent::insert_line_break(), window, cx);
+            }
+        }
+    }
+
+    pub(crate) fn hard_break(
+        &mut self,
+        _: &HardBreak,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_intent(EditIntent::insert_line_break(), window, cx);
     }
 
     pub(crate) fn tab_indent(
@@ -171,25 +221,28 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Intuitive Tab semantics for plain blocks: only a collapsed caret
-        // at the very start gestures "turn this block into a list"; anywhere
-        // else Tab inserts a visible soft tab (replacing the selection).
-        // Inside a list, items with a previous sibling indent as before.
+        // CodeBlock owns Tab as text indentation even when nested inside a
+        // list. Ordinary blocks keep the P2 list semantics: a list item
+        // indents structurally, while a non-list block at offset 0 converts
+        // to a list and other positions insert a visible soft tab.
         let plan = {
             let session = self.session.borrow();
             match session.selection().focus() {
                 DocumentPosition::Text(point) => {
+                    let kind = session
+                        .document()
+                        .node(point.node_id())
+                        .map(|node| node.kind());
                     let in_list =
                         markers::list_context(session.document(), point.node_id()).is_some();
-                    if in_list {
-                        None
-                    } else {
-                        session.text_selection().map(|selection| {
-                            tab_plan_for_plain_block(
-                                selection.is_collapsed(),
-                                selection.focus().offset().as_usize(),
-                            )
-                        })
+                    match (kind, session.text_selection()) {
+                        (Some(kind), Some(selection)) => tab_plan_for_block(
+                            kind,
+                            in_list,
+                            selection.is_collapsed(),
+                            selection.focus().offset().as_usize(),
+                        ),
+                        _ => None,
                     }
                 }
                 DocumentPosition::Gap(_) => None,
@@ -199,7 +252,7 @@ impl DocumentView {
             Some(TabPlan::ConvertToList) => {
                 self.apply_intent(
                     EditIntent::TurnInto {
-                        kind: xiaomu_core::document::NodeKind::BulletList,
+                        kind: NodeKind::BulletList,
                     },
                     window,
                     cx,
@@ -208,7 +261,7 @@ impl DocumentView {
             }
             Some(TabPlan::InsertSoftTab) => {
                 self.apply_intent(
-                    EditIntent::InsertText {
+                    EditIntent::PasteText {
                         text: SOFT_TAB.to_owned(),
                     },
                     window,
@@ -216,7 +269,7 @@ impl DocumentView {
                 );
                 return;
             }
-            _ => {}
+            None => {}
         }
         self.apply_intent(EditIntent::IndentListItem, window, cx);
     }
@@ -228,7 +281,11 @@ impl DocumentView {
         cx: &mut Context<Self>,
     ) {
         // Shift-Tab walks out the other way: nested items outdent one
-        // level; a top-level item lifts back to a plain paragraph.
+        // level; a top-level item lifts back to a plain paragraph. CodeBlock
+        // never participates in list structure through Tab/Shift-Tab in P3.5.
+        if matches!(self.focused_node_kind(), Some(NodeKind::CodeBlock)) {
+            return;
+        }
         let lifts_out = {
             let session = self.session.borrow();
             match session.selection().focus() {
@@ -242,7 +299,7 @@ impl DocumentView {
         if lifts_out {
             self.apply_intent(
                 EditIntent::TurnInto {
-                    kind: xiaomu_core::document::NodeKind::Paragraph,
+                    kind: NodeKind::Paragraph,
                 },
                 window,
                 cx,
@@ -341,22 +398,29 @@ impl DocumentView {
         let Some(content) = PlatformClipboard::new(&*cx).read_content() else {
             return;
         };
+        let code_block = matches!(self.focused_node_kind(), Some(NodeKind::CodeBlock));
         match content {
+            PlatformClipboardContent::Structured(slice) if code_block => {
+                // CodeBlock is a plain-code surface. Xiaomu-native rich
+                // structure is flattened to the same interoperable text the
+                // system clipboard exposes, preserving canonical LF while
+                // discarding paragraph/list/mark semantics.
+                let text = normalize_multiline_paste_text(slice.plain_text());
+                if !text.is_empty() {
+                    self.apply_intent(EditIntent::PasteText { text }, window, cx);
+                }
+            }
             PlatformClipboardContent::Structured(slice) => {
                 self.apply_intent(EditIntent::PasteSlice { slice }, window, cx);
             }
             PlatformClipboardContent::Text(text) => {
-                // Plain platform text has no document structure. Line breaks
-                // collapse to spaces for the current single-block fallback.
-                let text = normalize_paste_text(&text);
+                let text = if code_block {
+                    normalize_multiline_paste_text(&text)
+                } else {
+                    normalize_paste_text(&text)
+                };
                 if !text.is_empty() {
-                    self.apply_intent(
-                        EditIntent::PasteText {
-                            text: text.to_owned(),
-                        },
-                        window,
-                        cx,
-                    );
+                    self.apply_intent(EditIntent::PasteText { text }, window, cx);
                 }
             }
         }
@@ -428,6 +492,17 @@ impl DocumentView {
             .unwrap_or(false)
     }
 
+    fn focused_node_kind(&self) -> Option<NodeKind> {
+        let session = self.session.borrow();
+        let DocumentPosition::Text(point) = session.selection().focus() else {
+            return None;
+        };
+        session
+            .document()
+            .node(point.node_id())
+            .map(|node| node.kind().clone())
+    }
+
     /// Moves platform focus to the block holding the selection focus.
     pub(crate) fn route_focus(&self, window: &mut Window, cx: &App) {
         let node = match self.session.borrow().selection().focus() {
@@ -451,17 +526,63 @@ impl DocumentView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use xiaomu_core::document::HeadingLevel;
 
     #[test]
-    fn collapsed_caret_at_block_start_converts_to_list() {
-        assert_eq!(tab_plan_for_plain_block(true, 0), TabPlan::ConvertToList);
+    fn ordinary_enter_splits_but_code_block_enter_inserts_lf() {
+        assert_eq!(
+            enter_plan_for_kind(&NodeKind::Paragraph),
+            EnterPlan::SplitBlock
+        );
+        assert_eq!(
+            enter_plan_for_kind(&NodeKind::Heading(HeadingLevel::new(2).unwrap())),
+            EnterPlan::SplitBlock
+        );
+        assert_eq!(
+            enter_plan_for_kind(&NodeKind::CodeBlock),
+            EnterPlan::InsertLineBreak
+        );
+    }
+
+    #[test]
+    fn collapsed_caret_at_ordinary_block_start_converts_to_list() {
+        assert_eq!(
+            tab_plan_for_block(&NodeKind::Paragraph, false, true, 0),
+            Some(TabPlan::ConvertToList)
+        );
     }
 
     #[test]
     fn mid_paragraph_and_selection_insert_a_soft_tab() {
-        assert_eq!(tab_plan_for_plain_block(true, 1), TabPlan::InsertSoftTab);
-        assert_eq!(tab_plan_for_plain_block(false, 0), TabPlan::InsertSoftTab);
+        assert_eq!(
+            tab_plan_for_block(&NodeKind::Paragraph, false, true, 1),
+            Some(TabPlan::InsertSoftTab)
+        );
+        assert_eq!(
+            tab_plan_for_block(&NodeKind::Paragraph, false, false, 0),
+            Some(TabPlan::InsertSoftTab)
+        );
         assert_eq!(SOFT_TAB, "    ");
         assert!(!SOFT_TAB.contains('\t'));
+    }
+
+    #[test]
+    fn code_block_tab_is_text_indent_even_inside_a_list() {
+        assert_eq!(
+            tab_plan_for_block(&NodeKind::CodeBlock, true, true, 0),
+            Some(TabPlan::InsertSoftTab)
+        );
+        assert_eq!(
+            tab_plan_for_block(&NodeKind::CodeBlock, false, false, 4),
+            Some(TabPlan::InsertSoftTab)
+        );
+    }
+
+    #[test]
+    fn ordinary_list_item_keeps_structural_tab() {
+        assert_eq!(
+            tab_plan_for_block(&NodeKind::Paragraph, true, true, 0),
+            None
+        );
     }
 }

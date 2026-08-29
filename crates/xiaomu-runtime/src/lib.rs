@@ -9,6 +9,7 @@
 //! transactions plus intent-specific after-selection policies. Frontends
 //! (GPUI first) sit on top of this crate and their types never leak into it.
 
+mod line_break;
 mod session_clipboard;
 
 pub mod clipboard;

@@ -23,7 +23,7 @@ use crate::block_view::{
     SelectRight, SelectUp, ShiftTabIndent, TabIndent, ToggleBold, ToggleCode, ToggleItalic,
     ToggleStrike, ToggleUnderline, Undo, Up,
 };
-use crate::document_view::DocumentView;
+use crate::document_view::{DocumentView, actions::HardBreak};
 
 /// Optional host integrations handed to [`run_document_editor`].
 ///
@@ -93,6 +93,7 @@ pub fn run_document_editor_with_hooks(
             KeyBinding::new("backspace", Backspace, None),
             KeyBinding::new("delete", Delete, None),
             KeyBinding::new("enter", Enter, None),
+            KeyBinding::new("shift-enter", HardBreak, None),
             KeyBinding::new("tab", TabIndent, None),
             KeyBinding::new("shift-tab", ShiftTabIndent, None),
             KeyBinding::new("left", Left, None),

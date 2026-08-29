@@ -29,13 +29,13 @@ pub trait TextClipboard {
     fn read_text(&self) -> Option<String>;
 }
 
-/// Normalizes platform clipboard text for pasting into a single inline block.
+/// Normalizes platform line endings to Xiaomu's canonical LF representation.
 ///
-/// Line breaks (`\r\n`, `\r`, `\n`) cannot be represented in ordinary
-/// paragraph inline text, so each break collapses to one space. Xiaomu-native
-/// structured paste bypasses this fallback and reconstructs block structure.
+/// `CRLF` and lone `CR` both become one `\n`; existing LF is preserved. This
+/// is the multiline-safe normalization used by CodeBlock paste and other
+/// adapters that intentionally preserve canonical line breaks.
 #[must_use]
-pub fn normalize_paste_text(text: &str) -> String {
+pub fn normalize_multiline_paste_text(text: &str) -> String {
     let mut normalized = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
 
@@ -43,9 +43,8 @@ pub fn normalize_paste_text(text: &str) -> String {
         match character {
             '\r' => {
                 chars.next_if_eq(&'\n');
-                normalized.push(' ');
+                normalized.push('\n');
             }
-            '\n' => normalized.push(' '),
             other => normalized.push(other),
         }
     }
@@ -53,12 +52,35 @@ pub fn normalize_paste_text(text: &str) -> String {
     normalized
 }
 
+/// Normalizes platform clipboard text for the current ordinary rich-text
+/// plain-text fallback.
+///
+/// Canonical HardBreak is representable as LF (ADR 0004), but unstructured
+/// platform paste into an ordinary paragraph does not infer document break
+/// semantics yet. Line endings are first normalized to LF, then every LF is
+/// collapsed to one space. Xiaomu-native structured paste bypasses this
+/// fallback and reconstructs canonical structure directly.
+#[must_use]
+pub fn normalize_paste_text(text: &str) -> String {
+    normalize_multiline_paste_text(text).replace('\n', " ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn line_breaks_collapse_to_spaces() {
+    fn multiline_normalization_preserves_breaks_as_lf() {
+        assert_eq!(normalize_multiline_paste_text("a\r\nb"), "a\nb");
+        assert_eq!(normalize_multiline_paste_text("a\rb"), "a\nb");
+        assert_eq!(normalize_multiline_paste_text("a\nb"), "a\nb");
+        assert_eq!(normalize_multiline_paste_text("a\r\r\nb"), "a\n\nb");
+        assert_eq!(normalize_multiline_paste_text("\n"), "\n");
+        assert_eq!(normalize_multiline_paste_text(""), "");
+    }
+
+    #[test]
+    fn ordinary_plain_text_line_breaks_collapse_to_spaces() {
         assert_eq!(normalize_paste_text("a\r\nb"), "a b");
         assert_eq!(normalize_paste_text("a\rb"), "a b");
         assert_eq!(normalize_paste_text("a\nb"), "a b");
@@ -72,6 +94,10 @@ mod tests {
         assert_eq!(normalize_paste_text("你好 world 👍"), "你好 world 👍");
         assert_eq!(
             normalize_paste_text("combining é\u{301}"),
+            "combining é\u{301}"
+        );
+        assert_eq!(
+            normalize_multiline_paste_text("combining é\u{301}"),
             "combining é\u{301}"
         );
     }
