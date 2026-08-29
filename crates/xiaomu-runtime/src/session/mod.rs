@@ -1,8 +1,8 @@
 //! Document session orchestration.
 //!
 //! The session is the single canonical orchestration owner: it holds the
-//! current snapshot, the current selection, the basic undo/redo stacks, and
-//! the change-notification seam. Frontends translate input into
+//! current snapshot, the current selection, local editing state, undo/redo,
+//! and the change-notification seam. Frontends translate input into
 //! [`EditIntent`]s and never mutate the document directly.
 //!
 //! Every document edit flows through
@@ -22,6 +22,7 @@ mod paste_hierarchy;
 mod resolve;
 mod selection;
 mod split;
+mod stored_marks;
 mod structure;
 
 pub use history::HistoryStack;
@@ -31,13 +32,13 @@ pub use outcome::{SessionError, SessionOutcome};
 pub use selection::DocumentPosition;
 pub use selection::DocumentSelection;
 
-use xiaomu_core::document::{InlineContent, NodeId, XiaomuDocument};
+use xiaomu_core::document::{InlineContent, MarkSet, NodeId, XiaomuDocument};
 use xiaomu_core::mapping::StepMap;
 use xiaomu_core::selection::{TextPoint, TextSelection};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin};
 
-use self::history::HistoryEntry;
-use self::intent::PlannedAction;
+use self::history::{HistoryEntry, HistoryGroup};
+use self::intent::{HistoryPolicy, PlannedAction};
 use self::resolve::{affinity_of, collapsed_caret, preserved_focus, resolve_selection};
 
 /// Orchestrates one editing session over an immutable Core snapshot.
@@ -50,6 +51,7 @@ pub struct DocumentSession {
     document: XiaomuDocument,
     selection: DocumentSelection,
     history: HistoryStack,
+    stored_marks: Option<MarkSet>,
     listeners: Vec<Box<dyn DocumentChangeListener>>,
 }
 
@@ -68,6 +70,7 @@ impl DocumentSession {
             document,
             selection,
             history: HistoryStack::new(),
+            stored_marks: None,
             listeners: Vec::new(),
         })
     }
@@ -120,10 +123,11 @@ impl DocumentSession {
     /// Applies one typed editing intent.
     ///
     /// Legal empty operations (Backspace at the start of the first block,
-    /// caret moves at the boundary, toggling a mark with a collapsed
-    /// selection, TurnInto the kind already present) return
+    /// caret moves at a boundary, TurnInto the kind already present) return
     /// [`SessionOutcome::NoChange`] without calling Core, advancing the
-    /// revision, notifying listeners, or writing history.
+    /// revision, notifying document listeners, or writing history. A
+    /// collapsed mark toggle updates Runtime StoredMarks without a Core
+    /// transaction.
     pub fn apply_intent(&mut self, intent: &EditIntent) -> Result<SessionOutcome, SessionError> {
         if let EditIntent::MoveCaret {
             caret_move,
@@ -143,6 +147,8 @@ impl DocumentSession {
             return self.set_selection(*anchor, *focus);
         }
         if let EditIntent::PasteSlice { slice } = intent {
+            self.history.break_group();
+            self.clear_stored_marks();
             let action = paste::plan_paste_slice(&self.document, self.selection, slice)?;
             return match action {
                 PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
@@ -157,6 +163,7 @@ impl DocumentSession {
         if matches!(intent, EditIntent::Backspace | EditIntent::Delete)
             && self.selection.as_single_node().is_none()
         {
+            self.history.break_group();
             let action = cross_block::plan_delete_selection(&self.document, self.selection)?;
             return match action {
                 PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
@@ -174,8 +181,25 @@ impl DocumentSession {
             .as_single_node()
             .ok_or(SessionError::SelectionInvalid)?;
         let action = match intent {
-            EditIntent::InsertText { text } => intent::plan_insert_text(selection, text)?,
+            EditIntent::InsertText { text } => intent::plan_insert_text(
+                &inline,
+                selection,
+                text,
+                self.stored_marks.as_ref(),
+                HistoryPolicy::Typing,
+            )?,
+            EditIntent::CommitComposition { text } => {
+                self.history.break_group();
+                intent::plan_insert_text(
+                    &inline,
+                    selection,
+                    text,
+                    self.stored_marks.as_ref(),
+                    HistoryPolicy::Isolated,
+                )?
+            }
             EditIntent::Backspace => {
+                self.history.break_group();
                 let at_block_start = selection.is_collapsed() && focus.offset().as_usize() == 0;
                 // Priority at a block start: merge into the previous block
                 // (same parent), then into the previous list item's tail,
@@ -212,19 +236,42 @@ impl DocumentSession {
                     }
                 }
             }
-            EditIntent::Delete => intent::plan_delete(&inline, selection)?,
-            EditIntent::ToggleMark { mark } => intent::plan_toggle_mark(&inline, selection, mark)?,
-            EditIntent::SplitBlock => split::plan_split_block(&self.document, selection)?,
+            EditIntent::Delete => {
+                self.history.break_group();
+                intent::plan_delete(&inline, selection)?
+            }
+            EditIntent::ToggleMark { mark } if selection.is_collapsed() => {
+                return self.toggle_stored_mark(&inline, mark);
+            }
+            EditIntent::ToggleMark { mark } => {
+                self.history.break_group();
+                self.clear_stored_marks();
+                intent::plan_toggle_mark(&inline, selection, mark)?
+            }
+            EditIntent::SplitBlock => {
+                // Split is an explicit history boundary, but pending marks are
+                // intentionally inherited into the new tail block.
+                self.history.break_group();
+                split::plan_split_block(&self.document, selection)?
+            }
             EditIntent::JoinWithPrevious => {
+                self.history.break_group();
+                self.clear_stored_marks();
                 structure::plan_join_with_previous(&self.document, focus.node_id())?
             }
             EditIntent::TurnInto { kind } => {
+                self.history.break_group();
+                self.clear_stored_marks();
                 structure::plan_turn_into(&self.document, focus.node_id(), kind)?
             }
             EditIntent::IndentListItem => {
+                self.history.break_group();
+                self.clear_stored_marks();
                 structure::plan_indent_list_item(&self.document, focus.node_id())?
             }
             EditIntent::OutdentListItem => {
+                self.history.break_group();
+                self.clear_stored_marks();
                 structure::plan_outdent_list_item(&self.document, focus.node_id())?
             }
             EditIntent::MoveCaret { .. }
@@ -248,6 +295,8 @@ impl DocumentSession {
     /// history. The previous selection is mapped through the change map; a
     /// transaction that deletes a selection endpoint fails atomically.
     pub fn apply(&mut self, transaction: &Transaction) -> Result<SessionOutcome, SessionError> {
+        self.history.break_group();
+        self.clear_stored_marks();
         self.commit(intent::map_existing_plan(transaction.clone()))
     }
 
@@ -257,6 +306,7 @@ impl DocumentSession {
     /// the exact previous store, and reinstates the recorded
     /// `before_selection` directly. Undo on an empty history is a no-op.
     pub fn undo(&mut self) -> Result<SessionOutcome, SessionError> {
+        self.clear_stored_marks();
         let Some(entry) = self.history.take_undo() else {
             return Ok(SessionOutcome::NoChange);
         };
@@ -278,6 +328,7 @@ impl DocumentSession {
     /// Redo replays the original transaction and reinstates the recorded
     /// `after_selection`. Redo on an empty redo stack is a no-op.
     pub fn redo(&mut self) -> Result<SessionOutcome, SessionError> {
+        self.clear_stored_marks();
         let Some(entry) = self.history.take_redo() else {
             return Ok(SessionOutcome::NoChange);
         };
@@ -296,6 +347,7 @@ impl DocumentSession {
 
     fn commit(&mut self, plan: EditPlan) -> Result<SessionOutcome, SessionError> {
         let before_selection = self.selection;
+        let group = history_group_for_plan(&plan);
         let applied = plan
             .transaction()
             .apply_with_changes(&self.document)
@@ -322,6 +374,7 @@ impl DocumentSession {
             undo,
             before_selection,
             after_selection,
+            group,
         });
         self.document = applied.into_document();
         self.selection = after_selection;
@@ -411,6 +464,7 @@ impl DocumentSession {
             undo,
             before_selection,
             after_selection,
+            group: HistoryGroup::Isolated,
         });
         self.document = current;
         self.selection = after_selection;
@@ -468,5 +522,26 @@ impl DocumentSession {
         for listener in &mut self.listeners {
             listener.selection_changed(selection);
         }
+    }
+}
+
+fn history_group_for_plan(plan: &EditPlan) -> HistoryGroup {
+    if plan.history_policy() != HistoryPolicy::Typing {
+        return HistoryGroup::Isolated;
+    }
+    let Some(edit) = plan.primary_edit() else {
+        return HistoryGroup::Isolated;
+    };
+    if edit.range().start() != edit.range().end() || edit.inserted_len() == 0 {
+        return HistoryGroup::Isolated;
+    }
+    let start = edit.range().start().as_usize();
+    let Some(end) = start.checked_add(edit.inserted_len()) else {
+        return HistoryGroup::Isolated;
+    };
+    HistoryGroup::Typing {
+        node: edit.node(),
+        start,
+        end,
     }
 }
