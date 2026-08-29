@@ -158,7 +158,11 @@ fn metadata_round_trip_preserves_minimal_list_fragment_tree() {
         panic!("list fragment must keep item children");
     };
     assert_eq!(items.len(), 2);
-    assert!(items.iter().all(|item| matches!(item.kind(), NodeKind::ListItem)));
+    assert!(
+        items
+            .iter()
+            .all(|item| matches!(item.kind(), NodeKind::ListItem))
+    );
 }
 
 #[test]
