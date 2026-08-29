@@ -41,13 +41,7 @@ impl DocumentSession {
             DocumentSelection::collapsed(moved)
         };
 
-        if next == self.selection {
-            return Ok(SessionOutcome::NoChange);
-        }
-        self.selection = next;
-        self.notify_selection_changed();
-
-        Ok(SessionOutcome::SelectionChanged)
+        self.install_selection(next)
     }
 
     pub(super) fn place_caret(
@@ -70,13 +64,7 @@ impl DocumentSession {
             DocumentSelection::collapsed(moved)
         };
 
-        if next == self.selection {
-            return Ok(SessionOutcome::NoChange);
-        }
-        self.selection = next;
-        self.notify_selection_changed();
-
-        Ok(SessionOutcome::SelectionChanged)
+        self.install_selection(next)
     }
 
     /// Places both selection endpoints at absolute text positions.
@@ -92,13 +80,20 @@ impl DocumentSession {
         let next = DocumentSelection::new(anchor, focus);
         next.validate(&self.document)
             .map_err(|_| SessionError::SelectionInvalid)?;
+        self.install_selection(next)
+    }
 
+    fn install_selection(
+        &mut self,
+        next: DocumentSelection,
+    ) -> Result<SessionOutcome, SessionError> {
         if next == self.selection {
             return Ok(SessionOutcome::NoChange);
         }
         self.selection = next;
+        self.clear_stored_marks();
+        self.history.break_group();
         self.notify_selection_changed();
-
         Ok(SessionOutcome::SelectionChanged)
     }
 }
