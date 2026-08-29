@@ -3,11 +3,11 @@
 //! Split out of [`super::ParagraphView`]'s main module to keep file sizes
 //! within the source-size guardrail. The composition state machine itself
 //! lives in [`crate::input::composition`]; this module wires it to the
-//! view: begin/update from the platform marked-text callback, commit as a
-//! single transaction, cancel by restoring the base selection.
+//! view: begin/update remain frontend-transient, commit becomes one Runtime
+//! composition intent, and cancel simply drops the transient projection.
 
 use gpui::Context;
-use xiaomu_core::text::TextOffset;
+use xiaomu_core::text::{TextOffset, TextRange};
 use xiaomu_runtime::session::EditIntent;
 
 use crate::input::composition::{CompositionState, PreeditUpdate, resolve_preedit_update};
@@ -16,34 +16,21 @@ use crate::input::utf16;
 use super::ParagraphView;
 
 impl ParagraphView {
-    /// Ends the composition without committing, restoring the base
-    /// selection through selection-only intents.
+    /// Ends the composition without committing canonical content.
+    ///
+    /// The Runtime selection never moved while preedit was active, so cancel
+    /// must not synthesize `PlaceCaret` intents. This also preserves pending
+    /// StoredMarks across an IME cancellation.
     pub(crate) fn cancel_composition(&mut self, cx: &mut Context<Self>) {
-        let Some(state) = self.composition.take() else {
+        if self.composition.take().is_none() {
             return;
-        };
-
-        let selection = state.base_selection();
-        let anchor = selection.anchor().offset();
-        let focus = selection.focus().offset();
-        self.apply_intent(
-            EditIntent::PlaceCaret {
-                offset: anchor,
-                extend_selection: false,
-            },
-            cx,
-        );
-        self.apply_intent(
-            EditIntent::PlaceCaret {
-                offset: focus,
-                extend_selection: true,
-            },
-            cx,
-        );
+        }
+        self.request_caret_scroll();
+        cx.notify();
     }
 
-    /// Commits `text` over the composition's base range as exactly one
-    /// transaction (one undo unit).
+    /// Commits `text` over the composition's canonical base range as exactly
+    /// one Runtime intent and one undo unit.
     pub(crate) fn commit_composition(&mut self, text: &str, cx: &mut Context<Self>) {
         let Some(state) = self.composition.take() else {
             return;
@@ -64,23 +51,13 @@ impl ParagraphView {
         else {
             return;
         };
+        let Ok(range) = TextRange::new(start, end) else {
+            return;
+        };
 
         self.apply_intent(
-            EditIntent::PlaceCaret {
-                offset: start,
-                extend_selection: false,
-            },
-            cx,
-        );
-        self.apply_intent(
-            EditIntent::PlaceCaret {
-                offset: end,
-                extend_selection: true,
-            },
-            cx,
-        );
-        self.apply_intent(
-            EditIntent::InsertText {
+            EditIntent::CommitComposition {
+                range,
                 text: text.to_owned(),
             },
             cx,
@@ -144,7 +121,6 @@ impl ParagraphView {
                     // otherwise every keyboard edit stays blocked by the
                     // composing guard until the next mouse click.
                     self.cancel_composition(cx);
-                    cx.notify();
                     return;
                 }
             }
