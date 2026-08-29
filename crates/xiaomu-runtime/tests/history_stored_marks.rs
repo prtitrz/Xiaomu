@@ -181,10 +181,12 @@ fn stored_marks_survive_split_but_split_breaks_typing_history() {
     assert_eq!(session.history_depths(), (1, 0));
 
     session.apply_intent(&EditIntent::SplitBlock).unwrap();
-    assert!(session
-        .stored_marks()
-        .expect("split inherits pending marks")
-        .contains(MarkKind::Bold));
+    assert!(
+        session
+            .stored_marks()
+            .expect("split inherits pending marks")
+            .contains(MarkKind::Bold)
+    );
     assert_eq!(session.history_depths(), (2, 0));
 
     insert(&mut session, "b");
