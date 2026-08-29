@@ -12,7 +12,8 @@
 //!
 //! Modules:
 //! - [`accessibility`]: frontend-readable semantic/text/selection/focus
-//!   projection plus platform accessibility adapter helpers.
+//!   projection, kept independent from unavailable platform role builders in
+//!   the pinned crates.io GPUI 0.2.2 artifact.
 //! - [`input`]: UTF-16 ↔ Core-offset conversion for the platform input path.
 //! - [`block_view`]: one inline-bearing block view and its custom element.
 //! - [`document_view`]: multi-block editor projection and interaction owner.
