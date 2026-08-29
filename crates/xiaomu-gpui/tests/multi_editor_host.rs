@@ -10,7 +10,7 @@ use xiaomu_core::selection::{CursorAffinity, TextPoint};
 use xiaomu_gpui::document_view::DocumentView;
 use xiaomu_gpui::editor::{EditorHooks, EditorInstance, bind_default_editor_keys};
 use xiaomu_runtime::persistence::{DocumentPersistence, PersistenceError};
-use xiaomu_runtime::session::{DocumentChangeListener, DocumentPosition, DocumentSelection};
+use xiaomu_runtime::session::{DocumentChangeListener, DocumentSelection};
 
 struct CountListener(Rc<Cell<u32>>);
 
@@ -103,11 +103,8 @@ fn instance(
 
 #[gpui::test]
 fn mounted_editors_isolate_focus_input_selection_save_and_listener(cx: &mut TestAppContext) {
-    let (document_a, [a_first, a_second]) = document("a", "tail-a");
-    let selection_a = DocumentSelection::new(
-        DocumentPosition::Text(point(&document_a, a_first, 0)),
-        DocumentPosition::Text(point(&document_a, a_second, 6)),
-    );
+    let (document_a, [_a_first, a_second]) = document("a", "tail-a");
+    let selection_a = DocumentSelection::collapsed(point(&document_a, a_second, 6));
     let (document_b, [b_first, _b_second]) = document("head-b", "b");
     let selection_b = DocumentSelection::collapsed(point(&document_b, b_first, 6));
 
