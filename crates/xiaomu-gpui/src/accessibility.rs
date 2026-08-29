@@ -17,7 +17,10 @@ pub enum AccessibilityRole {
     /// Ordinary editable paragraph.
     Paragraph,
     /// Editable heading with a semantic outline level.
-    Heading { level: u8 },
+    Heading {
+        /// Canonical heading level in the inclusive range `1..=6`.
+        level: u8,
+    },
     /// Block quote container.
     BlockQuote,
     /// Ordered or unordered list container.
