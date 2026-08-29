@@ -13,9 +13,7 @@ use xiaomu_core::document::{
     AttrValue, HeadingLevel, InlineContent, LinkMark, Mark, MarkSet, NodeAttrs, NodeKind, TextRun,
 };
 
-use super::fragment::{
-    ClipboardNode, ClipboardNodeContent, ClipboardSlice, validate_roots,
-};
+use super::fragment::{ClipboardNode, ClipboardNodeContent, ClipboardSlice, validate_roots};
 
 const FORMAT: &str = "xiaomu.clipboard";
 // v1 carried only a flat leaf list. v2 carries the detached fragment tree so
@@ -154,8 +152,7 @@ impl WireNode {
         let content = match self.content {
             WireContent::Inline { runs } => ClipboardNodeContent::Inline(
                 InlineContent::new(
-                    runs
-                        .into_iter()
+                    runs.into_iter()
                         .map(WireRun::into_run)
                         .collect::<Result<Vec<_>, _>>()?,
                 )
