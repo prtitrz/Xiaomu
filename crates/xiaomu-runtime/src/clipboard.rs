@@ -9,9 +9,7 @@ mod fragment;
 mod projection;
 mod wire;
 
-pub use fragment::{
-    ClipboardBlock, ClipboardNode, ClipboardNodeContent, ClipboardSlice,
-};
+pub use fragment::{ClipboardBlock, ClipboardNode, ClipboardNodeContent, ClipboardSlice};
 pub use wire::{ClipboardMetadataError, decode_metadata, encode_metadata};
 
 pub(crate) use projection::slice_selection;
