@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P3.3 Cross-block Editing / Structured Clipboard 收口**
+当前切片：**P3.4 History Grouping / Stored Marks / IME 收口**
 
-前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection 均已完成并合入 `main`；P3.3 实现与自动化 Gate 已完成，PR #44 进入最终 CI / squash merge 收口。
+前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection、P3.3 Cross-block Editing / Structured Clipboard 均已完成并合入 `main`；P3.4 Runtime / GPUI 实现与专项自动化 Gate 已成立，PR #45 进入 final current-head CI 与 squash merge 收口。
 
 ## P3.0 Phase Contract
 
@@ -142,20 +142,62 @@ DocumentSelection
 - `structured_paste.rs` 覆盖单 leaf exact marks、multi-block kind / attrs / suffix / caret、cross-block replacement 原子 undo。
 - `hierarchical_paste.rs` 覆盖 list fragment 插入普通 paragraph seam、跨 block target 替换、container reconstruction、last-leaf caret 与 staged undo / redo。
 - PR #43 hierarchy implementation head `bbb61a01` 的 CI run #214：policy、source-size、dependency boundary、fmt、Clippy、workspace tests、Windows/macOS/Linux 与 `CI Success` 全绿。
-- 收口文档 head `44401225` 的 CI run #216：同样全部通过；因 #43 的 Draft 状态无法通过当前 connector 切换，最终 merge PR 为 #44，代码基线相同。
+- 收口文档 head `44401225` 的 CI run #216：同样全部通过；因 #43 的 Draft 状态无法通过当时 connector 切换，最终 merge PR 为 #44，代码基线相同。
+- PR #44 已 squash merge 到 `main`（`8019c03d`）。
 
-P3.3 设计 Gate 已满足；PR #44 仅剩 current-head CI 与 squash merge。
+P3.3 Gate 已关闭。
 
 ## P3.4 History Grouping / Stored Marks / IME
 
-- [ ] typing coalescing / history group
-- [ ] caret / selection move 断组
-- [ ] structural / paste / cut / mark boundary
-- [ ] IME updates 不写 history
-- [ ] IME commit 恰好一次 history commit
-- [ ] collapsed `StoredMarks`
-- [ ] normal typing / IME 对 StoredMarks 的一致继承
-- [ ] undo / redo selection + pending mark regression
+- [x] typing coalescing / history group
+- [x] caret / selection move 断组
+- [x] structural / paste / cut / mark boundary
+- [x] IME updates 不写 history
+- [x] IME commit 恰好一次 history commit
+- [x] collapsed `StoredMarks`
+- [x] normal typing / IME 对 StoredMarks 的一致继承
+- [x] undo / redo selection + pending mark regression
+
+实现事实：
+
+```text
+InsertText + HistoryPolicy::Typing
+→ HistoryGroup::Typing { node, start, end }
+→ same node + adjacent range + continuous selection + open group
+→ merge redo in forward order / undo in reverse order
+→ one undo unit
+
+collapsed ToggleMark
+→ Runtime StoredMarks
+→ no canonical revision / no history entry
+→ break current typing group
+
+IME preedit/update/cancel
+→ GPUI transient CompositionState only
+→ no Runtime selection mutation / no history
+
+IME commit
+→ CommitComposition { range, text }
+→ StoredMarks-aware ReplaceText
+→ isolated history entry
+```
+
+- typing grouping 完全由 Runtime 显式 `HistoryPolicy / HistoryGroup` 决定，不使用隐藏时间阈值。只有 collapsed、非空、同一 node、前后插入 range 相邻且 recorded selection 连续的 typing 才允许合并。
+- caret / selection movement 会清除 StoredMarks 并关闭 typing group；paste、cut、mark、structural command、raw apply、undo / redo 都是明确 boundary。`SplitBlock` 关闭 group，但按编辑器格式继承语义保留 StoredMarks 到新 tail block。
+- collapsed `ToggleMark` 不制造空 `TextRun`，也不推进 `DocumentRevision`。`StoredMarks = None` 表示采用 Core surrounding-run inheritance；`Some(empty)` 能显式覆盖周围已存在的 mark。
+- StoredMarks 的 boundary inheritance 与 Core `ReplaceText` 保持一致：run 边界优先左侧 run，offset 0 使用首 run，末尾使用最后 run。
+- normal typing 与 IME commit 共用 exact StoredMarks application。IME cancel 只丢弃 frontend preedit，因为 Runtime selection 从未在 composition 期间移动，所以 pending marks 不会被错误清除。
+- grouped history entry 保留第一笔 `before_selection` 和最后一笔 `after_selection`；undo / redo 后 StoredMarks 清空，避免 pending formatting 从历史操作中泄漏。
+- plain platform paste 通过独立 `PasteText` intent，不再伪装普通 `InsertText`，因此不会与前后 typing coalesce。
+
+验证证据：
+
+- `history_stored_marks.rs` 覆盖连续 ASCII/CJK/emoji typing coalescing、caret/selection movement、mark boundary、explicit unmark、SplitBlock inheritance、undo/redo pending marks、IME commit 与 plain-text paste boundary。
+- 旧 P1 `undo_redo_round_trip_restores_stores_and_selections` 已升级到 P3.4 contract：`A` + `B` 连续 typing 是一个 entry，Backspace 是第二个 isolated entry；undo / redo 继续精确恢复 store 与 selection。
+- PR #45 code head `e02dd174` 的 CI run #229：policy、source-size、dependency boundary、fmt、Clippy、workspace tests、Windows/macOS/Linux 与 aggregate `CI Success` 全绿。
+- 在 #229 后补充了 collapsed mark command 断组专项回归并同步架构文档；最终以 PR #45 current-head CI 为 merge Gate。
+
+P3.4 设计 Gate 已满足，剩余工作只有 current-head CI 与 squash merge。
 
 ## P3.5 HardBreak / CodeBlock Multi-line
 
@@ -196,8 +238,8 @@ P3 只有在以下条件全部满足后才能完成：
 - [x] wrapped paragraph 的 logical/visual coordinates 分层且可双向解析
 - [x] visual navigation / selection / hit-test 实机可用
 - [x] cross-block copy/cut/delete + structured clipboard 可 undo
-- [ ] typing history grouping 与 IME history interaction 可预测
-- [ ] collapsed StoredMarks 生效且不污染 canonical document
+- [x] typing history grouping 与 IME history interaction 可预测
+- [x] collapsed StoredMarks 生效且不污染 canonical document
 - [ ] HardBreak / CodeBlock multiline 完成长期 contract 决策
 - [ ] accessibility projection seam 成立
 - [ ] realistic persistence/change/focus + multi-editor fixture 成立
@@ -213,3 +255,5 @@ P3 只有在以下条件全部满足后才能完成：
 - P3.2 Windows 首轮实机 Gate 暴露 structural focus routing 时序与每帧 scroll-to-caret 抢占用户滚动；两项均在 #42 内修复，复测通过。
 - P3.3 初版先建立 flat clipboard slice，再逐步补 cross-block Delete / Cut、metadata transport 与 structured paste；history regression 确认一次命令只产生一个 entry。
 - P3.3 hierarchy 收口将 clipboard metadata 从 flat leaf list 升级到 v2 minimal fragment tree。首轮 CI #208 仅暴露 rustfmt 机械差异，macOS workspace tests 已通过；按日志格式化后 CI #214 在三平台、Clippy、policy 与 aggregate `CI Success` 全绿。
+- P3.4 第一轮 CI #221 只暴露 `history.rs` / 新测试的 rustfmt 差异；修正后进入真实 workspace regression。
+- P3.4 CI #224 / #227 暴露旧 P1 history 测试仍假定“每次 InsertText 都是独立 undo entry”。实际 `A`、`B` 已按 P3.4 contract 正确 coalesce；更新旧回归为 grouped typing + isolated Backspace 后，CI #229 三平台、Clippy、policy 与 `CI Success` 全绿。
