@@ -210,6 +210,7 @@ impl WireKind {
             NodeKind::Document | NodeKind::HorizontalRule | NodeKind::Image => {
                 Err(ClipboardMetadataError::unsupported())
             }
+            _ => Err(ClipboardMetadataError::unsupported()),
         }
     }
 
