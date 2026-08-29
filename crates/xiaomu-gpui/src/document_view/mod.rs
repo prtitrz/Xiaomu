@@ -21,7 +21,10 @@ mod visual_navigation;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gpui::{App, Context, Entity, MouseButton, Pixels, ScrollHandle, Window, div, prelude::*, px};
+use gpui::{
+    App, Context, Entity, Focusable as _, MouseButton, Pixels, ScrollHandle, Window, div,
+    prelude::*, px,
+};
 
 use xiaomu_core::document::{NodeContent, NodeId, NodeKind};
 use xiaomu_core::selection::TextPoint;
@@ -29,6 +32,7 @@ use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
 use xiaomu_runtime::persistence::DocumentPersistence;
 
+use crate::accessibility::{AccessibilityProjection, project_accessibility};
 use crate::block_view::{BlockBoundsRegistry, ParagraphView, SharedSession};
 use visual_navigation::NavStep;
 
@@ -80,6 +84,27 @@ impl DocumentView {
     #[must_use]
     pub fn session(&self) -> &SharedSession {
         &self.session
+    }
+
+    /// Projects the current canonical accessibility state and real focus owner.
+    ///
+    /// Selection and focus deliberately remain separate. An inactive editor
+    /// can retain its canonical caret while reporting no `focus_owner` in its
+    /// own window. Child views are materialized by render / initial focus
+    /// routing before a focus owner can be reported.
+    #[must_use]
+    pub fn accessibility_projection(
+        &self,
+        window: &Window,
+        cx: &App,
+    ) -> Option<AccessibilityProjection> {
+        let focus_owner = self
+            .children
+            .iter()
+            .find(|(_, view)| view.read(cx).focus_handle(cx).is_focused(window))
+            .map(|(node, _)| *node);
+        let session = self.session.borrow();
+        project_accessibility(session.document(), session.selection(), focus_owner)
     }
 
     // ---- central intent application ----
