@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P3.3 Cross-block Editing / Structured Clipboard**
+当前切片：**P3.3 Cross-block Editing / Structured Clipboard 收口**
 
-前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract 已通过 CI 并 squash merge；P3.1 Visual-line Geometry / Soft-wrap 已完成并合入；P3.2 Visual Navigation / Selection 已完成自动化与 Windows 实机 Gate，进入 squash merge 收口。
+前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection 均已完成并合入 `main`；P3.3 实现与自动化 Gate 已完成，PR #43 进入最终文档 / CI / squash merge 收口。
 
 ## P3.0 Phase Contract
 
@@ -99,19 +99,51 @@ Core TextPoint(node, TextOffset, CursorAffinity)
 - 两项回归已在 PR #42 内修复：结构变更先 `sync_children` 再 `route_focus`；scroll-to-caret 改为 one-shot request，用户主动滚动不触发回拉。
 - 修复后 PR #42 current head `e333096a` 的 CI run #171：policy、fmt、Clippy、workspace tests、Windows/macOS/Linux 与 `CI Success` 全绿。
 - Windows 复测：Enter 后新段落可直接继续输入；caret 滚出视口后仍可自由滚动，后续键盘/输入才重新触发 caret 可见性；其余 P3.2 visual navigation / selection Gate 未发现异常。
+- PR #42 已 squash merge 到 `main`（`47fcb490`）。
 
 ## P3.3 Cross-block Editing / Structured Clipboard
 
-- [ ] cross-block delete
-- [ ] cross-block copy / cut
-- [ ] frontend-neutral structured clipboard payload
-- [ ] plain-text fallback
-- [ ] structured paste
-- [ ] one-command one-history-entry 原子语义
-- [ ] list / heading / paragraph 跨结构 selection regression
-- [ ] mapping + after-selection regression
+- [x] cross-block delete
+- [x] cross-block copy / cut
+- [x] frontend-neutral structured clipboard payload
+- [x] plain-text fallback
+- [x] structured paste
+- [x] one-command one-history-entry 原子语义
+- [x] list / heading / paragraph 跨结构 selection regression
+- [x] mapping + after-selection regression
 
-已知 handoff：P3.2 实机测试确认单 block copy 正常，跨 block `Ctrl+C` 尚无输出；该缺口按阶段契约属于 P3.3，不回填到 P3.2。
+实现事实：
+
+```text
+DocumentSelection
+→ ClipboardSlice
+   ├─ plain_text
+   ├─ flat ClipboardBlock leaves
+   └─ minimal ClipboardNode fragment roots
+→ GPUI ClipboardItem(text + Xiaomu metadata v2)
+→ PasteSlice
+   ├─ leaf-only：单笔 Core transaction
+   └─ container fragment：hidden staged transactions
+→ one Runtime history entry
+```
+
+- `ClipboardSlice` 是 Runtime 的 detached value，不携带 canonical `NodeId`。单一 inline leaf 只复制所选 inline fragment；跨多个 leaf 时保留覆盖 selection 的最小 container 子树，因此 list / quote 等结构可以保留而不会把未选 sibling 一并复制。
+- plain-text fallback 始终以 `\n` 表示所选 inline block boundary。外部应用只看到普通文本；晓木内部通过 GPUI string metadata 携带版本化 `xiaomu.clipboard` v2 fragment tree。
+- metadata decode 对 foreign / malformed / unknown-version / stale-text payload fail closed，并自动退回 plain text；Core canonical types 不依赖 serde 或 GPUI platform type。
+- cross-block Delete 由 Runtime 编译为 typed Core transaction：保留 head block identity 与 prefix，将 tail suffix 搬到 seam，删除覆盖的中间 leaf，并只清理因本次删除而变空的 container。Cut 先只读投影 clipboard，再执行同一笔 Delete，因此只有一个 history mutation。
+- leaf-only structured paste 使用 `ReplaceText / AddMark / RemoveMark / InsertNode`，精确保留 source marks 和插入 block kind/attrs，并把 host suffix 接到最后 pasted leaf。
+- 含 container 的 structured paste 使用既有 `StagedPlan`：先在 selection seam 分出 host prefix / suffix，再按 fragment tree 重建 container/leaf。中间 snapshot 不暴露给 session；所有阶段 inverse 合并成一个 undo entry，redo 继续复用已分配 identity。
+- staged paste 的 after-selection 落在最后 pasted inline leaf 的 paste seam；cross-block Delete 则落在 surviving head seam。undo / redo 均恢复精确 store 与 selection。
+
+验证证据：
+
+- `cross_block_editing.rs` 覆盖跨 paragraph → nested list 的 Delete / Cut、单 history entry、surviving seam、精确 undo / redo。
+- `clipboard_metadata.rs` 覆盖 kind / attrs / runs / marks 与最小 list fragment tree 的 metadata v2 round-trip，以及 foreign / stale / unknown-version fallback。
+- `structured_paste.rs` 覆盖单 leaf exact marks、multi-block kind / attrs / suffix / caret、cross-block replacement 原子 undo。
+- `hierarchical_paste.rs` 覆盖 list fragment 插入普通 paragraph seam、跨 block target 替换、container reconstruction、last-leaf caret 与 staged undo / redo。
+- PR #43 hierarchy implementation head `bbb61a01` 的 CI run #214：policy、source-size、dependency boundary、fmt、Clippy、workspace tests、Windows/macOS/Linux 与 `CI Success` 全绿。
+
+P3.3 设计 Gate 已满足；PR #43 仅剩收口文档 current-head CI 与 squash merge。
 
 ## P3.4 History Grouping / Stored Marks / IME
 
@@ -162,7 +194,7 @@ P3 只有在以下条件全部满足后才能完成：
 - [x] soft-wrap 是正式 GPUI layout path
 - [x] wrapped paragraph 的 logical/visual coordinates 分层且可双向解析
 - [x] visual navigation / selection / hit-test 实机可用
-- [ ] cross-block copy/cut/delete + structured clipboard 可 undo
+- [x] cross-block copy/cut/delete + structured clipboard 可 undo
 - [ ] typing history grouping 与 IME history interaction 可预测
 - [ ] collapsed StoredMarks 生效且不污染 canonical document
 - [ ] HardBreak / CodeBlock multiline 完成长期 contract 决策
@@ -178,3 +210,5 @@ P3 只有在以下条件全部满足后才能完成：
 - P3.2 初版先由 rustfmt 校正 wrapped geometry / visual navigation 排版，再由 Clippy 暴露 P2 block-level vertical helper dead code；清理后 CI run #159 全绿。
 - P3.2 scroll-to-caret 接入时 CI run #160 暴露未落盘 module 与旧 helper 残留调用；修复后 scroll path 统一依赖 shared `ScrollHandle`、`BlockTextLayout` 与当前 document selection。
 - P3.2 Windows 首轮实机 Gate 暴露 structural focus routing 时序与每帧 scroll-to-caret 抢占用户滚动；两项均在 #42 内修复，复测通过。
+- P3.3 初版先建立 flat clipboard slice，再逐步补 cross-block Delete / Cut、metadata transport 与 structured paste；history regression 确认一次命令只产生一个 entry。
+- P3.3 hierarchy 收口将 clipboard metadata 从 flat leaf list 升级到 v2 minimal fragment tree。首轮 CI #208 仅暴露 rustfmt 机械差异，macOS workspace tests 已通过；按日志格式化后 CI #214 在三平台、Clippy、policy 与 aggregate `CI Success` 全绿。
