@@ -327,7 +327,10 @@ mod tests {
 
     #[test]
     fn gpui_role_mapping_preserves_supported_semantics() {
-        assert_eq!(platform_role_for_kind(&NodeKind::Paragraph), Role::Paragraph);
+        assert_eq!(
+            platform_role_for_kind(&NodeKind::Paragraph),
+            Role::Paragraph
+        );
         assert_eq!(
             platform_role_for_kind(&NodeKind::Heading(HeadingLevel::new(3).unwrap())),
             Role::Heading
