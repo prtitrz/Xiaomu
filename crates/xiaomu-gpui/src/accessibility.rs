@@ -1,10 +1,10 @@
 //! Frontend accessibility projection over the canonical document tree.
 //!
-//! Xiaomu owns a frontend-neutral semantic projection and separately adapts
-//! it to GPUI's public accessibility role/ARIA APIs. GPUI or platform objects
-//! never define canonical document semantics or leak into Core/Runtime.
+//! The pinned crates.io GPUI 0.2.2 artifact does not export its later
+//! semantic-role / AccessKit builder API. Xiaomu therefore owns a
+//! frontend-neutral projection here and keeps the eventual platform tree as
+//! an adapter concern. No GPUI or platform type defines canonical semantics.
 
-use gpui::Role;
 use xiaomu_core::document::{NodeContent, NodeId, NodeKind, XiaomuDocument};
 use xiaomu_runtime::session::DocumentSelection;
 
@@ -185,31 +185,6 @@ fn role_for_kind(kind: &NodeKind) -> AccessibilityRole {
     }
 }
 
-/// Maps one canonical kind to the closest GPUI/AccessKit role currently
-/// available in the pinned frontend. The canonical kind remains available in
-/// [`AccessibilityNode`] even when a platform role is necessarily generic.
-pub(crate) fn platform_role_for_kind(kind: &NodeKind) -> Role {
-    match role_for_kind(kind) {
-        AccessibilityRole::Document => Role::Document,
-        AccessibilityRole::Paragraph => Role::Paragraph,
-        AccessibilityRole::Heading { .. } => Role::Heading,
-        AccessibilityRole::BlockQuote => Role::Blockquote,
-        AccessibilityRole::List => Role::List,
-        AccessibilityRole::ListItem => Role::ListItem,
-        AccessibilityRole::CodeBlock => Role::Code,
-        AccessibilityRole::Image => Role::Image,
-        AccessibilityRole::Separator | AccessibilityRole::Generic => Role::GenericContainer,
-    }
-}
-
-/// Returns a heading level suitable for GPUI's ARIA projection.
-pub(crate) fn platform_heading_level(kind: &NodeKind) -> Option<usize> {
-    match kind {
-        NodeKind::Heading(level) => Some(usize::from(level.as_u8())),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,24 +298,5 @@ mod tests {
         let inactive = project_accessibility(&document, selection, None).unwrap();
         assert_eq!(inactive.selection(), selection);
         assert_eq!(inactive.focus_owner(), None);
-    }
-
-    #[test]
-    fn gpui_role_mapping_preserves_supported_semantics() {
-        assert_eq!(
-            platform_role_for_kind(&NodeKind::Paragraph),
-            Role::Paragraph
-        );
-        assert_eq!(
-            platform_role_for_kind(&NodeKind::Heading(HeadingLevel::new(3).unwrap())),
-            Role::Heading
-        );
-        assert_eq!(
-            platform_heading_level(&NodeKind::Heading(HeadingLevel::new(3).unwrap())),
-            Some(3)
-        );
-        assert_eq!(platform_role_for_kind(&NodeKind::CodeBlock), Role::Code);
-        assert_eq!(platform_role_for_kind(&NodeKind::BulletList), Role::List);
-        assert_eq!(platform_role_for_kind(&NodeKind::ListItem), Role::ListItem);
     }
 }
