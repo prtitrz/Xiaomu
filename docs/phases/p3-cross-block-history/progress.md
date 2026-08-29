@@ -17,7 +17,7 @@
 
 当前切片：**P3.3 Cross-block Editing / Structured Clipboard 收口**
 
-前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection 均已完成并合入 `main`；P3.3 实现与自动化 Gate 已完成，PR #43 进入最终文档 / CI / squash merge 收口。
+前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection 均已完成并合入 `main`；P3.3 实现与自动化 Gate 已完成，PR #44 进入最终 CI / squash merge 收口。
 
 ## P3.0 Phase Contract
 
@@ -142,8 +142,9 @@ DocumentSelection
 - `structured_paste.rs` 覆盖单 leaf exact marks、multi-block kind / attrs / suffix / caret、cross-block replacement 原子 undo。
 - `hierarchical_paste.rs` 覆盖 list fragment 插入普通 paragraph seam、跨 block target 替换、container reconstruction、last-leaf caret 与 staged undo / redo。
 - PR #43 hierarchy implementation head `bbb61a01` 的 CI run #214：policy、source-size、dependency boundary、fmt、Clippy、workspace tests、Windows/macOS/Linux 与 `CI Success` 全绿。
+- 收口文档 head `44401225` 的 CI run #216：同样全部通过；因 #43 的 Draft 状态无法通过当前 connector 切换，最终 merge PR 为 #44，代码基线相同。
 
-P3.3 设计 Gate 已满足；PR #43 仅剩收口文档 current-head CI 与 squash merge。
+P3.3 设计 Gate 已满足；PR #44 仅剩 current-head CI 与 squash merge。
 
 ## P3.4 History Grouping / Stored Marks / IME
 
