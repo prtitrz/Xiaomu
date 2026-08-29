@@ -17,7 +17,7 @@
 
 当前切片：**P3.4 History Grouping / Stored Marks / IME 收口**
 
-前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection、P3.3 Cross-block Editing / Structured Clipboard 均已完成并合入 `main`；P3.4 Runtime / GPUI 实现与专项自动化 Gate 已成立，PR #45 进入 final current-head CI 与 squash merge 收口。
+前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection、P3.3 Cross-block Editing / Structured Clipboard 均已完成并合入 `main`；P3.4 Runtime / GPUI 实现与专项自动化 Gate 已成立。Draft PR #45 的 current-head CI 已全绿，但 ready-for-review connector 因 GitHub GraphQL schema 兼容问题无法切换，故关闭 #45 并以同一分支的非 Draft PR #46 完成 final CI 与 squash merge。
 
 ## P3.0 Phase Contract
 
@@ -195,9 +195,9 @@ IME commit
 - `history_stored_marks.rs` 覆盖连续 ASCII/CJK/emoji typing coalescing、caret/selection movement、mark boundary、explicit unmark、SplitBlock inheritance、undo/redo pending marks、IME commit 与 plain-text paste boundary。
 - 旧 P1 `undo_redo_round_trip_restores_stores_and_selections` 已升级到 P3.4 contract：`A` + `B` 连续 typing 是一个 entry，Backspace 是第二个 isolated entry；undo / redo 继续精确恢复 store 与 selection。
 - PR #45 code head `e02dd174` 的 CI run #229：policy、source-size、dependency boundary、fmt、Clippy、workspace tests、Windows/macOS/Linux 与 aggregate `CI Success` 全绿。
-- 在 #229 后补充了 collapsed mark command 断组专项回归并同步架构文档；最终以 PR #45 current-head CI 为 merge Gate。
+- 补充 collapsed mark command 断组专项回归与架构文档后，#45 current head `f495d061` 的 CI run #235 再次全绿。因 Draft → ready connector 的 GraphQL schema 兼容故障，#45 未合并；最终 merge PR #46 复用同一分支并以自身 current-head CI 为 Gate。
 
-P3.4 设计 Gate 已满足，剩余工作只有 current-head CI 与 squash merge。
+P3.4 设计 Gate 已满足，剩余工作只有 PR #46 current-head CI 与 squash merge。
 
 ## P3.5 HardBreak / CodeBlock Multi-line
 
