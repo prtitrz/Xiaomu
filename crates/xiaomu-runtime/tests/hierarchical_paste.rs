@@ -105,10 +105,11 @@ fn assert_pasted_list(document: &XiaomuDocument, list: NodeId) -> NodeId {
     ));
     let items = children(document, list);
     assert_eq!(items.len(), 2);
-    assert!(items.iter().all(|item| matches!(
-        document.node(*item).unwrap().kind(),
-        NodeKind::ListItem
-    )));
+    assert!(
+        items
+            .iter()
+            .all(|item| matches!(document.node(*item).unwrap().kind(), NodeKind::ListItem))
+    );
     let first = children(document, items[0])[0];
     let second = children(document, items[1])[0];
     assert_eq!(text(document, first), "乙");
