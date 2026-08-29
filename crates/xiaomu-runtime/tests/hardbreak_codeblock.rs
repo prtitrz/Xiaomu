@@ -5,9 +5,7 @@ use xiaomu_core::document::{
     NodeStoreBuilder, TextRun, XiaomuDocument,
 };
 use xiaomu_core::selection::{CursorAffinity, TextPoint};
-use xiaomu_runtime::session::{
-    DocumentSelection, DocumentSession, EditIntent, SessionOutcome,
-};
+use xiaomu_runtime::session::{DocumentSelection, DocumentSession, EditIntent, SessionOutcome};
 
 fn document_with(kind: NodeKind, text: &str) -> (XiaomuDocument, NodeId) {
     let content = if text.is_empty() {
@@ -26,19 +24,12 @@ fn document_with(kind: NodeKind, text: &str) -> (XiaomuDocument, NodeId) {
             NodeContent::children([block]),
         )
         .unwrap();
-    (
-        XiaomuDocument::new(root, builder.finish()).unwrap(),
-        block,
-    )
+    (XiaomuDocument::new(root, builder.finish()).unwrap(), block)
 }
 
 fn point(document: &XiaomuDocument, node: NodeId, raw: usize) -> TextPoint {
     let inline = document.node(node).unwrap().content().as_inline().unwrap();
-    TextPoint::new(
-        node,
-        inline.offset_at(raw).unwrap(),
-        CursorAffinity::Before,
-    )
+    TextPoint::new(node, inline.offset_at(raw).unwrap(), CursorAffinity::Before)
 }
 
 fn session_at(document: &XiaomuDocument, node: NodeId, raw: usize) -> DocumentSession {
@@ -109,7 +100,15 @@ fn hard_break_is_one_lf_inside_the_same_paragraph_and_breaks_typing_history() {
         SessionOutcome::DocumentChanged
     );
     assert_eq!(text(&session, paragraph), "aX\nb");
-    assert_eq!(session.text_selection().unwrap().focus().offset().as_usize(), 3);
+    assert_eq!(
+        session
+            .text_selection()
+            .unwrap()
+            .focus()
+            .offset()
+            .as_usize(),
+        3
+    );
     assert_eq!(session.history_depths(), (2, 0));
 
     insert(&mut session, "Y");
