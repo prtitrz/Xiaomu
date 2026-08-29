@@ -229,7 +229,10 @@ impl DocumentView {
             let session = self.session.borrow();
             match session.selection().focus() {
                 DocumentPosition::Text(point) => {
-                    let kind = session.document().node(point.node_id()).map(|node| node.kind());
+                    let kind = session
+                        .document()
+                        .node(point.node_id())
+                        .map(|node| node.kind());
                     let in_list =
                         markers::list_context(session.document(), point.node_id()).is_some();
                     match (kind, session.text_selection()) {
@@ -400,8 +403,7 @@ impl DocumentView {
                 self.apply_intent(EditIntent::PasteSlice { slice }, window, cx);
             }
             PlatformClipboardContent::Text(text) => {
-                let preserve_breaks =
-                    matches!(self.focused_node_kind(), Some(NodeKind::CodeBlock));
+                let preserve_breaks = matches!(self.focused_node_kind(), Some(NodeKind::CodeBlock));
                 let text = if preserve_breaks {
                     normalize_multiline_paste_text(&text)
                 } else {
