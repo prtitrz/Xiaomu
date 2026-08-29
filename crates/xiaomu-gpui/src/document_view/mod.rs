@@ -89,22 +89,35 @@ impl DocumentView {
     /// Projects the current canonical accessibility state and real focus owner.
     ///
     /// Selection and focus deliberately remain separate. An inactive editor
-    /// can retain its canonical caret while reporting no `focus_owner` in its
-    /// own window. Child views are materialized by render / initial focus
-    /// routing before a focus owner can be reported.
+    /// can retain its canonical caret while reporting no `focus_owner`. Child
+    /// views are materialized by render / focus restoration before a focus
+    /// owner can be reported.
     #[must_use]
     pub fn accessibility_projection(
         &self,
         window: &Window,
         cx: &App,
     ) -> Option<AccessibilityProjection> {
-        let focus_owner = self
-            .children
-            .iter()
-            .find(|(_, view)| view.read(cx).focus_handle(cx).is_focused(window))
-            .map(|(node, _)| *node);
+        let focus_owner = if window.is_window_active() {
+            self.children
+                .iter()
+                .find(|(_, view)| view.read(cx).focus_handle(cx).is_focused(window))
+                .map(|(node, _)| *node)
+        } else {
+            None
+        };
         let session = self.session.borrow();
         project_accessibility(session.document(), session.selection(), focus_owner)
+    }
+
+    /// Restores native keyboard focus to the block holding selection focus.
+    ///
+    /// Hosts call this after mounting an [`EditorInstance`](crate::editor::EditorInstance)
+    /// whose [`DocumentSelection`](xiaomu_runtime::session::DocumentSelection)
+    /// was restored from host state. The canonical selection is not changed.
+    pub fn focus_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_children(cx);
+        self.route_focus(window, cx);
     }
 
     // ---- central intent application ----
