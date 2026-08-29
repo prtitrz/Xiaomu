@@ -10,18 +10,12 @@ use xiaomu_core::selection::{CursorAffinity, TextPoint};
 use xiaomu_gpui::document_view::DocumentView;
 use xiaomu_gpui::editor::{EditorHooks, EditorInstance, bind_default_editor_keys};
 use xiaomu_runtime::persistence::{DocumentPersistence, PersistenceError};
-use xiaomu_runtime::session::{
-    DocumentChangeListener, DocumentPosition, DocumentSelection,
-};
+use xiaomu_runtime::session::{DocumentChangeListener, DocumentPosition, DocumentSelection};
 
 struct CountListener(Rc<Cell<u32>>);
 
 impl DocumentChangeListener for CountListener {
-    fn document_changed(
-        &mut self,
-        _document: &XiaomuDocument,
-        _selection: DocumentSelection,
-    ) {
+    fn document_changed(&mut self, _document: &XiaomuDocument, _selection: DocumentSelection) {
         self.0.set(self.0.get() + 1);
     }
 }
@@ -74,11 +68,7 @@ fn document(first: &str, second: &str) -> (XiaomuDocument, [NodeId; 2]) {
 
 fn point(document: &XiaomuDocument, node: NodeId, raw: usize) -> TextPoint {
     let inline = document.node(node).unwrap().content().as_inline().unwrap();
-    TextPoint::new(
-        node,
-        inline.offset_at(raw).unwrap(),
-        CursorAffinity::Before,
-    )
+    TextPoint::new(node, inline.offset_at(raw).unwrap(), CursorAffinity::Before)
 }
 
 fn text(document: &XiaomuDocument, node: NodeId) -> String {
@@ -125,18 +115,8 @@ fn mounted_editors_isolate_focus_input_selection_save_and_listener(cx: &mut Test
     let saves_b = Rc::new(Cell::new(0));
     let changes_a = Rc::new(Cell::new(0));
     let changes_b = Rc::new(Cell::new(0));
-    let editor_a = instance(
-        document_a,
-        selection_a,
-        saves_a.clone(),
-        changes_a.clone(),
-    );
-    let editor_b = instance(
-        document_b,
-        selection_b,
-        saves_b.clone(),
-        changes_b.clone(),
-    );
+    let editor_a = instance(document_a, selection_a, saves_a.clone(), changes_a.clone());
+    let editor_b = instance(document_b, selection_b, saves_b.clone(), changes_b.clone());
     let session_a = editor_a.session().clone();
     let session_b = editor_b.session().clone();
 
