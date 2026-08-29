@@ -182,6 +182,39 @@ fn caret_and_selection_movement_clear_stored_marks() {
 }
 
 #[test]
+fn collapsed_mark_toggle_breaks_typing_and_starts_a_new_marked_group() {
+    let (document, paragraph) = document_with("", MarkSet::empty());
+    let mut session = session_at(&document, paragraph, 0);
+
+    insert(&mut session, "a");
+    assert_eq!(session.history_depths(), (1, 0));
+
+    assert_eq!(
+        session
+            .apply_intent(&EditIntent::ToggleMark { mark: Mark::Bold })
+            .unwrap(),
+        SessionOutcome::NoChange
+    );
+    assert_eq!(session.history_depths(), (1, 0));
+    assert!(
+        session
+            .stored_marks()
+            .expect("bold pending after collapsed toggle")
+            .contains(MarkKind::Bold)
+    );
+
+    insert(&mut session, "b");
+    assert_eq!(text(&session, paragraph), "ab");
+    assert_eq!(session.history_depths(), (2, 0));
+    assert!(!mark_at(&session, paragraph, 0, MarkKind::Bold));
+    assert!(mark_at(&session, paragraph, 1, MarkKind::Bold));
+
+    session.undo().unwrap();
+    assert_eq!(text(&session, paragraph), "a");
+    assert_eq!(session.history_depths(), (1, 1));
+}
+
+#[test]
 fn collapsed_toggle_can_explicitly_remove_inherited_marks() {
     let bold = MarkSet::new([Mark::Bold]).unwrap();
     let (document, paragraph) = document_with("ab", bold);
