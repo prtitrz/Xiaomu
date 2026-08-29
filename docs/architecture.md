@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 均已完成；P3.1 visual-line geometry / soft-wrap 与 P3.2 visual navigation / selection 已合入 `main`；P3.3 cross-block editing / structured clipboard 的实现与自动化 Gate 已完成，PR #44 处于收口。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection 与 structured paste；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、wrapped geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret 与 list marker projection；宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
+当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 均已完成；P3.1 visual-line geometry / soft-wrap、P3.2 visual navigation / selection 与 P3.3 cross-block editing / structured clipboard 已合入 `main`；P3.4 已建立 Runtime typing history grouping、explicit history boundary、collapsed `StoredMarks` 与独立 IME commit contract，当前进入阶段收口。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection、structured paste 与 local history grouping；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、wrapped geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret 与 list marker projection；宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
 
 ## Core 边界
 
@@ -233,6 +233,7 @@ EditIntent
 EditPlan / StagedPlan
 SelectionUpdate
 HistoryStack
+StoredMarks
 SessionOutcome
 DocumentChangeListener
 ```
@@ -243,6 +244,9 @@ DocumentChangeListener
 
 ```text
 InsertText
+CommitComposition
+PasteText
+PasteSlice
 Backspace
 Delete
 MoveCaret
@@ -253,7 +257,6 @@ JoinWithPrevious
 TurnInto
 IndentListItem
 OutdentListItem
-PasteSlice
 SetSelection
 ```
 
@@ -284,6 +287,36 @@ PreserveFocus
 ```
 
 结构命令和 structured paste 按 intent 明确 selection policy，避免把“目标节点被删”统一解释为失败。
+
+### History 与 StoredMarks
+
+Core inverse contract 仍只负责单笔 transaction 的精确反演；history grouping 由 Runtime `HistoryStack` 决定。每个 Runtime history entry 保存 redo / undo transaction、before / after `DocumentSelection` 与显式 `HistoryGroup`。
+
+当前 grouping 规则：
+
+```text
+连续 collapsed InsertText
+  + 同一 NodeId
+  + 前一插入 end == 后一插入 start
+  + before/after selection 连续
+  + typing group 未被 boundary 关闭
+→ 合并为一个 undo unit
+
+caret / selection move
+mark command
+paste / cut
+structural command
+IME commit
+undo / redo
+raw apply
+→ 关闭 typing group 或形成独立 history entry
+```
+
+Runtime 不使用时间阈值推断 canonical history 语义。合并后的 redo 按原提交顺序拼接，undo 按逆序拼接；entry 保留第一笔 `before_selection` 与最后一笔 `after_selection`，因此 grouped typing 的 undo / redo 可精确恢复 selection。
+
+collapsed caret 的 `ToggleMark` 更新 session-local `StoredMarks`，不写入 `XiaomuDocument`、不推进 revision、也不创建空 `TextRun`。`None` 表示继续使用 Core 的 surrounding-run inheritance，`Some(empty)` 表示显式要求无 mark。普通 `InsertText` 与 `CommitComposition` 共用同一 StoredMarks 应用规则。
+
+StoredMarks 生命周期已经明确：真实 caret / selection movement、undo / redo 与不继承格式的结构命令会清除；`SplitBlock` 保留 pending marks 到新 tail block，但同时关闭旧 typing group；collapsed mark toggle 本身也关闭 typing group，因此切换格式后的后续输入属于新的 undo unit。IME preedit/cancel 不改变 Runtime selection 或 StoredMarks，只有最终 commit 进入 Runtime history。
 
 ### List 与结构命令
 
@@ -409,7 +442,7 @@ editor.rs
 
 所有文档 mutation 经 Runtime intent 提交。平台 `EntityInputHandler` 的 UTF-16 range 在 GPUI adapter 转换为合法 Core UTF-8 coordinate。
 
-IME composition 的 preedit 保持 frontend-local，不推进 document revision；commit 形成一笔 `InsertText` history entry；cancel 恢复 base selection。P2 composition 仍限制在单 block 内启动。
+IME composition 的 preedit 保持 frontend-local，不推进 document revision，也不移动 Runtime canonical selection。composition state 只保存待替换的 canonical byte range、当前 preedit 与 preedit 内 UTF-16 selection；更新与 cancel 都不写 history。cancel 只丢弃 transient projection，因此 pending StoredMarks 不会因伪 caret movement 被清除。最终 commit 通过单个 `EditIntent::CommitComposition { range, text }` 进入 Runtime，使用与普通 typing 相同的 StoredMarks 规则，并形成恰好一个独立 undo unit。P3 composition 仍限制在单 block 内启动。
 
 ### Multi-block DocumentView
 
@@ -443,7 +476,7 @@ list marker 只存在于 frontend projection，不进入 canonical text、TextOf
 
 GPUI 已绑定 Left / Right / visual Home / End / Up / Down、Shift visual selection、Backspace / Delete、SelectAll、Undo / Redo、Copy / Cut / Paste、Bold / Italic / Code / Underline / Strike，以及结构编辑 Enter / Tab / Shift-Tab。macOS / Windows 使用平台对应组合键。
 
-Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 Xiaomu v2 structured metadata。外部应用按普通文本消费；晓木 Paste 优先验证并使用 structured metadata，metadata 缺失、过期或非法时自动走 plain-text fallback。平台 adapter 只负责 transport，不解释 canonical document mutation。
+Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 Xiaomu v2 structured metadata。外部应用按普通文本消费；晓木 Paste 优先验证并使用 structured metadata，metadata 缺失、过期或非法时自动走 `PasteText` plain-text fallback。structured paste 与 plain-text paste 都是显式 history boundary；平台 adapter 只负责 transport，不解释 canonical document mutation。
 
 ### Host hooks
 

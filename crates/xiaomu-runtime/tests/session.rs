@@ -451,34 +451,34 @@ fn undo_redo_round_trip_restores_stores_and_selections() {
     session.apply_intent(&EditIntent::Backspace).unwrap();
     assert_eq!(text_of(&session, paragraph), "A你好世界");
     assert_eq!(caret_offset(&session), 1);
+    assert_eq!(session.history_depths(), (2, 0));
     let peak_store = session.document().store().clone();
 
-    // Undo walks the selections back through the recorded before-states.
+    // P3.4 groups adjacent typing into one undo unit; Backspace remains an
+    // isolated boundary. Undo therefore restores AB first, then removes the
+    // whole typing group and its recorded pre-typing selection.
     session.undo().unwrap();
     assert_eq!(text_of(&session, paragraph), "AB你好世界");
     assert_eq!(caret_offset(&session), 2);
     session.undo().unwrap();
-    assert_eq!(text_of(&session, paragraph), "A你好世界");
-    assert_eq!(caret_offset(&session), 1);
-    session.undo().unwrap();
     assert_eq!(text_of(&session, paragraph), "你好世界");
     assert_eq!(caret_offset(&session), 0);
     assert_eq!(session.document().store(), &initial_store);
-    assert_eq!(session.history_depths(), (0, 3));
+    assert_eq!(session.history_depths(), (0, 2));
 
-    // Redo replays the recorded after-states in order.
+    // Redo replays the grouped typing and then the isolated Backspace.
     session.redo().unwrap();
-    assert_eq!(caret_offset(&session), 1);
-    session.redo().unwrap();
+    assert_eq!(text_of(&session, paragraph), "AB你好世界");
     assert_eq!(caret_offset(&session), 2);
     session.redo().unwrap();
     assert_eq!(text_of(&session, paragraph), "A你好世界");
     assert_eq!(caret_offset(&session), 1);
     assert_eq!(session.document().store(), &peak_store);
-    assert_eq!(session.history_depths(), (3, 0));
+    assert_eq!(session.history_depths(), (2, 0));
 
-    // Three commits, three undos, three redos: nine document changes.
-    assert_eq!(listener.counters().document_changes, 9);
+    // Three original commits still notify individually; two undo and two
+    // redo applications add four more document-change notifications.
+    assert_eq!(listener.counters().document_changes, 7);
 }
 
 #[test]

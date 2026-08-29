@@ -4,14 +4,23 @@
 //! transaction contract: the same Core steps can serve many commands, and
 //! only the session knows which after-selection a command promises.
 
-use xiaomu_core::document::{InlineContent, Mark, MarkKind, NodeId, NodeKind};
+use xiaomu_core::document::{InlineContent, Mark, MarkKind, MarkSet, NodeId, NodeKind};
 use xiaomu_core::selection::{TextPoint, TextSelection};
-use xiaomu_core::text::{TextOffset, TextRange};
+use xiaomu_core::text::{TextBuffer, TextOffset, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
 use crate::clipboard::ClipboardSlice;
 
 use super::SessionError;
+
+const MARK_KINDS: [MarkKind; 6] = [
+    MarkKind::Bold,
+    MarkKind::Italic,
+    MarkKind::Code,
+    MarkKind::Underline,
+    MarkKind::Strike,
+    MarkKind::Link,
+];
 
 /// One caret movement direction over the paragraph's logical text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -37,9 +46,29 @@ pub enum CaretMove {
 #[non_exhaustive]
 pub enum EditIntent {
     /// Insert `text` at the current selection, replacing a non-collapsed
-    /// selection. Empty text over a collapsed caret is a no-op.
+    /// selection. Adjacent collapsed insertions are eligible for Runtime
+    /// typing-history coalescing. Empty text over a collapsed caret is a no-op.
     InsertText {
         /// Replacement text; may be empty (deletes the selection).
+        text: String,
+    },
+    /// Commit one native IME composition over an explicit canonical range.
+    ///
+    /// Composition updates remain frontend-transient. The final committed
+    /// text uses the same StoredMarks semantics as normal typing but owns one
+    /// isolated history entry rather than joining an adjacent typing group.
+    CommitComposition {
+        /// Replacement range in the focused inline node.
+        range: TextRange,
+        /// Final composition text.
+        text: String,
+    },
+    /// Paste unstructured platform text over the current selection.
+    ///
+    /// Plain text inherits the current typing marks but always owns an
+    /// isolated history entry, so paste never coalesces with adjacent typing.
+    PasteText {
+        /// Normalized platform text.
         text: String,
     },
     /// Paste a detached Xiaomu structured clipboard fragment.
@@ -75,9 +104,11 @@ pub enum EditIntent {
         /// Keep the anchor and move only the focus (Shift-click, drag).
         extend_selection: bool,
     },
-    /// Toggle one mark over the whole selection.
+    /// Toggle one mark over the selection or at a collapsed caret.
     ///
-    /// A collapsed selection is a no-op; P1 has no pending-mark state.
+    /// Non-collapsed selections change canonical marks. At a collapsed caret
+    /// the session updates Runtime StoredMarks without advancing the document
+    /// revision; later typing/IME commit uses that explicit mark set.
     ToggleMark {
         /// The mark to apply; an existing mark of the same kind over the
         /// whole selection is removed instead.
@@ -133,6 +164,15 @@ pub enum EditIntent {
         /// Selection focus endpoint.
         focus: TextPoint,
     },
+}
+
+/// How one plan participates in Runtime history grouping.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HistoryPolicy {
+    /// Always record an independent undo unit.
+    Isolated,
+    /// Allow adjacency-based coalescing with the currently open typing group.
+    Typing,
 }
 
 /// How the session derives the selection after a plan commits.
@@ -204,7 +244,7 @@ impl PrimaryEdit {
     }
 }
 
-/// A planned edit: the Core transaction plus the runtime selection policy.
+/// A planned edit: the Core transaction plus Runtime selection/history policy.
 ///
 /// Plans are produced by the session from intents; callers never construct
 /// them directly.
@@ -213,6 +253,7 @@ pub struct EditPlan {
     transaction: Transaction,
     selection_update: SelectionUpdate,
     primary_edit: Option<PrimaryEdit>,
+    history_policy: HistoryPolicy,
 }
 
 impl EditPlan {
@@ -225,7 +266,13 @@ impl EditPlan {
             transaction,
             selection_update,
             primary_edit,
+            history_policy: HistoryPolicy::Isolated,
         }
+    }
+
+    pub(crate) fn with_history_policy(mut self, history_policy: HistoryPolicy) -> Self {
+        self.history_policy = history_policy;
+        self
     }
 
     /// Returns the Core transaction to apply.
@@ -244,6 +291,10 @@ impl EditPlan {
     #[must_use]
     pub const fn primary_edit(&self) -> Option<&PrimaryEdit> {
         self.primary_edit.as_ref()
+    }
+
+    pub(crate) const fn history_policy(&self) -> HistoryPolicy {
+        self.history_policy
     }
 }
 
@@ -291,10 +342,13 @@ pub(crate) fn concatenated(inline: &InlineContent) -> String {
         .collect()
 }
 
-/// Builds the plan for inserting text at the current selection.
+/// Builds a text replacement plan using optional explicit StoredMarks.
 pub(crate) fn plan_insert_text(
+    inline: &InlineContent,
     selection: TextSelection,
     text: &str,
+    stored_marks: Option<&MarkSet>,
+    requested_history: HistoryPolicy,
 ) -> Result<PlannedAction, SessionError> {
     if text.is_empty() && selection.is_collapsed() {
         return Ok(PlannedAction::NoChange);
@@ -302,21 +356,38 @@ pub(crate) fn plan_insert_text(
 
     let node = selection.focus().node_id();
     let range = ordered_range(selection)?;
-    let transaction = edit_transaction(TransactionStep::ReplaceText {
+    let mut transaction = edit_transaction(TransactionStep::ReplaceText {
         node,
         range,
         replacement: text.to_owned(),
     });
+    if let Some(marks) = stored_marks
+        && !text.is_empty()
+    {
+        push_exact_insert_marks(&mut transaction, inline, node, range, text, marks)?;
+    }
 
-    Ok(PlannedAction::Commit(EditPlan::new(
-        transaction,
-        SelectionUpdate::CaretAfterReplacement,
-        Some(PrimaryEdit {
-            node,
-            range,
-            inserted_len: text.len(),
-        }),
-    )))
+    let history_policy = if requested_history == HistoryPolicy::Typing
+        && selection.is_collapsed()
+        && !text.is_empty()
+    {
+        HistoryPolicy::Typing
+    } else {
+        HistoryPolicy::Isolated
+    };
+
+    Ok(PlannedAction::Commit(
+        EditPlan::new(
+            transaction,
+            SelectionUpdate::CaretAfterReplacement,
+            Some(PrimaryEdit {
+                node,
+                range,
+                inserted_len: text.len(),
+            }),
+        )
+        .with_history_policy(history_policy),
+    ))
 }
 
 /// Builds the plan for Backspace.
@@ -361,7 +432,7 @@ pub(crate) fn plan_delete(
     Ok(PlannedAction::Commit(deletion_plan(node, range)))
 }
 
-/// Builds the plan for toggling one mark over the selection.
+/// Builds the plan for toggling one mark over a non-collapsed selection.
 pub(crate) fn plan_toggle_mark(
     inline: &InlineContent,
     selection: TextSelection,
@@ -397,6 +468,45 @@ pub(crate) fn plan_toggle_mark(
 /// Wraps a raw transaction with the map-existing selection policy.
 pub(crate) fn map_existing_plan(transaction: Transaction) -> EditPlan {
     EditPlan::new(transaction, SelectionUpdate::MapExisting, None)
+}
+
+fn push_exact_insert_marks(
+    transaction: &mut Transaction,
+    inline: &InlineContent,
+    node: NodeId,
+    replaced: TextRange,
+    inserted_text: &str,
+    marks: &MarkSet,
+) -> Result<(), SessionError> {
+    let source = concatenated(inline);
+    let start = replaced.start().as_usize();
+    let end = replaced.end().as_usize();
+    let post_text = format!("{}{}{}", &source[..start], inserted_text, &source[end..]);
+    let buffer = TextBuffer::from_string(post_text);
+    let inserted_range = buffer
+        .range(
+            buffer.offset_at(start).map_err(SessionError::Core)?,
+            buffer
+                .offset_at(start + inserted_text.len())
+                .map_err(SessionError::Core)?,
+        )
+        .map_err(SessionError::Core)?;
+
+    for kind in MARK_KINDS {
+        transaction.push_step(TransactionStep::RemoveMark {
+            node,
+            range: inserted_range,
+            mark_kind: kind,
+        });
+    }
+    for mark in marks.as_slice() {
+        transaction.push_step(TransactionStep::AddMark {
+            node,
+            range: inserted_range,
+            mark: mark.clone(),
+        });
+    }
+    Ok(())
 }
 
 fn ordered_range(selection: TextSelection) -> Result<TextRange, SessionError> {
