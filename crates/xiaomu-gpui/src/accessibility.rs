@@ -4,6 +4,7 @@
 //! AccessKit objects. Platform accessibility trees are adapters over this
 //! projection; they do not define document semantics.
 
+use gpui::Role;
 use xiaomu_core::document::{NodeContent, NodeId, NodeKind, XiaomuDocument};
 use xiaomu_runtime::session::DocumentSelection;
 
@@ -189,6 +190,31 @@ pub(crate) fn element_id(node: NodeId) -> String {
     format!("xiaomu-a11y-{node:?}")
 }
 
+/// Maps a canonical node kind to the closest GPUI/AccessKit platform role.
+pub(crate) fn platform_role(kind: &NodeKind) -> Role {
+    match kind {
+        NodeKind::Document => Role::Document,
+        NodeKind::Paragraph => Role::Paragraph,
+        NodeKind::Heading(_) => Role::Heading,
+        NodeKind::Quote => Role::Blockquote,
+        NodeKind::BulletList | NodeKind::OrderedList => Role::List,
+        NodeKind::ListItem => Role::ListItem,
+        NodeKind::CodeBlock => Role::Code,
+        NodeKind::HorizontalRule => Role::Separator,
+        NodeKind::Image => Role::Image,
+        NodeKind::Custom(_) => Role::Group,
+        _ => Role::Group,
+    }
+}
+
+/// Returns an outline level only for canonical headings.
+pub(crate) fn heading_level(kind: &NodeKind) -> Option<usize> {
+    match kind {
+        NodeKind::Heading(level) => Some(usize::from(level.as_u8())),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,5 +323,15 @@ mod tests {
         let inactive = project_accessibility(&document, selection, None).unwrap();
         assert_eq!(inactive.selection(), selection);
         assert_eq!(inactive.focus_owner(), None);
+    }
+
+    #[test]
+    fn platform_role_mapping_keeps_document_semantics() {
+        assert_eq!(platform_role(&NodeKind::Paragraph), Role::Paragraph);
+        assert_eq!(platform_role(&NodeKind::CodeBlock), Role::Code);
+        assert_eq!(
+            heading_level(&NodeKind::Heading(HeadingLevel::new(4).unwrap())),
+            Some(4)
+        );
     }
 }
