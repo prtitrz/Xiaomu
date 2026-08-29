@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use xiaomu_core::document::{InlineContent, NodeAttrs, NodeContent, NodeId, NodeKind, TextRun, XiaomuDocument};
+use xiaomu_core::document::{
+    InlineContent, NodeAttrs, NodeContent, NodeId, NodeKind, TextRun, XiaomuDocument,
+};
 
 use super::fragment::{ClipboardNode, ClipboardNodeContent, ClipboardSlice, project_roots};
 use crate::session::{DocumentPosition, DocumentSelection, SessionError};
@@ -306,13 +308,27 @@ mod tests {
         assert!(matches!(list.kind(), NodeKind::BulletList));
         let items = list.content().as_children().unwrap();
         assert_eq!(items.len(), 2);
-        assert!(items.iter().all(|item| matches!(item.kind(), NodeKind::ListItem)));
+        assert!(
+            items
+                .iter()
+                .all(|item| matches!(item.kind(), NodeKind::ListItem))
+        );
         assert_eq!(
-            text(items[0].content().as_children().unwrap()[0].content().as_inline().unwrap()),
+            text(
+                items[0].content().as_children().unwrap()[0]
+                    .content()
+                    .as_inline()
+                    .unwrap()
+            ),
             "乙"
         );
         assert_eq!(
-            text(items[1].content().as_children().unwrap()[0].content().as_inline().unwrap()),
+            text(
+                items[1].content().as_children().unwrap()[0]
+                    .content()
+                    .as_inline()
+                    .unwrap()
+            ),
             "尾"
         );
     }
