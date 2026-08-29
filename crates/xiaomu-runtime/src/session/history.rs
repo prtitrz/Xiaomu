@@ -21,11 +21,7 @@ impl HistoryGroup {
     fn merge(self, next: Self) -> Option<Self> {
         match (self, next) {
             (
-                Self::Typing {
-                    node,
-                    start,
-                    end,
-                },
+                Self::Typing { node, start, end },
                 Self::Typing {
                     node: next_node,
                     start: next_start,
@@ -111,8 +107,7 @@ impl HistoryStack {
             if let Some(merged_group) = previous.group.merge(entry.group)
                 && previous.after_selection == entry.before_selection
             {
-                self.undo
-                    .push(merge_entries(previous, entry, merged_group));
+                self.undo.push(merge_entries(previous, entry, merged_group));
                 self.typing_group_open = true;
                 return;
             }
@@ -157,11 +152,7 @@ impl HistoryStack {
     }
 }
 
-fn merge_entries(
-    previous: HistoryEntry,
-    next: HistoryEntry,
-    group: HistoryGroup,
-) -> HistoryEntry {
+fn merge_entries(previous: HistoryEntry, next: HistoryEntry, group: HistoryGroup) -> HistoryEntry {
     let mut redo = Transaction::new(TransactionOrigin::System);
     for step in previous.redo.steps() {
         redo.push_step(step.clone());
