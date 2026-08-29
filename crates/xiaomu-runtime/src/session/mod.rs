@@ -296,7 +296,6 @@ impl DocumentSession {
             }
             EditIntent::MoveCaret { .. }
             | EditIntent::PlaceCaret { .. }
-            | EditIntent::PasteText { .. }
             | EditIntent::PasteSlice { .. }
             | EditIntent::SetSelection { .. } => unreachable!("handled above"),
         };
