@@ -108,7 +108,7 @@ fn mounted_editors_isolate_focus_input_selection_save_and_listener(cx: &mut Test
         DocumentPosition::Text(point(&document_a, a_first, 0)),
         DocumentPosition::Text(point(&document_a, a_second, 6)),
     );
-    let (document_b, [b_first, b_second]) = document("head-b", "b");
+    let (document_b, [b_first, _b_second]) = document("head-b", "b");
     let selection_b = DocumentSelection::collapsed(point(&document_b, b_first, 6));
 
     let saves_a = Rc::new(Cell::new(0));
