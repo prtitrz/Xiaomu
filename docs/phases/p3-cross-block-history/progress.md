@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P3.4 History Grouping / Stored Marks / IME 收口**
+当前切片：**P3.5 HardBreak / CodeBlock Multi-line 收口**
 
-前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection、P3.3 Cross-block Editing / Structured Clipboard 均已完成并合入 `main`；P3.4 Runtime / GPUI 实现与专项自动化 Gate 已成立。Draft PR #45 的 current-head CI 已全绿，但 ready-for-review connector 因 GitHub GraphQL schema 兼容问题无法切换，故关闭 #45 并以同一分支的非 Draft PR #46 完成 final CI 与 squash merge。
+前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection、P3.3 Cross-block Editing / Structured Clipboard、P3.4 History Grouping / Stored Marks / IME 均已完成并合入 `main`。P3.5 canonical LF contract、Runtime/GPUI 实现与专项自动化 Gate 已成立，PR #47 进入 docs-only final current-head CI 与 squash merge 收口。
 
 ## P3.0 Phase Contract
 
@@ -195,19 +195,62 @@ IME commit
 - `history_stored_marks.rs` 覆盖连续 ASCII/CJK/emoji typing coalescing、caret/selection movement、mark boundary、explicit unmark、SplitBlock inheritance、undo/redo pending marks、IME commit 与 plain-text paste boundary。
 - 旧 P1 `undo_redo_round_trip_restores_stores_and_selections` 已升级到 P3.4 contract：`A` + `B` 连续 typing 是一个 entry，Backspace 是第二个 isolated entry；undo / redo 继续精确恢复 store 与 selection。
 - PR #45 code head `e02dd174` 的 CI run #229：policy、source-size、dependency boundary、fmt、Clippy、workspace tests、Windows/macOS/Linux 与 aggregate `CI Success` 全绿。
-- 补充 collapsed mark command 断组专项回归与架构文档后，#45 current head `f495d061` 的 CI run #235 再次全绿。因 Draft → ready connector 的 GraphQL schema 兼容故障，#45 未合并；最终 merge PR #46 复用同一分支并以自身 current-head CI 为 Gate。
+- 补充 collapsed mark command 断组专项回归与架构文档后，#45 current head `f495d061` 的 CI run #235 再次全绿。因 Draft → ready connector 的 GraphQL schema 兼容故障，#45 未合并；最终 merge PR #46 的 current head `e151d06d` 在 CI run #238 再次全绿，并 squash merge 到 `main`（`f8820247`）。
 
-P3.4 设计 Gate 已满足，剩余工作只有 PR #46 current-head CI 与 squash merge。
+P3.4 Gate 已关闭。
 
 ## P3.5 HardBreak / CodeBlock Multi-line
 
-- [ ] ADR：HardBreak canonical representation
-- [ ] 明确 soft-wrap / HardBreak / CodeBlock newline 三者边界
-- [ ] Shift+Enter 语义（若 ADR 选择在 P3 实施）
-- [ ] CodeBlock Enter
-- [ ] CodeBlock multiline paste
-- [ ] CodeBlock Tab / indentation
-- [ ] mapping / inverse regression
+- [x] ADR：HardBreak canonical representation
+- [x] 明确 soft-wrap / HardBreak / CodeBlock newline 三者边界
+- [x] Shift+Enter 语义
+- [x] CodeBlock Enter
+- [x] CodeBlock multiline paste
+- [x] CodeBlock Tab / indentation
+- [x] mapping / inverse regression
+
+实现事实：
+
+```text
+soft wrap
+→ GPUI visual geometry only
+→ no canonical byte
+
+Paragraph / Heading LF
+→ canonical HardBreak
+
+CodeBlock LF
+→ canonical code newline
+
+Enter on ordinary rich-text block
+→ SplitBlock
+
+Shift+Enter
+→ EditIntent::insert_line_break()
+→ one LF through isolated ReplaceText history
+
+Enter on CodeBlock
+→ EditIntent::insert_line_break()
+→ same stable CodeBlock NodeId
+```
+
+- ADR 0004 选择 UTF-8 LF `\n` 作为晓木唯一具有 line-break 语义的 canonical inline scalar。Core 不新增 HardBreak atom、node/content variant 或 transaction step；LF 继续使用既有 `TextOffset / TextRange / ReplaceText / ChangeMap / inverse` contract。Core 原始 construction 仍可承载 CR，但 CR 不获得第二种晓木 newline 语义；平台 adapter / codec 表达 line break 时必须把 CRLF / CR 规范化为 LF。
+- `EditIntent::insert_line_break()` 是 Runtime 的语义构造器，当前编译为 isolated text replacement，因此 HardBreak / CodeBlock newline 与前后普通 typing 明确断组，同时继续使用 StoredMarks exact application。
+- ordinary rich-text `Enter` 继续结构 split；`Shift+Enter` 插入 LF。CodeBlock `Enter` 与 `Shift+Enter` 都插入 LF，不创建 sibling block。
+- CodeBlock `Tab` 当前插入四个可见空格，不触发 list conversion / list item indent；CodeBlock `Shift-Tab` 不执行 list structural command。本阶段只固化正向 indentation，批量/反向 code indentation 可在后续 code-editing 增强中扩展。
+- plain platform paste 到 CodeBlock 保留多行并执行 `CRLF / CR → LF`；普通 rich-text plain fallback 仍把 line break 折叠为空格。晓木 structured clipboard 粘入 CodeBlock 时主动降格为其 `plain_text`，丢弃 paragraph/list/mark 结构并保留 LF，防止 rich structure 泄入 code surface。
+- `BlockTextLayout` 继续把 logical lines 间的一个 canonical LF byte 计入坐标。hard newline 两侧是两个不同 `TextOffset`；只有 soft-wrap 才允许同一 logical offset 通过 `CursorAffinity` 对应两个视觉 caret state。
+- harness fixture v2 已能把 inline LF 转义为 `\n` 并精确恢复，Paragraph HardBreak 与 CodeBlock newline 均可 persistence round-trip。
+
+验证证据：
+
+- `line_break_mapping.rs` 覆盖 LF 插入 seam 的 Start/End mapping、后续 position +1 byte、Paragraph/CodeBlock exact inverse round-trip 与 LF scalar boundary。
+- `hardbreak_codeblock.rs` 覆盖同 NodeId HardBreak、CodeBlock newline、Backspace 删除单个 LF、isolated history、undo/redo、StoredMarks 与 clipboard projection。
+- GPUI `block_view::tests` 覆盖 LF 原样进入 display projection、style segment byte offset 与 IME 在 HardBreak 后的 virtual projection；`navigation.rs` 覆盖 LF 前后两个合法 caret 以及 Right/Left 1↔2。
+- harness fixture regression 覆盖 Paragraph `alpha\nbeta` 与多行 CodeBlock 的 v2 save/parse semantic round-trip。
+- PR #47 code head `539c190e` 的 CI run #251：policy、source-size、dependency boundary、fmt、Clippy、workspace tests、Windows/macOS/Linux 与 aggregate `CI Success` 全绿。
+
+P3.5 实现与自动化 Gate 已满足；PR #47 剩余 docs-only current-head CI 与 squash merge。Windows 最终交互实机矩阵仍按阶段设计统一放在 P3.7，不伪造本切片未执行的人工 Gate。
 
 ## P3.6 Accessibility / Realistic Host Integration
 
@@ -240,7 +283,7 @@ P3 只有在以下条件全部满足后才能完成：
 - [x] cross-block copy/cut/delete + structured clipboard 可 undo
 - [x] typing history grouping 与 IME history interaction 可预测
 - [x] collapsed StoredMarks 生效且不污染 canonical document
-- [ ] HardBreak / CodeBlock multiline 完成长期 contract 决策
+- [x] HardBreak / CodeBlock multiline 完成长期 contract 决策
 - [ ] accessibility projection seam 成立
 - [ ] realistic persistence/change/focus + multi-editor fixture 成立
 - [ ] Unicode cross-block + undo/redo invariants 全绿
@@ -257,3 +300,4 @@ P3 只有在以下条件全部满足后才能完成：
 - P3.3 hierarchy 收口将 clipboard metadata 从 flat leaf list 升级到 v2 minimal fragment tree。首轮 CI #208 仅暴露 rustfmt 机械差异，macOS workspace tests 已通过；按日志格式化后 CI #214 在三平台、Clippy、policy 与 aggregate `CI Success` 全绿。
 - P3.4 第一轮 CI #221 只暴露 `history.rs` / 新测试的 rustfmt 差异；修正后进入真实 workspace regression。
 - P3.4 CI #224 / #227 暴露旧 P1 history 测试仍假定“每次 InsertText 都是独立 undo entry”。实际 `A`、`B` 已按 P3.4 contract 正确 coalesce；更新旧回归为 grouped typing + isolated Backspace 后，CI #229 三平台、Clippy、policy 与 `CI Success` 全绿。
+- P3.5 CI #242 首先只暴露新增 Core/Runtime/GPUI regression 的 rustfmt 差异；修正后 CI #245 进入 Clippy，并指出两处 test slice 上无意义的 `as_ref()`。移除后继续补 persistence、display projection、structured-to-code flatten 与 LF navigation regression；code head CI #251 三平台、Clippy、policy 与 `CI Success` 全绿。
