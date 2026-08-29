@@ -144,6 +144,44 @@ fn caret_movement_breaks_the_open_typing_group() {
 }
 
 #[test]
+fn caret_and_selection_movement_clear_stored_marks() {
+    let (document, paragraph) = document_with("ab", MarkSet::empty());
+    let mut session = session_at(&document, paragraph, 1);
+
+    session
+        .apply_intent(&EditIntent::ToggleMark { mark: Mark::Bold })
+        .unwrap();
+    assert!(session.stored_marks().is_some());
+
+    assert_eq!(
+        session
+            .apply_intent(&EditIntent::MoveCaret {
+                caret_move: CaretMove::Backward,
+                extend_selection: false,
+            })
+            .unwrap(),
+        SessionOutcome::SelectionChanged
+    );
+    assert!(session.stored_marks().is_none());
+
+    session
+        .apply_intent(&EditIntent::ToggleMark { mark: Mark::Bold })
+        .unwrap();
+    assert!(session.stored_marks().is_some());
+
+    assert_eq!(
+        session
+            .apply_intent(&EditIntent::SetSelection {
+                anchor: point(session.document(), paragraph, 0),
+                focus: point(session.document(), paragraph, 1),
+            })
+            .unwrap(),
+        SessionOutcome::SelectionChanged
+    );
+    assert!(session.stored_marks().is_none());
+}
+
+#[test]
 fn collapsed_toggle_can_explicitly_remove_inherited_marks() {
     let bold = MarkSet::new([Mark::Bold]).unwrap();
     let (document, paragraph) = document_with("ab", bold);
