@@ -398,13 +398,23 @@ impl DocumentView {
         let Some(content) = PlatformClipboard::new(&*cx).read_content() else {
             return;
         };
+        let code_block = matches!(self.focused_node_kind(), Some(NodeKind::CodeBlock));
         match content {
+            PlatformClipboardContent::Structured(slice) if code_block => {
+                // CodeBlock is a plain-code surface. Xiaomu-native rich
+                // structure is flattened to the same interoperable text the
+                // system clipboard exposes, preserving canonical LF while
+                // discarding paragraph/list/mark semantics.
+                let text = normalize_multiline_paste_text(slice.plain_text());
+                if !text.is_empty() {
+                    self.apply_intent(EditIntent::PasteText { text }, window, cx);
+                }
+            }
             PlatformClipboardContent::Structured(slice) => {
                 self.apply_intent(EditIntent::PasteSlice { slice }, window, cx);
             }
             PlatformClipboardContent::Text(text) => {
-                let preserve_breaks = matches!(self.focused_node_kind(), Some(NodeKind::CodeBlock));
-                let text = if preserve_breaks {
+                let text = if code_block {
                     normalize_multiline_paste_text(&text)
                 } else {
                     normalize_paste_text(&text)
