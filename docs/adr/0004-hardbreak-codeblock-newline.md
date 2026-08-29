@@ -19,7 +19,7 @@ CodeBlock newline  代码块正文中的真实多行文本
 
 ## Decision
 
-采用 UTF-8 LF scalar `\n`（U+000A）作为 inline content 内唯一 canonical line-break 表达。
+采用 UTF-8 LF scalar `\n`（U+000A）作为 inline content 内唯一**具有晓木 line-break 语义**的 canonical 表达。
 
 它的语义由所在 inline-bearing node 的 kind 决定：
 
@@ -33,6 +33,8 @@ CodeBlock
 GPUI soft-wrap
     不产生 LF，不修改 canonical content
 ```
+
+Core 当前仍允许普通 `TextRun` 承载其他合法 Unicode scalar，包括调用者直接构造的 CR。ADR 0004 不新增“全局禁止 CR”的 Core validation invariant；它规定的是晓木编辑命令、平台 adapter 与 codec 在表达 line break 时只生成/识别 LF。若未来需要把 CR 禁止升级为 schema invariant，应另行增加明确的 Core validation contract，而不能假设本 ADR 已经做到。
 
 ### 输入语义
 
@@ -70,13 +72,15 @@ Backspace / Delete 对 LF 与其他 scalar 一样工作，一次删除一个 LF�
 
 ### Line ending normalization
 
-canonical document 中只保存 LF，不保存 CR 或 CRLF。平台输入 adapter 在需要保留多行文本时执行：
+晓木的 line-break 语义只生成 LF。平台输入 adapter 或 codec 在需要保留多行文本时执行：
 
 ```text
 CRLF → LF
 CR   → LF
 LF   → LF
 ```
+
+因此由晓木正常编辑路径产生的 HardBreak / CodeBlock newline 都是 LF；原始 Core construction 若显式放入 CR，只会被视为普通文本 scalar，不获得第二种 newline 语义。
 
 当前 plain-text paste 策略按目标 node 区分：
 
@@ -110,7 +114,7 @@ soft-wrap boundary 只由 shaping geometry 产生，没有 canonical byte；Hard
 
 ### B. LF scalar in inline text
 
-优点：与现有 `TextOffset`、`ReplaceText`、mapping、inverse、structured clipboard、fixture persistence、GPUI multi-line geometry天然组合；CodeBlock 本来就需要真实 newline；没有新增 Core step 或 extension dependency。
+优点：与现有 `TextOffset`、`ReplaceText`、mapping、inverse、structured clipboard、fixture persistence、GPUI multi-line geometry 天然组合；CodeBlock 本来就需要真实 newline；没有新增 Core step 或 extension dependency。
 
 这是本 ADR 采用的方案。
 
@@ -131,7 +135,8 @@ soft-wrap boundary 只由 shaping geometry 产生，没有 canonical byte；Hard
 - Paragraph/Heading 从此允许 canonical inline text 包含 LF；调用方不能继续假设一个 block 等于一个 logical line。
 - CodeBlock 可以在同一个 stable NodeId 内承载多行文本。
 - frontend navigation / hit-test 必须正确跨 logical newline，不得把 LF 当 soft-wrap boundary。
-- Markdown codec 后续可把 Paragraph LF 编码为 Markdown hard break，把 CodeBlock LF 原样编码到 fenced code body；codec source representation仍不反向定义 Core。
+- 平台/codec 若从 CR/CRLF 源文本导入 line break，必须先规范化为 LF；Core 原始 construction 的 CR 容忍度不属于 line-break contract。
+- Markdown codec 后续可把 Paragraph LF 编码为 Markdown hard break，把 CodeBlock LF 原样编码到 fenced code body；codec source representation 仍不反向定义 Core。
 - P4 InlineAtom 仍用于 mention/reference/chip 等真正 atomic inline object，不承担 HardBreak。
 
 ## Revisit when
