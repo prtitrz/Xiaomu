@@ -49,9 +49,9 @@ impl DocumentSession {
         self.stored_marks = Some(MarkSet::new(next).map_err(SessionError::Core)?);
         self.history.break_group();
 
-        // The canonical snapshot and selection are unchanged, but callers
-        // need a non-NoChange outcome so frontend command state can repaint.
-        Ok(SessionOutcome::SelectionChanged)
+        // No canonical document or selection state changed. Frontends that
+        // issued the command already repaint and can query `stored_marks()`.
+        Ok(SessionOutcome::NoChange)
     }
 
     pub(super) fn clear_stored_marks(&mut self) {
