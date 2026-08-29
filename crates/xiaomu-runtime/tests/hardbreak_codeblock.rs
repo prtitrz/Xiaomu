@@ -122,7 +122,7 @@ fn hard_break_is_one_lf_inside_the_same_paragraph_and_breaks_typing_history() {
         .content()
         .as_children()
         .unwrap();
-    assert_eq!(children.as_ref(), &[paragraph]);
+    assert_eq!(children, &[paragraph]);
 
     session.undo().unwrap();
     assert_eq!(text(&session, paragraph), "aX\nb");
@@ -158,7 +158,7 @@ fn code_block_newline_keeps_stable_block_identity_and_backspace_deletes_one_lf()
         .content()
         .as_children()
         .unwrap();
-    assert_eq!(children.as_ref(), &[code]);
+    assert_eq!(children, &[code]);
 
     assert_eq!(
         session.apply_intent(&EditIntent::Backspace).unwrap(),
