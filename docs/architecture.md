@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前阶段事实：P0 Core contract 已完成，P1 native single-block input 已完成，P2 document tree / structural edit 的功能实现与 Windows 实机 Gate 已完成，P3.1 visual-line geometry / soft-wrap 已完成并合入 `main`，P3.2 visual navigation / selection 正在实现与验证。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step；Runtime session 已升级为跨 block `DocumentSelection` 并编排 split / join / list Enter / wrap / lift / indent / outdent；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、wrapped geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret 与 list marker projection；宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
+当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 均已完成；P3.1 visual-line geometry / soft-wrap 与 P3.2 visual navigation / selection 已合入 `main`；P3.3 cross-block editing / structured clipboard 的实现与自动化 Gate 已完成，PR #43 处于收口。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection 与 structured paste；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、wrapped geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret 与 list marker projection；宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
 
 ## Core 边界
 
@@ -253,6 +253,7 @@ JoinWithPrevious
 TurnInto
 IndentListItem
 OutdentListItem
+PasteSlice
 SetSelection
 ```
 
@@ -278,10 +279,11 @@ MapExisting
 CaretAtSplitTail
 CaretAtJoinSeam
 CaretAtJoinPoint
+CaretAtLastInsertedOffset
 PreserveFocus
 ```
 
-结构命令按 intent 明确 selection policy，避免把“目标节点被删”统一解释为失败。
+结构命令和 structured paste 按 intent 明确 selection policy，避免把“目标节点被删”统一解释为失败。
 
 ### List 与结构命令
 
@@ -312,9 +314,40 @@ staged plan 的多个 Core transaction 对用户表现为一笔 history。undo �
 
 ### Clipboard
 
-`runtime/clipboard.rs` 提供 frontend-neutral `TextClipboard` seam 与 `normalize_paste_text`。平台 clipboard binding 位于 GPUI。
+Runtime clipboard 已从 P2 的纯文本 seam 升级为 frontend-neutral structured clipboard：
 
-P2 仍只承诺单 inline selection 的 copy / cut / paste；cross-block structured clipboard 属 P3。
+```text
+DocumentSelection
+→ ClipboardSlice
+   ├─ plain_text
+   ├─ ClipboardBlock leaves
+   └─ ClipboardNode minimal fragment roots
+→ versioned metadata codec
+```
+
+`ClipboardSlice` 是 detached value，不携带 canonical `NodeId`。单一 inline leaf 只保留所选 inline fragment；跨多个 inline leaf 时，projection 从 canonical tree 剪出覆盖 selection 的最小 fragment tree，因此 list / quote 等 container 可以保留，同时不会携带未选择的 sibling。
+
+`plain_text` 始终存在，并用 `\n` 表达所选 inline block boundary。Runtime metadata codec 当前格式为 `xiaomu.clipboard` v2；它使用私有 serde wire DTO，不给 Core canonical value 增加 serde 依赖。decode 会重新构造临时 document 校验 fragment tree；foreign、malformed、unknown-version 或与系统文本不一致的 stale metadata 均视为不可识别，由 frontend 回退到 plain text。
+
+cross-block Delete / Cut 由 Runtime 统一编排。Delete 保留首个 inline block identity 与未选 prefix，把末 block 未选 suffix 接到 seam，删除覆盖的中间 leaves，并清理因本次操作而变空的 container；Cut 的 clipboard projection 是只读步骤，文档侧仍只提交一次 Delete history change。
+
+structured paste 分两条路径：
+
+```text
+leaf-only slice
+→ ordinary Core transaction
+→ ReplaceText / mark steps / InsertNode
+
+container slice
+→ StagedPlan
+→ split host at selection seam
+→ reconstruct fragment roots / children
+→ combine stage inverses
+```
+
+两条路径对 session 都是一条 history entry。leaf-only paste 精确恢复 source marks、block kind / attrs，并把宿主 suffix 接到最后 pasted leaf；container paste 通过 hidden staged transaction 解决“新 container 的 NodeId 只有 InsertNode apply 后才存在”的依赖，中间 snapshot 不暴露。after-selection 落在最后 pasted inline leaf 的 paste seam，undo / redo 恢复精确 store、selection 与已分配 identity。
+
+`TextClipboard` 仍保留为最小纯文本 host seam；平台 structured transport 不进入 Runtime/Core 类型系统。
 
 ### Persistence
 
@@ -352,7 +385,7 @@ input/composition.rs
     IME CompositionState；preedit 只存在于 adapter
 
 input/platform_clipboard.rs
-    Runtime TextClipboard 的 GPUI adapter
+    plain text + Xiaomu metadata 的 GPUI clipboard adapter
 
 document_view/
     DocumentView multi-block 容器
@@ -410,6 +443,8 @@ list marker 只存在于 frontend projection，不进入 canonical text、TextOf
 
 GPUI 已绑定 Left / Right / visual Home / End / Up / Down、Shift visual selection、Backspace / Delete、SelectAll、Undo / Redo、Copy / Cut / Paste、Bold / Italic / Code / Underline / Strike，以及结构编辑 Enter / Tab / Shift-Tab。macOS / Windows 使用平台对应组合键。
 
+Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 Xiaomu v2 structured metadata。外部应用按普通文本消费；晓木 Paste 优先验证并使用 structured metadata，metadata 缺失、过期或非法时自动走 plain-text fallback。平台 adapter 只负责 transport，不解释 canonical document mutation。
+
 ### Host hooks
 
 `EditorHooks` 接受 `DocumentPersistence` adapter 与 `DocumentChangeListener`。Ctrl/Cmd-S 触发 `SaveDocument`，把当前 canonical snapshot 交给 persistence adapter。
@@ -458,5 +493,3 @@ Core 永远不反向依赖 codec。
 - CI 执行 Rust formatting、Clippy 和 tests；
 - `cargo-deny` 检查 dependency source / license policy；
 - `engineering-rules.md` 约束实现与文档同步。
-
-只要实现让本文档中的任何描述失真，就必须在同一 PR 中同步更新本文档。
