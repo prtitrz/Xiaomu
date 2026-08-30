@@ -5,9 +5,7 @@ use xiaomu_core::document::{
     XiaomuDocument,
 };
 use xiaomu_core::selection::{CursorAffinity, TextPoint};
-use xiaomu_runtime::session::{
-    DocumentSelection, DocumentSession, EditIntent, SessionOutcome,
-};
+use xiaomu_runtime::session::{DocumentSelection, DocumentSession, EditIntent, SessionOutcome};
 
 fn inline(text: &str) -> InlineContent {
     InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()]).unwrap()
@@ -104,7 +102,11 @@ fn unicode_cross_block_matrix_preserves_boundaries_clipboard_and_history() {
         );
         session.document().validate().unwrap();
         session.selection().validate(session.document()).unwrap();
-        assert_eq!(text(session.document(), first), "LR", "seam mismatch for {label}");
+        assert_eq!(
+            text(session.document(), first),
+            "LR",
+            "seam mismatch for {label}"
+        );
         assert!(
             session.document().node(second).is_none(),
             "covered tail must be removed for {label}"
@@ -112,11 +114,19 @@ fn unicode_cross_block_matrix_preserves_boundaries_clipboard_and_history() {
         let after_store = session.document().store().clone();
 
         assert_eq!(session.undo().unwrap(), SessionOutcome::DocumentChanged);
-        assert_eq!(session.document().store(), &before_store, "undo mismatch for {label}");
+        assert_eq!(
+            session.document().store(),
+            &before_store,
+            "undo mismatch for {label}"
+        );
         session.selection().validate(session.document()).unwrap();
 
         assert_eq!(session.redo().unwrap(), SessionOutcome::DocumentChanged);
-        assert_eq!(session.document().store(), &after_store, "redo mismatch for {label}");
+        assert_eq!(
+            session.document().store(),
+            &after_store,
+            "redo mismatch for {label}"
+        );
         session.selection().validate(session.document()).unwrap();
     }
 }
@@ -214,13 +224,17 @@ fn run_randomized_sequence(seed: u64) {
     initial.validate().unwrap();
     let first = inline_nodes(&initial)[0];
     let caret = point(&initial, first, 0);
-    let mut session = DocumentSession::new(initial.clone(), DocumentSelection::collapsed(caret)).unwrap();
+    let mut session =
+        DocumentSession::new(initial.clone(), DocumentSelection::collapsed(caret)).unwrap();
     let mut rng = Rng(seed | 1);
     let inserts = ["x", "中", "👍", "e\u{301}", "אב", "م"];
 
     for _ in 0..96 {
         let nodes = inline_nodes(session.document());
-        assert!(!nodes.is_empty(), "document must retain an inline block for seed {seed}");
+        assert!(
+            !nodes.is_empty(),
+            "document must retain an inline block for seed {seed}"
+        );
 
         if nodes.len() > 1 && rng.below(7) == 0 {
             let left_index = rng.below(nodes.len() - 1);
@@ -254,11 +268,7 @@ fn run_randomized_sequence(seed: u64) {
         } else {
             let node = nodes[rng.below(nodes.len())];
             let boundaries = scalar_boundaries(session.document(), node);
-            set_collapsed(
-                &mut session,
-                node,
-                boundaries[rng.below(boundaries.len())],
-            );
+            set_collapsed(&mut session, node, boundaries[rng.below(boundaries.len())]);
 
             let intent = match rng.below(6) {
                 0 => EditIntent::InsertText {
