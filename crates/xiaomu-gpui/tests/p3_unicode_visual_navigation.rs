@@ -125,7 +125,11 @@ fn unicode_wrapped_navigation_matrix_keeps_canonical_boundaries(cx: &mut TestApp
 
         cx.simulate_keystrokes(window.into(), "up");
         let above = focus(&session);
-        assert_eq!(above.node_id(), node, "Up crossed block unexpectedly for {label}");
+        assert_eq!(
+            above.node_id(),
+            node,
+            "Up crossed block unexpectedly for {label}"
+        );
         session
             .borrow()
             .selection()
@@ -134,7 +138,11 @@ fn unicode_wrapped_navigation_matrix_keeps_canonical_boundaries(cx: &mut TestApp
 
         cx.simulate_keystrokes(window.into(), "down");
         let down = focus(&session);
-        assert_eq!(down.node_id(), node, "Down crossed block unexpectedly for {label}");
+        assert_eq!(
+            down.node_id(),
+            node,
+            "Down crossed block unexpectedly for {label}"
+        );
         session
             .borrow()
             .selection()
