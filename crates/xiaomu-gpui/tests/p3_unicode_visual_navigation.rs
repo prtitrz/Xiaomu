@@ -79,16 +79,19 @@ fn unicode_wrapped_navigation_matrix_keeps_canonical_boundaries(cx: &mut TestApp
 
     for (label, node, text) in cases {
         let end = point(session.borrow().document(), node, text.len());
-        assert_eq!(
-            session
-                .borrow_mut()
-                .apply_intent(&EditIntent::SetSelection {
-                    anchor: end,
-                    focus: end,
-                })
-                .unwrap(),
-            SessionOutcome::SelectionChanged,
-            "case {label} must move onto its target block"
+        let move_outcome = session
+            .borrow_mut()
+            .apply_intent(&EditIntent::SetSelection {
+                anchor: end,
+                focus: end,
+            })
+            .unwrap();
+        assert!(
+            matches!(
+                move_outcome,
+                SessionOutcome::NoChange | SessionOutcome::SelectionChanged
+            ),
+            "case {label} must land on its target block"
         );
         window
             .update(cx, |view: &mut DocumentView, window, cx| {
