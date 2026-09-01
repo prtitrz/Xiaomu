@@ -127,10 +127,7 @@ impl ApplyContext {
             .position(|placement| placement.text_offset() >= at.text_offset())
             .unwrap_or(placements.len());
         let insert_at = first_at_or_after + at.atom_index();
-        placements.insert(
-            insert_at,
-            InlineAtomPlacement::new(atom, at.text_offset()),
-        );
+        placements.insert(insert_at, InlineAtomPlacement::new(atom, at.text_offset()));
         let next = InlineContent::with_atoms(content.runs().iter().cloned(), placements)?;
         self.rewrite_node(
             at.node_id(),
@@ -239,7 +236,10 @@ mod tests {
         assert_eq!(inline.atoms().len(), 1);
         let atom = inline.atoms()[0].atom();
         assert_eq!(next.parent_of(atom), Some(paragraph));
-        assert!(matches!(next.node(atom).unwrap().kind(), NodeKind::InlineAtom(_)));
+        assert!(matches!(
+            next.node(atom).unwrap().kind(),
+            NodeKind::InlineAtom(_)
+        ));
         assert_eq!(
             next.node(atom)
                 .unwrap()
