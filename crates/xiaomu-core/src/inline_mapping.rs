@@ -164,21 +164,11 @@ mod tests {
         );
         assert_eq!(
             map.map_inline_point(exact, MapBias::End),
-            MappedPosition::Mapped(InlinePoint::new(
-                parent,
-                at,
-                2,
-                CursorAffinity::Before,
-            ))
+            MappedPosition::Mapped(InlinePoint::new(parent, at, 2, CursorAffinity::Before,))
         );
         assert_eq!(
             map.map_inline_point(after, MapBias::Start),
-            MappedPosition::Mapped(InlinePoint::new(
-                parent,
-                at,
-                3,
-                CursorAffinity::Before,
-            ))
+            MappedPosition::Mapped(InlinePoint::new(parent, at, 3, CursorAffinity::Before,))
         );
     }
 
@@ -198,36 +188,21 @@ mod tests {
                 InlinePoint::new(parent, at, 1, CursorAffinity::Before),
                 MapBias::Start,
             ),
-            MappedPosition::Mapped(InlinePoint::new(
-                parent,
-                at,
-                1,
-                CursorAffinity::Before,
-            ))
+            MappedPosition::Mapped(InlinePoint::new(parent, at, 1, CursorAffinity::Before,))
         );
         assert_eq!(
             map.map_inline_point(
                 InlinePoint::new(parent, at, 2, CursorAffinity::Before),
                 MapBias::End,
             ),
-            MappedPosition::Mapped(InlinePoint::new(
-                parent,
-                at,
-                1,
-                CursorAffinity::Before,
-            ))
+            MappedPosition::Mapped(InlinePoint::new(parent, at, 1, CursorAffinity::Before,))
         );
         assert_eq!(
             map.map_inline_point(
                 InlinePoint::new(parent, at, 3, CursorAffinity::Before),
                 MapBias::Start,
             ),
-            MappedPosition::Mapped(InlinePoint::new(
-                parent,
-                at,
-                2,
-                CursorAffinity::Before,
-            ))
+            MappedPosition::Mapped(InlinePoint::new(parent, at, 2, CursorAffinity::Before,))
         );
     }
 
