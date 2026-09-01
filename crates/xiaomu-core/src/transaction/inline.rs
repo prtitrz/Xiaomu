@@ -5,9 +5,7 @@
 //! `InlineContent`. User-visible text coordinates stay UTF-8 document offsets,
 //! while atom placements are preserved explicitly.
 
-use crate::document::{
-    InlineAtomPlacement, InlineContent, Mark, MarkKind, MarkSet, TextRun,
-};
+use crate::document::{InlineAtomPlacement, InlineContent, Mark, MarkKind, MarkSet, TextRun};
 use crate::text::{TextOffset, TextRange};
 use crate::{Error, Result};
 
@@ -42,10 +40,7 @@ fn validate_inline_range(inline: &InlineContent, range: TextRange) -> Result<()>
 /// Old text-only `ReplaceText` cannot address a position inside a same-byte
 /// atom seam. Reject any edit whose closed boundary span contains an atom;
 /// atom-aware editing uses `InlinePoint` in the dedicated P4 contract.
-fn validate_text_replacement_against_atoms(
-    inline: &InlineContent,
-    range: TextRange,
-) -> Result<()> {
+fn validate_text_replacement_against_atoms(inline: &InlineContent, range: TextRange) -> Result<()> {
     let start = range.start().as_usize();
     let end = range.end().as_usize();
     if inline.atoms().iter().any(|placement| {
