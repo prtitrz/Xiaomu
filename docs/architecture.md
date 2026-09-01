@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 均已完成；P3.1 visual-line geometry / soft-wrap、P3.2 visual navigation / selection、P3.3 cross-block editing / structured clipboard 与 P3.4 history grouping / StoredMarks / IME 均已合入 `main`；P3.5 已建立 canonical LF HardBreak / CodeBlock multi-line contract，并完成 Runtime/GPUI 实现与自动化 Gate。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step，并继续用 `ReplaceText` 承载 canonical LF；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection、structured paste、local history grouping 与 semantic line-break command；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、soft-wrap / multi-logical-line geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret、list marker 与 CodeBlock multi-line input；宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
+当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 与 P3 cross-block selection / history 已完成。P3 已覆盖 visual-line geometry / soft-wrap、visual navigation / selection、cross-block editing / structured clipboard、history grouping / StoredMarks / IME、canonical LF HardBreak / CodeBlock multi-line、accessibility projection seam、realistic host integration、Unicode/CJK/emoji/combining/BiDi closeout matrix 与 Windows 最终实机 Gate。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step，并继续用 `ReplaceText` 承载 canonical LF；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection、structured paste、local history grouping 与 semantic line-break command；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、soft-wrap / multi-logical-line geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret、list marker 与 CodeBlock multi-line input；可复用 `EditorInstance` 持有独立 session/history/StoredMarks/listener/persistence，并支持完整 `DocumentSelection` restore 与 native focus routing。宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
 
 ## Core 边界
 
@@ -415,7 +415,7 @@ pub trait DocumentPersistence {
 契约：
 
 ```text
-store 不存在          → Ok(None)
+store 不存在                 → Ok(None)
 读取 / parse / adapter failure → Err(PersistenceError)
 ```
 
@@ -451,8 +451,13 @@ block_view/
     layout.rs：BlockTextLayout、soft-wrap / multi logical-line visual rows、caret affinity、2D hit-test
     scroll.rs：shared ScrollHandle 上的最小 scroll-to-caret 调整
 
+accessibility.rs
+    frontend-neutral AccessibilityProjection
+
 editor.rs
+    reusable EditorInstance
     window / key binding / EditorHooks 装配
+    bind_default_editor_keys
     run_document_editor(_with_hooks)
     run_single_block_editor 薄兼容入口
 ```
@@ -493,6 +498,12 @@ nested list  → marker 与 list depth 对齐
 
 list marker 只存在于 frontend projection，不进入 canonical text、TextOffset 或 selection range。
 
+### Accessibility projection
+
+P3.6 已建立 frontend-neutral `AccessibilityProjection`。projection 可读取 editable text、semantic node role/kind、当前 `DocumentSelection` 与实际 focus owner；editor 未激活时，即使 Runtime 仍保留 caret，`focus_owner` 也为 `None`。
+
+当前精确 pin 的 GPUI `0.2.2` 缺少后续版本公开的 `gpui::Role` / `.role()` builder，所以 P3 不伪造平台 AccessKit tree。平台 accessibility adapter 继续限制在 `xiaomu-gpui`，待 GPUI 能力升级后接入；Core / Runtime contract 不承载 GPUI/AccessKit 类型。
+
 ### Clipboard 与键绑定
 
 GPUI 已绑定 Left / Right / visual Home / End / Up / Down、Shift visual selection、Backspace / Delete、SelectAll、Undo / Redo、Copy / Cut / Paste、Bold / Italic / Code / Underline / Strike，以及 Enter / Shift+Enter / Tab / Shift-Tab。macOS / Windows 使用平台对应组合键。
@@ -501,9 +512,13 @@ GPUI 已绑定 Left / Right / visual Home / End / Up / Down、Shift visual selec
 
 Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 Xiaomu v2 structured metadata。外部应用按普通文本消费；晓木 Paste 优先验证 structured metadata，metadata 缺失、过期或非法时自动走 `PasteText` plain-text fallback。普通 rich-text plain paste 当前把 line break 折叠为空格；CodeBlock plain paste 保留多行并规范化为 LF。若剪贴板带有效 Xiaomu structured metadata但目标是 CodeBlock，frontend 主动使用 `ClipboardSlice::plain_text` 而不重建 rich structure，使代码块保持 plain-code destination semantics。structured paste 与 plain-text paste 都是显式 history boundary；平台 adapter 只负责 transport，不进入 Core 类型系统。
 
-### Host hooks
+### Host hooks / reusable editor instance
 
 `EditorHooks` 接受 `DocumentPersistence` adapter 与 `DocumentChangeListener`。Ctrl/Cmd-S 触发 `SaveDocument`，把当前 canonical snapshot 交给 persistence adapter。
+
+P3.6 引入可复用 `EditorInstance`，每个 instance 独立持有 session/history/StoredMarks/listener/persistence。宿主可以恢复完整 `DocumentSelection`；`DocumentView::focus_selection` 会把 native focus 路由到恢复后 selection 的 focus node。`bind_default_editor_keys` 从 convenience runner 中抽出，真实宿主可以复用同一 key route 而不依赖 demo runner。
+
+`multi_editor_host.rs` 用两个独立 GPUI editor/window 验证 input、selection、accessibility focus owner、listener、Ctrl+S persistence、session/history 均不串状态。`gpui` 的 test-support 只存在于 dev/test 依赖，不扩散到 production contract。
 
 `examples/editor_harness` 使用 harness-private fixture v2 演示：
 
@@ -539,6 +554,14 @@ Core 永远不反向依赖 codec。ADR 0004 只规定 canonical LF 语义；Mark
 宿主专用 business model 不进入晓木 canonical document semantics，除非某个概念已经证明对通用编辑器具有普遍价值。文件、数据库、资产、网络、协作 transport、窗口 / workspace / app shell、产品配置都由 Host 持有。
 
 当宿主便利性与晓木长期 correctness / extensibility 冲突时，由宿主在 adapter boundary 完成适配。
+
+## P3 Closeout 事实
+
+P3.7 固定 Unicode matrix 覆盖 ASCII、中文、中英混排、emoji、combining mark、CJK+emoji 与 BiDi。Runtime cross-block invariant 测试验证 scalar boundary、clipboard/delete seam、document/selection validity 与 exact undo/redo；deterministic randomized history/mapping sequence验证全链 undo/redo；GPUI wrapped-navigation fixture 通过真实 `TestAppContext / EditorInstance / DocumentView` 验证同一 Unicode matrix 的 Home/End/Up/Down projection。
+
+code head `5584d57745fa4bd760f15b5ef7d911f23fb9d6ee` 的 CI #282 与 Gate-document head `8cadaa7dba055505379a7c4d9e3a0ca5a5b393fa` 的 CI #283 均在 Ubuntu/Windows/macOS、fmt、Clippy、workspace all-targets、source-size、dependency-boundary、cargo-deny/advisory 与 aggregate `CI Success` 上全绿。2026-09-01 Windows 最终实机 Gate 通过，IME、Unicode、wrapped navigation、cross-block clipboard/history、list structural editing、scroll/focus/keyboard-only 与 persistence 均未发现缺陷。Windows 与输入法具体版本未单独记录。
+
+因此 P3 的 host-neutrality、Unicode/history correctness、realistic host integration 与 final real-machine Gate 已全部满足，**P3 = CLOSED**。
 
 ## 仓库级约束
 

@@ -2,7 +2,9 @@
 
 > Status: **EARLY / INDEPENDENT PROJECT**
 >
-> Date: 2026-08-21
+> Date: 2026-09-01
+>
+> 当前里程碑：**P0 / P1 / P2 / P3 CLOSED；下一阶段 P4 — Inline Atom / Extension Seam。**
 >
 > 定位：独立演进、可嵌入宿主应用的 **Rust Native Structured Rich-Text / Block Editor Engine**。首个原生前端基于 GPUI，但核心架构不绑定 GPUI。
 
@@ -837,6 +839,8 @@ resolve assets
 
 公开 Host Contract 发生变化时，对应 integration harness 必须同步通过。
 
+P3 已通过可复用 `EditorInstance` 与 multi-editor fixture 验证 load/change/persistence/full-selection restore/native-focus routing、listener 与 history/session isolation，Host Contract 无需产品专用类型即可完成真实闭环。
+
 ### 13.2 Accessibility scope
 
 Accessibility 是晓木的长期质量要求，但不作为 P0/P1 的阻塞 Gate。Core 必须保留足够的结构语义与文本/selection query 能力，使 frontend 能构建可访问性树；不能把“Canvas/native paint”设计成只有像素、无法恢复语义的单向输出。
@@ -850,7 +854,7 @@ P4+    extension node/atom 提供 accessibility fallback
 P7     在 GPUI 支持范围内加入 screen-reader smoke test
 ```
 
-如果 GPUI 或平台当前缺少必要 accessibility API，应明确记录 limitation，并将兼容工作限制在 `xiaomu-gpui`；不能为了补 UI 框架缺口把平台类型带进 Core。
+P3 已完成 frontend-neutral `AccessibilityProjection`，覆盖 editable text、semantic role/kind、selection 与真实 focus owner。当前精确 pin 的 GPUI `0.2.2` 缺少后续版本公开的角色 builder，因此平台 AccessKit tree adapter 保留在 `xiaomu-gpui` 的未来升级工作中；该限制不允许把平台类型带进 Core。
 
 ---
 
@@ -915,6 +919,8 @@ BiDi samples
 
 任何 byte offset 落到非法 UTF-8 char boundary 都应在 API 层无法构造或返回可控错误，不允许 panic。
 
+P3.7 已将这组固定 matrix 同时落到 Runtime cross-block/history invariants 与真实 GPUI wrapped-navigation fixture，并以 deterministic randomized history/mapping sequence 验证完整 undo/redo。
+
 ### 15.3 Native interaction harness
 
 实机 Gate：
@@ -931,7 +937,7 @@ multi-editor focus isolation
 keyboard-only operation
 ```
 
-P2/P3 起增加 accessibility projection invariants；P7 在平台能力允许时增加 screen-reader smoke tests。
+P3 最终 Windows Gate 已覆盖 IME、Unicode、wrapped navigation、cross-block clipboard/history、list structural editing、scroll/focus/keyboard-only 与 persistence，2026-09-01 PASS，无缺陷。P2/P3 accessibility projection invariants 已建立；P7 在平台能力允许时增加 screen-reader smoke tests。
 
 Table 阶段增加：
 
@@ -952,7 +958,7 @@ Core 尽早加入随机 transaction sequence + inverse replay + mapping invarian
 
 ### P0 — Core Contract
 
-目标：无 GPUI。
+状态：**CLOSED**
 
 完成：
 
@@ -973,6 +979,8 @@ Gate：Unicode / CJK / emoji / property tests 全绿。
 
 ### P1 — Single Block Native Input
 
+状态：**CLOSED**
+
 完成：
 
 ```text
@@ -987,6 +995,8 @@ basic marks
 Gate：真实 IME + selection + undo。
 
 ### P2 — Document Tree / Structural Edit
+
+状态：**CLOSED**
 
 完成：
 
@@ -1005,34 +1015,49 @@ Gate：paragraph → list → paragraph 日常编辑闭环，且最小宿主可�
 
 ### P3 — Cross-block Selection / History
 
+状态：**CLOSED（2026-09-01）**
+
 完成：
 
 ```text
+soft-wrap / visual-line geometry
+visual navigation / selection / hit-test
 drag / select all
 cross-block copy / cut / delete
 structured clipboard
-history grouping
+history grouping + StoredMarks
 composition/history interaction
-mapping regression matrix
-persistence/change/focus integration fixture
+HardBreak / CodeBlock multiline contract
+accessibility text/role/selection/focus projection seam
+realistic EditorInstance host integration
+multiple-editor focus / persistence / history isolation
+Unicode/CJK/emoji/combining/BiDi cross-block matrix
+randomized history / mapping invariants
+P0/P1/P2/P3 regression matrix
+Windows final real-machine Gate
 ```
 
-Gate：Unicode cross-block + undo/redo invariant 全绿，Host Contract 无需产品专用类型即可完成真实持久化闭环。
+Gate：固定 Unicode cross-block + visual-line matrix、exact undo/redo 与 randomized history/mapping invariants 全绿；Host Contract 无产品专用类型即可完成真实 load/change/persistence/selection/focus 闭环；Windows 最终实机 Gate PASS；三平台 workspace tests、fmt、Clippy、source-size、dependency-boundary 与 policy 全绿。
 
 ### P4 — Inline Atom / Extension Seam
 
-完成：
+状态：**NEXT**
+
+完成目标：
 
 ```text
-InlineAtom
+InlineAtom canonical model
+mixed-inline coordinate contract
 atom navigation/delete/copy
+atom-aware transaction / mapping / inverse
 renderer registry
 block renderer registry
 host capability callbacks
+extension accessibility fallback
 extension + capability-service integration fixture
 ```
 
-Gate：一个 demo atom 作为 one-caret-unit 完整操作，且 Core 无宿主业务类型。
+Gate：一个 demo atom 作为 one-caret-unit 完整操作，文本/atom seam 不污染 UTF-8 `TextOffset` contract，undo/redo 与 mapping 精确，且 Core 无宿主业务类型。
 
 ### P5 — Table
 

@@ -1,6 +1,6 @@
 # P3 Visual Lines / Cross-block Clipboard / History 进度
 
-状态：进行中
+状态：**CLOSED**
 
 本文档只记录 P3 执行状态和验证证据。阶段设计见 `design.md`；长期架构事实放在 `docs/architecture.md`；顶层路线以 `docs/planning.md` 为准。
 
@@ -15,9 +15,9 @@
 
 ## 当前状态
 
-当前切片：**P3.5 HardBreak / CodeBlock Multi-line 收口**
+当前切片：**P3.7 Closeout 已完成**
 
-前置状态：P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection、P3.3 Cross-block Editing / Structured Clipboard、P3.4 History Grouping / Stored Marks / IME 均已完成并合入 `main`。P3.5 canonical LF contract、Runtime/GPUI 实现与专项自动化 Gate 已成立，PR #47 进入 docs-only final current-head CI 与 squash merge 收口。
+P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection、P3.3 Cross-block Editing / Structured Clipboard、P3.4 History Grouping / Stored Marks / IME、P3.5 HardBreak / CodeBlock Multi-line、P3.6 Accessibility / Realistic Host Integration 与 P3.7 Closeout 均已完成。2026-09-01 Windows 最终实机 Gate 通过，未发现缺陷；Windows 与输入法具体版本未单独记录。最终 docs-only current-head CI 通过后，PR #49 可 squash merge，P3 阶段保持 CLOSED。
 
 ## P3.0 Phase Contract
 
@@ -39,7 +39,7 @@ P3.0 不改生产代码。其 Gate 已通过 PR #40，并 squash merge 到 `main
 - [x] logical offset → visual caret geometry
 - [x] visual point → logical offset hit-test
 - [x] layout cache 从 single `ShapedLine` 升级
-- [~] Unicode/CJK/emoji/combining/BiDi visual 专项 fixture：canonical / coordinate regression 已由既有测试覆盖，完整 visual matrix 并入 P3.7
+- [x] Unicode/CJK/emoji/combining/BiDi visual 专项 fixture：最终由 P3.7 完整矩阵收口
 - [x] Windows 实机窄宽 paragraph soft-wrap smoke Gate
 
 实现事实：
@@ -249,33 +249,56 @@ Enter on CodeBlock
 - GPUI `block_view::tests` 覆盖 LF 原样进入 display projection、style segment byte offset 与 IME 在 HardBreak 后的 virtual projection；`navigation.rs` 覆盖 LF 前后两个合法 caret 以及 Right/Left 1↔2。
 - harness fixture regression 覆盖 Paragraph `alpha\nbeta` 与多行 CodeBlock 的 v2 save/parse semantic round-trip。
 - PR #47 code head `539c190e` 的 CI run #251：policy、source-size、dependency boundary、fmt、Clippy、workspace tests、Windows/macOS/Linux 与 aggregate `CI Success` 全绿。
-
-P3.5 实现与自动化 Gate 已满足；PR #47 剩余 docs-only current-head CI 与 squash merge。Windows 最终交互实机矩阵仍按阶段设计统一放在 P3.7，不伪造本切片未执行的人工 Gate。
+- PR #47 后续已 squash merge，P3.5 Gate 已关闭。
 
 ## P3.6 Accessibility / Realistic Host Integration
 
-- [ ] accessibility projection：text
-- [ ] semantic node role/kind
-- [ ] selection projection
-- [ ] focus projection
-- [ ] restore selection/focus integration fixture
-- [ ] multiple editors coexist
-- [ ] focus isolation
-- [ ] persistence / listener / save 不串状态
+- [x] accessibility projection：text
+- [x] semantic node role/kind
+- [x] selection projection
+- [x] focus projection
+- [x] restore selection/focus integration fixture
+- [x] multiple editors coexist
+- [x] focus isolation
+- [x] persistence / listener / save 不串状态
+
+实现事实：
+
+- `AccessibilityProjection` 是 frontend-neutral projection，公开 editable text、semantic role/kind、当前 `DocumentSelection` 与实际 focus owner；未激活 editor 即使保留 caret，也投影 `focus_owner = None`。
+- 当前 crates.io 精确 pin 的 GPUI `0.2.2` 没有后续版本公开的 `gpui::Role` / `.role()` builder，因此 P3.6 固化 frontend-neutral accessibility seam；平台 AccessKit tree adapter 留给未来 GPUI 升级或平台层工作，不伪造当前依赖不存在的 API。
+- `EditorInstance` 独立持有 session/history/StoredMarks/listener/persistence，支持完整 `DocumentSelection` restore；`DocumentView::focus_selection` 将 native focus 路由到恢复后的 focus node。
+- `bind_default_editor_keys` 可复用，`run_document_editor_with_hooks` convenience runner 保留；GPUI `test-support` 仅存在于 dev/test 依赖。
+- `multi_editor_host.rs` 挂载两个独立 GPUI editor/window，覆盖 input、selection、focus owner、listener、Ctrl+S persistence、session/history isolation。
+
+验证证据：
+
+- PR #48 head `ec9c37e25018d77037e7210652ef907a3f435104` 的 CI run #276 完整全绿。
+- PR #48 已 squash merge 到 `main`（`3e0fc00bfe4967c2fccc074bd9fb04ac5d70631f`）。
+
+P3.6 Gate 已关闭。
 
 ## P3.7 Closeout
 
-- [ ] Unicode cross-block + visual-line matrix
-- [ ] history / mapping random invariants
-- [ ] P0/P1/P2 regressions
-- [ ] Windows 最终实机 Gate
-- [ ] source-size / dependency-boundary guard
-- [ ] architecture / planning / progress 同步
-- [ ] 最终 CI Success
+- [x] Unicode cross-block + visual-line matrix
+- [x] history / mapping random invariants
+- [x] P0/P1/P2 regressions
+- [x] Windows 最终实机 Gate
+- [x] source-size / dependency-boundary guard
+- [x] architecture / planning / progress 同步
+- [x] 最终 CI Success
+
+实现与验证事实：
+
+- `p3_closeout_invariants.rs` 固定覆盖 ASCII、中文、中英混排、emoji、combining mark、CJK+emoji、BiDi 七组 cross-block case，验证 scalar boundary、clipboard plain fallback、Delete seam、document/selection validity 与 exact undo/redo store round-trip。
+- deterministic randomized sequence 覆盖合法 scalar caret boundary、InsertText、Backspace、Delete、SplitBlock、JoinWithPrevious、PasteText 与相邻 block cross-block Delete；每步校验 document/selection invariant，失败路径保持 store/history 不变，并验证整链 undo/redo 精确恢复。
+- `p3_unicode_visual_navigation.rs` 经真实 GPUI `TestAppContext` / `EditorInstance` / `DocumentView` 与默认 key route 对同一七组 Unicode case 做 wrapped Home/End/Up/Down projection 验证。
+- code head `5584d57745fa4bd760f15b5ef7d911f23fb9d6ee` 的 CI #282：Ubuntu fmt/Clippy/workspace all-targets、Windows workspace all-targets、macOS workspace all-targets、policy/source-size/dependency-boundary/cargo-deny/advisory 与 aggregate `CI Success` 全绿。
+- Gate 文档 head `8cadaa7dba055505379a7c4d9e3a0ca5a5b393fa` 的 CI #283 同样完整 success。
+- 2026-09-01 Windows 最终实机 Gate：IME、Unicode、soft-wrap/navigation、cross-block clipboard/history、list structural editing、scroll/focus/keyboard-only、persistence 均未发现异常。Windows 与输入法具体版本未单独记录；Result = PASS，Defects found = none。
 
 ## P3 Phase Gate
 
-P3 只有在以下条件全部满足后才能完成：
+P3 以下条件均已满足：
 
 - [x] soft-wrap 是正式 GPUI layout path
 - [x] wrapped paragraph 的 logical/visual coordinates 分层且可双向解析
@@ -284,11 +307,13 @@ P3 只有在以下条件全部满足后才能完成：
 - [x] typing history grouping 与 IME history interaction 可预测
 - [x] collapsed StoredMarks 生效且不污染 canonical document
 - [x] HardBreak / CodeBlock multiline 完成长期 contract 决策
-- [ ] accessibility projection seam 成立
-- [ ] realistic persistence/change/focus + multi-editor fixture 成立
-- [ ] Unicode cross-block + undo/redo invariants 全绿
-- [ ] Host Contract 无产品专用类型
-- [ ] 最终 CI Success 全绿
+- [x] accessibility projection seam 成立
+- [x] realistic persistence/change/focus + multi-editor fixture 成立
+- [x] Unicode cross-block + undo/redo invariants 全绿
+- [x] Host Contract 无产品专用类型
+- [x] 最终 CI Success 全绿
+
+**P3 = CLOSED。**
 
 ## Regression Log
 
@@ -301,3 +326,5 @@ P3 只有在以下条件全部满足后才能完成：
 - P3.4 第一轮 CI #221 只暴露 `history.rs` / 新测试的 rustfmt 差异；修正后进入真实 workspace regression。
 - P3.4 CI #224 / #227 暴露旧 P1 history 测试仍假定“每次 InsertText 都是独立 undo entry”。实际 `A`、`B` 已按 P3.4 contract 正确 coalesce；更新旧回归为 grouped typing + isolated Backspace 后，CI #229 三平台、Clippy、policy 与 `CI Success` 全绿。
 - P3.5 CI #242 首先只暴露新增 Core/Runtime/GPUI regression 的 rustfmt 差异；修正后 CI #245 进入 Clippy，并指出两处 test slice 上无意义的 `as_ref()`。移除后继续补 persistence、display projection、structured-to-code flatten 与 LF navigation regression；code head CI #251 三平台、Clippy、policy 与 `CI Success` 全绿。
+- P3.6 accessibility/host integration 在 pinned GPUI 0.2.2 能力边界内收口为 frontend-neutral projection seam；multi-editor fixture 验证真实 focus/persistence/listener/session 隔离，CI #276 全绿。
+- P3.7 Runtime/GPUI Unicode closeout matrix 与 randomized history/mapping invariants 在 CI #282 全绿；docs-only Gate 清单 head 的 CI #283 再次全绿。2026-09-01 Windows 最终实机 Gate PASS，无新增缺陷。
