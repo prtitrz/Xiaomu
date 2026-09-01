@@ -2,7 +2,7 @@
 
 ## Current status
 
-P4 已启动。P3.7 的自动 closeout regression 已在独立 Draft PR #49 中通过，Windows 最终人工 Gate 待设备可用时补跑；P4 分支从当前 `main`（P3.6 已合入）独立建立，避免把未关闭的人工 Gate 与后续功能提交绑成一个 PR。
+P4 已启动。P3 已于 2026-09-01 完成 Windows 最终实机 Gate，并通过 PR #53 squash merge 到 `main`（`f1167e97f2cac852fc56933c631b37978adcac9f`），阶段状态 `P3 = CLOSED`。
 
 当前 P4.1 分支 / PR：
 
@@ -11,7 +11,7 @@ feat/p4.1-inline-coordinate-contract
 PR #50 (Draft)
 ```
 
-P4.1 实现 Gate 已成立。该 PR 暂不合入 `main`，等 P3.7 #49 完成人工 Gate 并 squash merge 后，再 rebase 到新的 `main` 做 root architecture/planning 最终同步。
+P4.1 已基于 P3-closed 的新 `main` 做干净 tree transplant，旧施工提交收敛为单一 P4.1 commit；root `architecture.md / planning.md` 已同步。当前只等待最新 docs-only current-head CI Success，随后即可按既定 Draft workaround 建非 Draft merge PR 并 squash merge。
 
 ## P4.1 Inline Coordinate Contract
 
@@ -23,7 +23,7 @@ P4.1 实现 Gate 已成立。该 PR 暂不合入 `main`，等 P3.7 #49 完成人
 - [x] Core `StepMap / ChangeMap` mapping seam
 - [x] GPUI `DocumentView` focus/selection projection seam
 - [x] P0/P1/P2/P3 full regression
-- [ ] root `architecture.md / planning.md` sync after P3.7 rebase
+- [x] root `architecture.md / planning.md` sync after P3 closeout rebase
 - [ ] docs-only final head CI Success
 
 Gate：没有 atom 的现有文档行为零语义回归；`TextOffset` 继续严格表示 UTF-8 byte coordinate；P4.1 不引入 sentinel / fake byte；非零 atom ordinal 在 canonical placement 建立前 fail closed。
@@ -61,6 +61,7 @@ GPUI
 - 首轮 Core CI 只暴露 `inline_mapping.rs` rustfmt 差异；修正后 Ubuntu fmt/Clippy/workspace tests 通过。
 - Runtime / GPUI seam 首轮 CI 仍只暴露 rustfmt module ordering / assertion formatting；修正后进入真实编译与全量 regression。
 - implementation head `a2edcb35e4634b85294725ea1d19278276e754ae` 的 CI run #295：policy、source-size、dependency boundary、cargo-deny/advisory、Ubuntu fmt/Clippy/workspace all-targets、Windows/macOS workspace all-targets 与 aggregate `CI Success` 全绿。
+- P3 closeout merge 后，P4.1 以 `f1167e97f2cac852fc56933c631b37978adcac9f` 为新 parent 重放自身 11 个文件，新基线未携带旧 P3 文档树；最终 current-head CI 作为 P4.1 merge Gate。
 
 ## P4.2 Canonical Inline Atom
 
