@@ -23,6 +23,7 @@ pub mod accessibility;
 pub mod block_view;
 pub mod document_view;
 pub mod editor;
+mod inline_position;
 pub mod input;
 
 /// Returns the pinned GPUI crates.io version this crate is built against.
