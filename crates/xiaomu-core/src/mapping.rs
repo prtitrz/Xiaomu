@@ -26,16 +26,17 @@ use crate::text::{TextOffset, TextRange};
 
 /// How an ambiguous position is resolved during mapping.
 ///
-/// Replacing a text range and inserting a child both create boundaries where
-/// an old position has two defensible new locations. The bias makes that
-/// choice explicit instead of clamping silently.
+/// Replacing a text range, inserting a structural child, and inserting an
+/// inline atom all create boundaries where an old position has two defensible
+/// new locations. The bias makes that choice explicit instead of clamping
+/// silently.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MapBias {
     /// Prefer the first coordinate of the edited region: before replacement
-    /// text, and before a newly inserted child.
+    /// text, before a newly inserted child, or before a newly inserted atom.
     Start,
     /// Prefer the coordinate just after the edited region: after replacement
-    /// text, and after a newly inserted child.
+    /// text, after a newly inserted child, or after a newly inserted atom.
     End,
 }
 
@@ -67,6 +68,28 @@ pub enum StepMap {
         range: TextRange,
         /// UTF-8 byte length of the replacement text.
         replacement_len: usize,
+    },
+    /// One atom was inserted into an inline parent's same-boundary atom order.
+    InlineAtomInserted {
+        /// Inline-bearing parent whose placement list gained the atom.
+        parent: NodeId,
+        /// UTF-8 text boundary anchoring the atom.
+        text_offset: TextOffset,
+        /// Number of same-boundary atoms before the insertion.
+        atom_index: usize,
+        /// Fresh stable identity allocated for the atom.
+        inserted: NodeId,
+    },
+    /// One atom was removed from an inline parent's same-boundary atom order.
+    InlineAtomRemoved {
+        /// Inline-bearing parent whose placement list lost the atom.
+        parent: NodeId,
+        /// UTF-8 text boundary that anchored the atom.
+        text_offset: TextOffset,
+        /// Number of same-boundary atoms before the removed atom.
+        atom_index: usize,
+        /// Stable identity of the removed atom.
+        removed: NodeId,
     },
     /// A freshly allocated node entered one parent's child list.
     NodeInserted {
@@ -127,7 +150,7 @@ impl StepMap {
     /// range.end)` resolve to the replacement boundary chosen by `bias`.
     /// An empty range is a pure insertion: the position exactly at its start
     /// is the insertion boundary and also resolves by `bias`. Affinity is
-    /// preserved. Text points of other nodes are unaffected.
+    /// preserved. Atom-only edits do not move text coordinates.
     #[must_use]
     pub fn map_text_point(&self, point: TextPoint, bias: MapBias) -> MappedPosition<TextPoint> {
         match self {
@@ -167,7 +190,9 @@ impl StepMap {
                     point.affinity(),
                 ))
             }
-            Self::NodeInserted { .. } => MappedPosition::Mapped(point),
+            Self::InlineAtomInserted { .. }
+            | Self::InlineAtomRemoved { .. }
+            | Self::NodeInserted { .. } => MappedPosition::Mapped(point),
             Self::NodeSplit {
                 node, at, inserted, ..
             } => {
@@ -224,11 +249,14 @@ impl StepMap {
     /// Boundaries after an insertion point shift by one; a boundary exactly
     /// at the insertion point resolves by `bias`. Removing a child shifts
     /// only later boundaries: the boundary that pointed at the removed child
-    /// survives as the boundary between its former neighbors.
+    /// survives as the boundary between its former neighbors. Inline atom
+    /// edits do not alter structural child indexes.
     #[must_use]
     pub fn map_node_gap(&self, gap: NodeGap, bias: MapBias) -> MappedPosition<NodeGap> {
         match self {
-            Self::TextReplaced { .. } => MappedPosition::Mapped(gap),
+            Self::TextReplaced { .. }
+            | Self::InlineAtomInserted { .. }
+            | Self::InlineAtomRemoved { .. } => MappedPosition::Mapped(gap),
             Self::NodeInserted { parent, index, .. } | Self::NodeSplit { parent, index, .. } => {
                 if gap.parent() != *parent || gap.index() < *index {
                     return MappedPosition::Mapped(gap);
@@ -266,11 +294,18 @@ impl StepMap {
 
     /// Maps one node selection across this step.
     ///
-    /// Only removal deletes a selected node; every other step keeps the
-    /// node identity intact.
+    /// Removal deletes a selection whose stable target left the document;
+    /// every other step keeps the selected node identity intact.
     #[must_use]
     pub fn map_node_selection(&self, selection: NodeSelection) -> MappedPosition<NodeSelection> {
         match self {
+            Self::InlineAtomRemoved { removed, .. } => {
+                if selection.node_id() == *removed {
+                    MappedPosition::Deleted
+                } else {
+                    MappedPosition::Mapped(selection)
+                }
+            }
             Self::NodeRemoved { removed, .. } | Self::NodeJoined { removed, .. } => {
                 if removed.contains(&selection.node_id()) {
                     MappedPosition::Deleted

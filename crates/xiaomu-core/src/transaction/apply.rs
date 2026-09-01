@@ -5,6 +5,8 @@
 //! internally and never escape the engine. While applying, the engine also
 //! records the inverse steps of every step; see [`super::inverse`].
 
+mod atom;
+
 use std::collections::{BTreeSet, VecDeque};
 
 use crate::document::{
@@ -81,6 +83,16 @@ impl ApplyContext {
                 range,
                 replacement,
             } => self.apply_replace_text(*node, *range, replacement),
+            TransactionStep::InsertInlineAtom {
+                at,
+                kind,
+                attrs,
+                content,
+            } => self.apply_insert_inline_atom(*at, kind, attrs.clone(), content.clone()),
+            TransactionStep::RemoveInlineAtom { atom } => self.apply_remove_inline_atom(*atom),
+            TransactionStep::RestoreInlineAtom { at, node } => {
+                self.apply_restore_inline_atom(*at, node)
+            }
             TransactionStep::InsertNode {
                 parent,
                 index,
@@ -345,6 +357,9 @@ impl ApplyContext {
     ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
         let content = self.inline_content(node)?;
         content.validate_offset(at)?;
+        if !content.atoms().is_empty() {
+            return Err(Error::InvalidTransaction);
+        }
 
         let split_at = at.as_usize();
         let mut head_runs = Vec::new();
@@ -435,6 +450,9 @@ impl ApplyContext {
         if first == second || self.store.get(first).is_none() {
             return Err(Error::InvalidTransaction);
         }
+        if !first_content.atoms().is_empty() || !second_content.atoms().is_empty() {
+            return Err(Error::InvalidTransaction);
+        }
         let parent = self.find_parent(first)?;
         let mut children = self.children(parent)?;
         let first_index = children
@@ -521,10 +539,20 @@ impl ApplyContext {
         let mut queue = VecDeque::from([target]);
 
         while let Some(current) = queue.pop_front() {
-            if let Ok(children) = self.children(current) {
+            let Some(node) = self.store.get(current) else {
+                continue;
+            };
+            if let Some(children) = node.content().as_children() {
                 for child in children {
-                    if collected.insert(child) {
-                        queue.push_back(child);
+                    if collected.insert(*child) {
+                        queue.push_back(*child);
+                    }
+                }
+            }
+            if let Some(inline) = node.content().as_inline() {
+                for placement in inline.atoms() {
+                    if collected.insert(placement.atom()) {
+                        queue.push_back(placement.atom());
                     }
                 }
             }
