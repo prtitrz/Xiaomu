@@ -2,6 +2,8 @@
 
 use crate::{Error, Result};
 
+use super::AtomKind;
+
 /// Valid heading level for a canonical heading node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HeadingLevel(u8);
@@ -50,6 +52,8 @@ pub enum NodeKind {
     HorizontalRule,
     /// Image atomic block.
     Image,
+    /// Extension-defined inline atom with a stable semantic key.
+    InlineAtom(AtomKind),
     /// Extension-defined block kind preserved by its stable key.
     Custom(String),
 }

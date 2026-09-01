@@ -9,8 +9,8 @@ use super::{DocumentRevision, DocumentVersion, Node, NodeId, NodeKind, NodeStore
 /// Immutable canonical Xiaomu document snapshot.
 ///
 /// Hosts can query this value but cannot mutate its node store directly.
-/// P0.4 transactions will become the public mutation path that produces new
-/// validated snapshots.
+/// Transactions are the public mutation path that produces new validated
+/// snapshots.
 #[derive(Clone, Debug)]
 pub struct XiaomuDocument {
     version: DocumentVersion,
@@ -82,11 +82,12 @@ impl XiaomuDocument {
         self.store.get(id)
     }
 
-    /// Returns the parent of `id` in this snapshot.
+    /// Returns the canonical parent of `id` in this snapshot.
     ///
-    /// The document root has no parent. Unknown identities also yield
-    /// `None`; callers that need to distinguish a missing node should query
-    /// [`Self::node`] first.
+    /// Both structural `Children` references and inline-atom placements are
+    /// real tree edges. The document root has no parent. Unknown identities
+    /// also yield `None`; callers that need to distinguish a missing node
+    /// should query [`Self::node`] first.
     #[must_use]
     pub fn parent_of(&self, id: NodeId) -> Option<NodeId> {
         if id == self.root {
@@ -95,16 +96,25 @@ impl XiaomuDocument {
 
         let mut queue = VecDeque::from([self.root]);
         while let Some(current) = queue.pop_front() {
-            let Some(children) = self
-                .node(current)
-                .and_then(|node| node.content().as_children())
-            else {
-                continue;
-            };
-            if children.contains(&id) {
-                return Some(current);
+            let node = self.node(current)?;
+
+            if let Some(children) = node.content().as_children() {
+                if children.contains(&id) {
+                    return Some(current);
+                }
+                queue.extend(children.iter().copied());
             }
-            queue.extend(children.iter().copied());
+
+            if let Some(inline) = node.content().as_inline() {
+                if inline
+                    .atoms()
+                    .iter()
+                    .any(|placement| placement.atom() == id)
+                {
+                    return Some(current);
+                }
+                queue.extend(inline.atoms().iter().map(|placement| placement.atom()));
+            }
         }
         None
     }
@@ -170,27 +180,26 @@ fn validate_tree(root: NodeId, store: &NodeStore) -> Result<()> {
         stack.push((id, false));
 
         let node = store.get(id).ok_or(Error::UnknownNode)?;
-        let Some(children) = node.content().as_children() else {
-            continue;
-        };
 
-        for child_id in children.iter().rev() {
-            let child = store.get(*child_id).ok_or(Error::UnknownNode)?;
-            if !allows_child(node.kind(), child.kind()) {
-                return Err(Error::InvalidChildKind);
+        if let Some(children) = node.content().as_children() {
+            for child_id in children.iter().rev() {
+                let child = store.get(*child_id).ok_or(Error::UnknownNode)?;
+                if !allows_child(node.kind(), child.kind()) {
+                    return Err(Error::InvalidChildKind);
+                }
+                register_edge(*child_id, &active, &mut parent_counts, &mut stack)?;
             }
+        }
 
-            if active.contains(child_id) {
-                return Err(Error::CyclicDocument);
+        if let Some(inline) = node.content().as_inline() {
+            for placement in inline.atoms().iter().rev() {
+                let atom_id = placement.atom();
+                let atom = store.get(atom_id).ok_or(Error::UnknownNode)?;
+                if !matches!(atom.kind(), NodeKind::InlineAtom(_)) {
+                    return Err(Error::InvalidInlineAtomReference);
+                }
+                register_edge(atom_id, &active, &mut parent_counts, &mut stack)?;
             }
-
-            let count = parent_counts.entry(*child_id).or_default();
-            *count += 1;
-            if *count > 1 {
-                return Err(Error::MultipleNodeParents);
-            }
-
-            stack.push((*child_id, true));
         }
     }
 
@@ -205,11 +214,32 @@ fn validate_tree(root: NodeId, store: &NodeStore) -> Result<()> {
     Ok(())
 }
 
+fn register_edge(
+    child_id: NodeId,
+    active: &BTreeSet<NodeId>,
+    parent_counts: &mut BTreeMap<NodeId, usize>,
+    stack: &mut Vec<(NodeId, bool)>,
+) -> Result<()> {
+    if active.contains(&child_id) {
+        return Err(Error::CyclicDocument);
+    }
+
+    let count = parent_counts.entry(child_id).or_default();
+    *count += 1;
+    if *count > 1 {
+        return Err(Error::MultipleNodeParents);
+    }
+
+    stack.push((child_id, true));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::document::{
-        InlineContent, MarkSet, NodeAttrs, NodeContent, NodeStoreBuilder, TextRun,
+        AtomKind, InlineAtomContent, InlineAtomPlacement, InlineContent, MarkSet, NodeAttrs,
+        NodeContent, NodeStoreBuilder, TextRun,
     };
 
     #[test]
@@ -248,6 +278,85 @@ mod tests {
         assert_eq!(
             validate_tree(root, &cyclic_store),
             Err(Error::CyclicDocument)
+        );
+    }
+
+    #[test]
+    fn inline_atom_placement_is_a_real_tree_edge() {
+        let mut builder = NodeStoreBuilder::new();
+        let atom = builder
+            .insert(
+                NodeKind::InlineAtom(AtomKind::new("mention").unwrap()),
+                NodeAttrs::empty(),
+                NodeContent::InlineAtom(InlineAtomContent::new("@A").unwrap()),
+            )
+            .unwrap();
+        let inline = InlineContent::with_atoms(
+            [TextRun::new("ab", MarkSet::empty()).unwrap()],
+            [InlineAtomPlacement::new(
+                atom,
+                crate::text::TextOffset::from_validated_byte_index(1),
+            )],
+        )
+        .unwrap();
+        let paragraph = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::Inline(inline),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([paragraph]),
+            )
+            .unwrap();
+        let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+        assert_eq!(document.node_count(), 3);
+        assert_eq!(document.parent_of(atom), Some(paragraph));
+        assert_eq!(document.parent_of(paragraph), Some(root));
+        assert!(document.validate().is_ok());
+    }
+
+    #[test]
+    fn one_atom_identity_cannot_have_two_inline_parents() {
+        let mut builder = NodeStoreBuilder::new();
+        let atom = builder
+            .insert(
+                NodeKind::InlineAtom(AtomKind::new("mention").unwrap()),
+                NodeAttrs::empty(),
+                NodeContent::InlineAtom(InlineAtomContent::new("@A").unwrap()),
+            )
+            .unwrap();
+        let placement = InlineAtomPlacement::new(atom, crate::text::TextOffset::ZERO);
+        let first = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::Inline(InlineContent::with_atoms([], [placement]).unwrap()),
+            )
+            .unwrap();
+        let second = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::Inline(InlineContent::with_atoms([], [placement]).unwrap()),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([first, second]),
+            )
+            .unwrap();
+
+        assert_eq!(
+            XiaomuDocument::new(root, builder.finish()).unwrap_err(),
+            Error::MultipleNodeParents
         );
     }
 

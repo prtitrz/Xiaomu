@@ -112,9 +112,9 @@ impl NodeStore {
 
 /// Safe bottom-up builder for an initial canonical node store.
 ///
-/// Child references must already have been allocated by this builder. This
-/// makes ordinary construction deterministic and prevents dangling references
-/// before full-document validation runs.
+/// Structural children and inline-atom placements must already have been
+/// allocated by this builder. This keeps ordinary construction deterministic
+/// and prevents dangling references before full-document validation runs.
 #[derive(Debug)]
 pub struct NodeStoreBuilder {
     nodes: BTreeMap<NodeId, Arc<Node>>,
@@ -138,7 +138,7 @@ impl NodeStoreBuilder {
         attrs: NodeAttrs,
         content: NodeContent,
     ) -> Result<NodeId> {
-        self.validate_child_references(&kind, &content)?;
+        self.validate_references(&kind, &content)?;
 
         let id = NodeId::from_allocated(self.next_id);
         let next_id = self.next_id.checked_add(1).ok_or(Error::NodeIdExhausted)?;
@@ -178,24 +178,30 @@ impl NodeStoreBuilder {
         NodeStore::from_nodes(self.nodes)
     }
 
-    fn validate_child_references(
-        &self,
-        parent_kind: &NodeKind,
-        content: &NodeContent,
-    ) -> Result<()> {
-        let Some(children) = content.as_children() else {
-            return Ok(());
-        };
+    fn validate_references(&self, parent_kind: &NodeKind, content: &NodeContent) -> Result<()> {
+        if let Some(children) = content.as_children() {
+            let mut unique = BTreeSet::new();
+            for child_id in children {
+                if !unique.insert(*child_id) {
+                    return Err(Error::DuplicateChildReference);
+                }
 
-        let mut unique = BTreeSet::new();
-        for child_id in children {
-            if !unique.insert(*child_id) {
-                return Err(Error::DuplicateChildReference);
+                let child = self.nodes.get(child_id).ok_or(Error::UnknownNode)?;
+                if !allows_child(parent_kind, child.kind()) {
+                    return Err(Error::InvalidChildKind);
+                }
             }
+        }
 
-            let child = self.nodes.get(child_id).ok_or(Error::UnknownNode)?;
-            if !allows_child(parent_kind, child.kind()) {
-                return Err(Error::InvalidChildKind);
+        if let Some(inline) = content.as_inline() {
+            for placement in inline.atoms() {
+                let atom = self
+                    .nodes
+                    .get(&placement.atom())
+                    .ok_or(Error::UnknownNode)?;
+                if !matches!(atom.kind(), NodeKind::InlineAtom(_)) {
+                    return Err(Error::InvalidInlineAtomReference);
+                }
             }
         }
 
@@ -212,22 +218,26 @@ impl Default for NodeStoreBuilder {
 pub(crate) fn allows_child(parent: &NodeKind, child: &NodeKind) -> bool {
     match parent {
         NodeKind::BulletList | NodeKind::OrderedList => matches!(child, NodeKind::ListItem),
-        NodeKind::Document | NodeKind::Quote | NodeKind::ListItem => {
-            !matches!(child, NodeKind::Document | NodeKind::ListItem)
-        }
-        NodeKind::Custom(_) => true,
+        NodeKind::Document | NodeKind::Quote | NodeKind::ListItem => !matches!(
+            child,
+            NodeKind::Document | NodeKind::ListItem | NodeKind::InlineAtom(_)
+        ),
+        NodeKind::Custom(_) => !matches!(child, NodeKind::InlineAtom(_)),
         NodeKind::Paragraph
         | NodeKind::Heading(_)
         | NodeKind::CodeBlock
         | NodeKind::HorizontalRule
-        | NodeKind::Image => false,
+        | NodeKind::Image
+        | NodeKind::InlineAtom(_) => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{InlineContent, MarkSet, TextRun};
+    use crate::document::{
+        AtomKind, InlineAtomContent, InlineAtomPlacement, InlineContent, MarkSet, TextRun,
+    };
 
     #[test]
     fn failed_insert_does_not_consume_a_node_id() {
@@ -251,6 +261,68 @@ mod tests {
             .unwrap();
 
         assert_eq!(first_valid, NodeId::from_allocated(1));
+    }
+
+    #[test]
+    fn builder_requires_existing_inline_atom_target() {
+        let mut builder = NodeStoreBuilder::new();
+        let missing = builder.peek_next_id();
+        let mixed = InlineContent::with_atoms(
+            [TextRun::new("a", MarkSet::empty()).unwrap()],
+            [InlineAtomPlacement::new(
+                missing,
+                crate::text::TextOffset::ZERO,
+            )],
+        )
+        .unwrap();
+
+        assert_eq!(
+            builder.insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::Inline(mixed),
+            ),
+            Err(Error::UnknownNode)
+        );
+    }
+
+    #[test]
+    fn inline_atom_can_only_be_referenced_from_inline_content() {
+        let mut builder = NodeStoreBuilder::new();
+        let atom = builder
+            .insert(
+                NodeKind::InlineAtom(AtomKind::new("mention").unwrap()),
+                NodeAttrs::empty(),
+                NodeContent::InlineAtom(InlineAtomContent::new("@A").unwrap()),
+            )
+            .unwrap();
+
+        assert_eq!(
+            builder.insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([atom]),
+            ),
+            Err(Error::InvalidChildKind)
+        );
+
+        let mixed = InlineContent::with_atoms(
+            [TextRun::new("a", MarkSet::empty()).unwrap()],
+            [InlineAtomPlacement::new(
+                atom,
+                crate::text::TextOffset::ZERO,
+            )],
+        )
+        .unwrap();
+        assert!(
+            builder
+                .insert(
+                    NodeKind::Paragraph,
+                    NodeAttrs::empty(),
+                    NodeContent::Inline(mixed),
+                )
+                .is_ok()
+        );
     }
 
     #[test]
