@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 与 P3 cross-block selection / history 已完成。P3 已覆盖 visual-line geometry / soft-wrap、visual navigation / selection、cross-block editing / structured clipboard、history grouping / StoredMarks / IME、canonical LF HardBreak / CodeBlock multi-line、accessibility projection seam、realistic host integration、Unicode/CJK/emoji/combining/BiDi closeout matrix 与 Windows 最终实机 Gate。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step，并继续用 `ReplaceText` 承载 canonical LF；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection、structured paste、local history grouping 与 semantic line-break command；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、soft-wrap / multi-logical-line geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret、list marker 与 CodeBlock multi-line input；可复用 `EditorInstance` 持有独立 session/history/StoredMarks/listener/persistence，并支持完整 `DocumentSelection` restore 与 native focus routing。宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
+当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 与 P3 cross-block selection / history 已完成；P4 已启动，P4.1 mixed-inline coordinate contract 已建立。P3 已覆盖 visual-line geometry / soft-wrap、visual navigation / selection、cross-block editing / structured clipboard、history grouping / StoredMarks / IME、canonical LF HardBreak / CodeBlock multi-line、accessibility projection seam、realistic host integration、Unicode/CJK/emoji/combining/BiDi closeout matrix 与 Windows 最终实机 Gate。P4.1 新增 `InlinePoint(node_id, text_offset, atom_index, affinity)`，保持 `TextOffset` 的 UTF-8 byte contract，不使用 sentinel / fake byte，并在 canonical atom placement 尚未建立时对非零 ordinal fail closed。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step，并继续用 `ReplaceText` 承载 canonical LF；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection、structured paste、local history grouping 与 semantic line-break command；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、soft-wrap / multi-logical-line geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret、list marker 与 CodeBlock multi-line input；可复用 `EditorInstance` 持有独立 session/history/StoredMarks/listener/persistence，并支持完整 `DocumentSelection` restore 与 native focus routing。宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
 
 ## Core 边界
 
@@ -149,6 +149,7 @@ Core `selection/` 实现：
 ```text
 CursorAffinity
 TextPoint
+InlinePoint
 NodeGap
 TextSelection
 NodeSelection
@@ -156,9 +157,17 @@ NodeSelection
 
 `TextPoint` 由 stable `NodeId`、`TextOffset`、`CursorAffinity` 组成。使用时针对具体 snapshot 校验：节点存在、携带 inline content、offset 是拼接文本的合法 UTF-8 scalar boundary。
 
+P4.1 引入 `InlinePoint` 作为 mixed-inline canonical coordinate seam：
+
+```text
+InlinePoint(node_id, text_offset, atom_index, affinity)
+```
+
+`text_offset` 继续严格表示 canonical text 的 UTF-8 byte offset；inline atom 不占 fake byte，也不使用 U+FFFC/private-use sentinel。若同一 text boundary 上未来存在 N 个 atom，则 `atom_index = 0..=N` 表达 N+1 个唯一 caret gap；`CursorAffinity` 仍只处理 visual ambiguity，不承担 canonical atom order。当前文档尚未建立 atom placement，所以 pure-text path 只允许 `atom_index = 0`，非零 ordinal 返回 typed failure。`TextPoint ↔ InlinePoint` 在 ordinal 0 时精确兼容。
+
 `NodeGap` 表示 parent child list 的结构边界位置。`TextSelection` 保存 anchor / focus；Core 语义仍要求两端在同一个 inline node。跨 block selection 位于 Runtime `DocumentSelection`。
 
-视觉 caret projection 与 affinity 的视觉解析属于 frontend。
+视觉 caret projection 与 affinity 的视觉解析属于 frontend。mixed-inline coordinate 的长期决策见 ADR 0005。
 
 ### Transaction Application
 
@@ -185,6 +194,8 @@ JoinNodes
 
 metadata seam 使用 `BTreeMap<String, String>`，不携带宿主专用类型。
 
+P4.1 只建立 coordinate/mapping compatibility seam，不提前增加 atom mutation step。复核已确认：atom 前后可能共享同一 `TextOffset`，因此后续 atom seam 上的文本 mutation 必须消费 `InlinePoint.atom_index`；旧 `ReplaceText(TextRange)` 不能被当成完整 mixed-inline replacement contract。
+
 ### Position Mapping
 
 `mapping/` 实现显式 position mapping。映射只由 transaction application 产出，其他子系统不维护并行 offset 修补规则。
@@ -197,6 +208,8 @@ MappedPosition（Mapped / Deleted）
 ```
 
 主要 step map 包括文本 replacement、node insert/remove、`NodeSplit`、`NodeJoined`。目标被删除时返回 `Deleted`，不静默 clamp。split 点、插入点等歧义由显式 `MapBias` 决定。
+
+P4.1 增加 `StepMap::map_inline_point` 与 `ChangeMap::map_inline_point`。在尚无 atom-changing step 的当前阶段，它复用已经验证的 text/node mapping，并保持 `atom_index`；后续 atom-specific step 必须在同一 mapping engine 中显式调整 ordinal，不能建立平行修补逻辑。
 
 `TextSelection` 映射采用向外 bias；collapsed selection 保持 collapsed。长期 mapping 决策见 `docs/adr/0002-position-mapping-policy.md`。
 
@@ -241,6 +254,8 @@ DocumentChangeListener
 ```
 
 `DocumentSelection` 是 Runtime 的 document-level selection，两端可落在不同 inline block；公开读取点始终针对当前 snapshot 校验。排序使用 snapshot tree order，并保留 anchor / focus 方向。
+
+P4.1 在不改变现有 Runtime selection storage 的前提下增加 mixed-inline compatibility entry points：`DocumentPosition::from_inline_point`、`DocumentPosition::as_inline_point` 与 `DocumentSelection::from_inline_points`。纯文本 ordinal 0 无损工作；当前 canonical document 无法验证的非零 ordinal fail closed。真正能持有 atom ordinal 的 Runtime 存储迁移留给 canonical atom placement 与 atom editing 同步完成。
 
 当前 `EditIntent` 覆盖：
 
@@ -439,6 +454,9 @@ input/composition.rs
 input/platform_clipboard.rs
     plain text + Xiaomu metadata 的 GPUI clipboard adapter
 
+inline_position.rs
+    DocumentView mixed-inline focus / selection projection seam
+
 document_view/
     DocumentView multi-block 容器
     navigation.rs document-order / horizontal scalar navigation helper
@@ -471,6 +489,8 @@ IME composition 的 preedit 保持 frontend-local，不推进 document revision�
 ### Multi-block DocumentView
 
 `DocumentView` 持有共享 session，并按文档序为 inline-bearing block 挂载 `ParagraphView`。焦点跟随 `DocumentSelection` focus node 路由。
+
+P4.1 新增 `DocumentView::inline_focus_point` 与 `DocumentView::inline_selection_points`，将现有 Runtime selection/focus 投影为 `InlinePoint`。当前纯文本路径仍得到 ordinal 0；后续 atom placement 出现后，上层 GPUI API 不需要再次更名或另建平行 position 类型。
 
 Left / Right 保持 Unicode scalar navigation，并在 soft-wrap 共享 logical offset 上先通过 `CursorAffinity` 跨越上一视觉行末尾 / 下一视觉行开头两个 caret state。Home / End 解析当前 visual row 首尾。Up / Down 读取最近一次 `BlockTextLayout` 的 wrapped geometry；`desired_x` 只保存在 `DocumentView` frontend transient state，连续纵向移动保持视觉列，越过 block 边界时在相邻 inline block 的首 / 末 visual row 上按同一 x 求最近合法 Core offset。Shift 版本只改变 selection focus，anchor 继续由 Runtime document selection 持有。
 
@@ -562,6 +582,12 @@ P3.7 固定 Unicode matrix 覆盖 ASCII、中文、中英混排、emoji、combin
 code head `5584d57745fa4bd760f15b5ef7d911f23fb9d6ee` 的 CI #282 与 Gate-document head `8cadaa7dba055505379a7c4d9e3a0ca5a5b393fa` 的 CI #283 均在 Ubuntu/Windows/macOS、fmt、Clippy、workspace all-targets、source-size、dependency-boundary、cargo-deny/advisory 与 aggregate `CI Success` 上全绿。2026-09-01 Windows 最终实机 Gate 通过，IME、Unicode、wrapped navigation、cross-block clipboard/history、list structural editing、scroll/focus/keyboard-only 与 persistence 均未发现缺陷。Windows 与输入法具体版本未单独记录。
 
 因此 P3 的 host-neutrality、Unicode/history correctness、realistic host integration 与 final real-machine Gate 已全部满足，**P3 = CLOSED**。
+
+## P4.1 Mixed-inline Coordinate 事实
+
+P4.1 固化 ADR 0005：`TextOffset` 继续严格表示 canonical UTF-8 text bytes，atom 不占 fake byte；`InlinePoint` 用 `(text_offset, atom_index)` 表达 mixed-inline order，并保留 `CursorAffinity` 只处理 visual ambiguity。Core mapping、Runtime compatibility seam 与 GPUI selection/focus projection 已接入同一个类型边界；纯文本现有路径保持 ordinal 0，因此 P0-P3 行为无语义变化。
+
+P4.1 也明确了后续 transaction 约束：同一 `TextOffset` 上 atom 前后是不同 canonical caret gap，因此 mixed-inline text replacement 必须消费 atom ordinal；不能把位置先降格成裸 `TextOffset` 再在 Runtime/GPUI 猜顺序。
 
 ## 仓库级约束
 
