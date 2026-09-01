@@ -12,11 +12,6 @@ use super::{CursorAffinity, TextPoint};
 /// concatenated canonical text. `atom_index` is orthogonal to that text
 /// coordinate: when multiple inline atoms are anchored at the same text
 /// boundary, it counts how many of those atoms are before the caret.
-///
-/// P4.1 introduces the coordinate seam before canonical atoms exist. On the
-/// current text-only `InlineContent`, the only valid `atom_index` is zero.
-/// P4.2 extends validation against real atom placements without changing the
-/// meaning of [`TextOffset`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct InlinePoint {
     node_id: NodeId,
@@ -97,9 +92,9 @@ impl InlinePoint {
 
     /// Validates this point against one document snapshot.
     ///
-    /// P4.1 has no canonical atom placement yet, so only ordinal zero is
-    /// accepted. P4.2 replaces that temporary constraint with `0..=N`, where
-    /// N is the number of atoms anchored at `text_offset`.
+    /// If `N` atoms are anchored at `text_offset`, `atom_index` must be in
+    /// `0..=N`. The text component is validated independently as a UTF-8 byte
+    /// boundary, so atoms never consume fake bytes.
     pub fn validate(&self, document: &XiaomuDocument) -> Result<()> {
         let Some(node) = document.node(self.node_id) else {
             return Err(Error::UnknownNode);
@@ -108,7 +103,7 @@ impl InlinePoint {
             return Err(Error::InvalidSelection);
         };
         inline.validate_offset(self.text_offset)?;
-        if self.atom_index != 0 {
+        if self.atom_index > inline.atom_count_at(self.text_offset) {
             return Err(Error::InvalidSelection);
         }
         Ok(())
@@ -133,7 +128,8 @@ impl TryFrom<InlinePoint> for TextPoint {
 mod tests {
     use super::*;
     use crate::document::{
-        InlineContent, MarkSet, NodeAttrs, NodeContent, NodeKind, NodeStoreBuilder, TextRun,
+        AtomKind, InlineAtomContent, InlineAtomPlacement, InlineContent, MarkSet, NodeAttrs,
+        NodeContent, NodeKind, NodeStoreBuilder, TextRun,
     };
 
     fn paragraph_document(text: &str) -> (XiaomuDocument, NodeId) {
@@ -160,6 +156,53 @@ mod tests {
         )
     }
 
+    fn adjacent_atom_document() -> (XiaomuDocument, NodeId, TextOffset) {
+        let mut builder = NodeStoreBuilder::new();
+        let first = builder
+            .insert(
+                NodeKind::InlineAtom(AtomKind::new("mention").unwrap()),
+                NodeAttrs::empty(),
+                NodeContent::InlineAtom(InlineAtomContent::new("@A").unwrap()),
+            )
+            .unwrap();
+        let second = builder
+            .insert(
+                NodeKind::InlineAtom(AtomKind::new("reference").unwrap()),
+                NodeAttrs::empty(),
+                NodeContent::InlineAtom(InlineAtomContent::new("ref").unwrap()),
+            )
+            .unwrap();
+        let at = TextOffset::from_validated_byte_index(1);
+        let paragraph = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::Inline(
+                    InlineContent::with_atoms(
+                        [TextRun::new("ab", MarkSet::empty()).unwrap()],
+                        [
+                            InlineAtomPlacement::new(first, at),
+                            InlineAtomPlacement::new(second, at),
+                        ],
+                    )
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([paragraph]),
+            )
+            .unwrap();
+        (
+            XiaomuDocument::new(root, builder.finish()).unwrap(),
+            paragraph,
+            at,
+        )
+    }
+
     #[test]
     fn text_point_conversion_preserves_existing_coordinates_exactly() {
         let (document, paragraph) = paragraph_document("a中👍");
@@ -183,7 +226,28 @@ mod tests {
     }
 
     #[test]
-    fn nonzero_atom_index_fails_closed_until_atom_placements_exist() {
+    fn adjacent_atoms_expose_three_unique_caret_gaps() {
+        let (document, paragraph, offset) = adjacent_atom_document();
+
+        for atom_index in 0..=2 {
+            assert_eq!(
+                InlinePoint::new(paragraph, offset, atom_index, CursorAffinity::Before)
+                    .validate(&document),
+                Ok(())
+            );
+        }
+        assert_eq!(
+            InlinePoint::new(paragraph, offset, 3, CursorAffinity::Before).validate(&document),
+            Err(Error::InvalidSelection)
+        );
+        assert_eq!(
+            InlinePoint::new(paragraph, offset, 1, CursorAffinity::Before).to_text_point(),
+            Err(Error::InvalidSelection)
+        );
+    }
+
+    #[test]
+    fn nonzero_atom_index_is_rejected_at_plain_text_boundary() {
         let (document, paragraph) = paragraph_document("abc");
         let offset = document
             .node(paragraph)

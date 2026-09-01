@@ -73,6 +73,7 @@ fn validate_content_shape(kind: &NodeKind, content: &NodeContent) -> Result<()> 
         NodeKind::Paragraph | NodeKind::Heading(_) | NodeKind::CodeBlock => {
             matches!(content, NodeContent::Inline(_))
         }
+        NodeKind::InlineAtom(_) => matches!(content, NodeContent::InlineAtom(_)),
         NodeKind::HorizontalRule | NodeKind::Image => matches!(content, NodeContent::Atomic),
         NodeKind::Custom(_) => true,
     };

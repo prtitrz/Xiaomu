@@ -39,6 +39,14 @@ pub enum Error {
     },
     /// An extension-defined node kind has an empty key.
     InvalidCustomNodeKind,
+    /// An inline-atom semantic kind has an empty stable key.
+    InvalidAtomKind,
+    /// An inline atom has no textual fallback for clipboard/accessibility.
+    InvalidAtomFallback,
+    /// The same inline-atom node is referenced more than once by one parent.
+    DuplicateInlineAtomReference,
+    /// An inline placement references a node that is not an inline atom.
+    InvalidInlineAtomReference,
     /// A node attribute key is empty after trimming.
     InvalidNodeAttrKey,
     /// A mark set contains conflicting values for one semantic mark kind.
@@ -90,6 +98,14 @@ impl fmt::Display for Error {
                 )
             }
             Self::InvalidCustomNodeKind => f.write_str("custom node kind key must not be empty"),
+            Self::InvalidAtomKind => f.write_str("inline atom kind key must not be empty"),
+            Self::InvalidAtomFallback => f.write_str("inline atom fallback text must not be empty"),
+            Self::DuplicateInlineAtomReference => {
+                f.write_str("inline content contains a duplicate atom reference")
+            }
+            Self::InvalidInlineAtomReference => {
+                f.write_str("inline placement must reference an inline-atom node")
+            }
             Self::InvalidNodeAttrKey => f.write_str("node attribute key must not be empty"),
             Self::InvalidMarkSet => f.write_str("mark set contains conflicting mark values"),
             Self::EmptyTextRun => f.write_str("canonical text run must not be empty"),

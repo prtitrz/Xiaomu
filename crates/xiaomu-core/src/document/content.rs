@@ -1,46 +1,67 @@
 //! Canonical node content shapes and inline normalization.
 
+use std::collections::BTreeSet;
+
 use crate::text::TextOffset;
 use crate::{Error, Result};
 
-use super::{NodeId, TextRun};
+use super::{InlineAtomContent, InlineAtomPlacement, NodeId, TextRun};
 
-/// Normalized inline text content for paragraph-like nodes.
+/// Normalized mixed inline content for paragraph-like nodes.
 ///
-/// Adjacent runs with identical marks are merged so run segmentation does not
-/// become accidental canonical state. Empty inline content is valid and is how
-/// an empty paragraph or heading is represented.
+/// Text remains a sequence of normalized [`TextRun`] values. Inline atoms are
+/// referenced separately by validated UTF-8 text boundaries so adding atomic
+/// content does not change the meaning of [`TextOffset`]. Multiple atoms may
+/// share one boundary; their stable vector order defines the atom ordinal used
+/// by [`crate::selection::InlinePoint`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct InlineContent {
     runs: Vec<TextRun>,
+    atoms: Vec<InlineAtomPlacement>,
 }
 
 impl InlineContent {
-    /// Creates normalized inline content.
+    /// Creates normalized text-only inline content.
     pub fn new(runs: impl IntoIterator<Item = TextRun>) -> Result<Self> {
-        let mut normalized: Vec<TextRun> = Vec::new();
+        Self::with_atoms(runs, [])
+    }
 
-        for run in runs {
-            if let Some(previous) = normalized.last_mut()
-                && previous.marks() == run.marks()
-            {
-                let mut text = String::with_capacity(previous.len_bytes() + run.len_bytes());
-                text.push_str(previous.text().as_str());
-                text.push_str(run.text().as_str());
-                let marks = previous.marks().clone();
-                *previous = TextRun::new(text, marks)?;
-                continue;
+    /// Creates normalized mixed inline content with ordered atom placements.
+    ///
+    /// Placements are stably normalized by `text_offset`; atoms sharing one
+    /// text boundary keep caller order. A referenced atom identity may occur
+    /// only once in one inline parent. Full document validation later verifies
+    /// that each identity exists and has inline-atom node semantics.
+    pub fn with_atoms(
+        runs: impl IntoIterator<Item = TextRun>,
+        atoms: impl IntoIterator<Item = InlineAtomPlacement>,
+    ) -> Result<Self> {
+        let runs = normalize_runs(runs)?;
+        let mut content = Self {
+            runs,
+            atoms: atoms.into_iter().collect(),
+        };
+
+        let mut identities = BTreeSet::new();
+        for placement in &content.atoms {
+            content.validate_offset(placement.text_offset())?;
+            if !identities.insert(placement.atom()) {
+                return Err(Error::DuplicateInlineAtomReference);
             }
-            normalized.push(run);
         }
-
-        Ok(Self { runs: normalized })
+        content
+            .atoms
+            .sort_by_key(|placement| placement.text_offset().as_usize());
+        Ok(content)
     }
 
     /// Returns empty inline content.
     #[must_use]
     pub const fn empty() -> Self {
-        Self { runs: Vec::new() }
+        Self {
+            runs: Vec::new(),
+            atoms: Vec::new(),
+        }
     }
 
     /// Returns normalized text runs.
@@ -49,13 +70,30 @@ impl InlineContent {
         &self.runs
     }
 
-    /// Returns whether no text runs are present.
+    /// Returns ordered inline-atom placements.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.runs.is_empty()
+    pub fn atoms(&self) -> &[InlineAtomPlacement] {
+        &self.atoms
     }
 
-    /// Returns the total UTF-8 byte length of the represented text.
+    /// Returns the number of atoms anchored at `offset`.
+    #[must_use]
+    pub fn atom_count_at(&self, offset: TextOffset) -> usize {
+        self.atoms
+            .iter()
+            .filter(|placement| placement.text_offset() == offset)
+            .count()
+    }
+
+    /// Returns whether this inline content has neither text nor atoms.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.runs.is_empty() && self.atoms.is_empty()
+    }
+
+    /// Returns the total UTF-8 byte length of represented text only.
+    ///
+    /// Inline atoms do not consume fake bytes in this coordinate space.
     #[must_use]
     pub fn len_bytes(&self) -> usize {
         self.runs.iter().map(TextRun::len_bytes).sum()
@@ -100,19 +138,41 @@ impl InlineContent {
         }
 
         // `raw == total length` with no runs means empty inline content,
-        // whose only valid coordinate is zero.
+        // whose only valid text coordinate is zero.
         Ok(())
     }
+}
+
+fn normalize_runs(runs: impl IntoIterator<Item = TextRun>) -> Result<Vec<TextRun>> {
+    let mut normalized: Vec<TextRun> = Vec::new();
+
+    for run in runs {
+        if let Some(previous) = normalized.last_mut()
+            && previous.marks() == run.marks()
+        {
+            let mut text = String::with_capacity(previous.len_bytes() + run.len_bytes());
+            text.push_str(previous.text().as_str());
+            text.push_str(run.text().as_str());
+            let marks = previous.marks().clone();
+            *previous = TextRun::new(text, marks)?;
+            continue;
+        }
+        normalized.push(run);
+    }
+
+    Ok(normalized)
 }
 
 /// Canonical content shape of a document node.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NodeContent {
-    /// Normalized inline text content.
+    /// Normalized mixed inline content.
     Inline(InlineContent),
     /// Ordered child-node references.
     Children(Vec<NodeId>),
+    /// Canonical payload for one atomic inline extension node.
+    InlineAtom(InlineAtomContent),
     /// Atomic block with no editable child content.
     Atomic,
 }
@@ -139,6 +199,15 @@ impl NodeContent {
         }
     }
 
+    /// Returns inline-atom content when this node has atom shape.
+    #[must_use]
+    pub const fn as_inline_atom(&self) -> Option<&InlineAtomContent> {
+        match self {
+            Self::InlineAtom(content) => Some(content),
+            _ => None,
+        }
+    }
+
     /// Returns child IDs when this node has a structural child shape.
     #[must_use]
     pub fn as_children(&self) -> Option<&[NodeId]> {
@@ -148,7 +217,7 @@ impl NodeContent {
         }
     }
 
-    /// Returns whether this is atomic content.
+    /// Returns whether this is atomic block content.
     #[must_use]
     pub const fn is_atomic(&self) -> bool {
         matches!(self, Self::Atomic)
@@ -158,7 +227,7 @@ impl NodeContent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::MarkSet;
+    use crate::document::{MarkSet, NodeAttrs, NodeKind, NodeStoreBuilder};
 
     fn inline(text: &str) -> InlineContent {
         InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()]).unwrap()
@@ -180,5 +249,64 @@ mod tests {
             Err(Error::TextOutOfBounds { offset: 5, len: 4 })
         ));
         assert_eq!(InlineContent::empty().offset_at(0).unwrap().as_usize(), 0);
+    }
+
+    #[test]
+    fn placements_normalize_by_offset_and_keep_same_offset_order() {
+        let mut builder = NodeStoreBuilder::new();
+        let first = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::empty_inline(),
+            )
+            .unwrap();
+        let second = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::empty_inline(),
+            )
+            .unwrap();
+        let third = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::empty_inline(),
+            )
+            .unwrap();
+        let text = inline("ab");
+        let at_zero = InlineAtomPlacement::new(first, text.offset_at(0).unwrap());
+        let at_one_first = InlineAtomPlacement::new(second, text.offset_at(1).unwrap());
+        let at_one_second = InlineAtomPlacement::new(third, text.offset_at(1).unwrap());
+
+        let mixed = InlineContent::with_atoms(
+            text.runs().iter().cloned(),
+            [at_one_first, at_zero, at_one_second],
+        )
+        .unwrap();
+
+        assert_eq!(mixed.atoms(), &[at_zero, at_one_first, at_one_second]);
+        assert_eq!(mixed.atom_count_at(text.offset_at(1).unwrap()), 2);
+        assert_eq!(mixed.len_bytes(), 2);
+        assert!(!mixed.is_empty());
+    }
+
+    #[test]
+    fn placement_rejects_invalid_boundaries_and_duplicate_identity() {
+        let builder = NodeStoreBuilder::new();
+        let atom = builder.peek_next_id();
+        let run = TextRun::new("中", MarkSet::empty()).unwrap();
+        let invalid = InlineAtomPlacement::new(atom, TextOffset::from_validated_byte_index(1));
+        assert_eq!(
+            InlineContent::with_atoms([run.clone()], [invalid]),
+            Err(Error::InvalidTextBoundary { offset: 1 })
+        );
+
+        let at_start = InlineAtomPlacement::new(atom, TextOffset::ZERO);
+        assert_eq!(
+            InlineContent::with_atoms([run], [at_start, at_start]),
+            Err(Error::DuplicateInlineAtomReference)
+        );
     }
 }

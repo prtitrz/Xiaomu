@@ -4,6 +4,7 @@
 //! stable value types; P0.2B adds canonical nodes, storage, validation, and
 //! immutable document snapshots.
 
+mod atom;
 mod attrs;
 mod content;
 mod kind;
@@ -15,6 +16,7 @@ mod store;
 mod text_run;
 mod version;
 
+pub use atom::{AtomKind, InlineAtomContent, InlineAtomPlacement};
 pub use attrs::{AttrValue, NodeAttrs};
 pub use content::{InlineContent, NodeContent};
 pub use kind::{HeadingLevel, NodeKind};
