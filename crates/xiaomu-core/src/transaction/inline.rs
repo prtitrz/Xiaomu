@@ -1,11 +1,14 @@
-//! Piece-based editing over inline content.
+//! Piece-based editing over mixed inline content.
 //!
 //! Run segmentation is an internal detail: these helpers split runs at range
 //! boundaries, edit the affected pieces, and rebuild normalized
-//! `InlineContent`. User-visible coordinates stay document text offsets.
+//! `InlineContent`. User-visible text coordinates stay UTF-8 document offsets,
+//! while atom placements are preserved explicitly.
 
-use crate::document::{InlineContent, Mark, MarkKind, MarkSet, TextRun};
-use crate::text::TextRange;
+use crate::document::{
+    InlineAtomPlacement, InlineContent, Mark, MarkKind, MarkSet, TextRun,
+};
+use crate::text::{TextOffset, TextRange};
 use crate::{Error, Result};
 
 /// One contiguous piece of inline text carrying one mark set.
@@ -34,6 +37,24 @@ fn validate_inline_range(inline: &InlineContent, range: TextRange) -> Result<()>
 
     inline.validate_offset(range.start())?;
     inline.validate_offset(range.end())
+}
+
+/// Old text-only `ReplaceText` cannot address a position inside a same-byte
+/// atom seam. Reject any edit whose closed boundary span contains an atom;
+/// atom-aware editing uses `InlinePoint` in the dedicated P4 contract.
+fn validate_text_replacement_against_atoms(
+    inline: &InlineContent,
+    range: TextRange,
+) -> Result<()> {
+    let start = range.start().as_usize();
+    let end = range.end().as_usize();
+    if inline.atoms().iter().any(|placement| {
+        let offset = placement.text_offset().as_usize();
+        offset >= start && offset <= end
+    }) {
+        return Err(Error::InvalidTransaction);
+    }
+    Ok(())
 }
 
 /// Splits inline content into pieces that concatenate to the full original
@@ -85,26 +106,57 @@ fn split_pieces(inline: &InlineContent, range: TextRange) -> Result<Vec<Piece>> 
     Ok(pieces)
 }
 
-fn rebuild(pieces: Vec<Piece>) -> Result<InlineContent> {
+fn rebuild(pieces: Vec<Piece>, atoms: &[InlineAtomPlacement]) -> Result<InlineContent> {
     let mut runs = Vec::new();
     for piece in pieces {
         if !piece.text.is_empty() {
             runs.push(TextRun::new(piece.text, piece.marks)?);
         }
     }
-    InlineContent::new(runs)
+    InlineContent::with_atoms(runs, atoms.iter().copied())
+}
+
+fn mapped_atom_placements_after_text_replace(
+    inline: &InlineContent,
+    range: TextRange,
+    replacement_len: usize,
+) -> Vec<InlineAtomPlacement> {
+    let start = range.start().as_usize();
+    let end = range.end().as_usize();
+    let removed_len = end - start;
+
+    inline
+        .atoms()
+        .iter()
+        .copied()
+        .map(|placement| {
+            let old = placement.text_offset().as_usize();
+            if old > end {
+                InlineAtomPlacement::new(
+                    placement.atom(),
+                    TextOffset::from_validated_byte_index(old - removed_len + replacement_len),
+                )
+            } else {
+                placement
+            }
+        })
+        .collect()
 }
 
 /// Returns inline content with `range` replaced by `replacement`.
 ///
 /// The replacement inherits the marks of the piece containing
-/// `range.start`, keeping continuous typing behavior deterministic.
+/// `range.start`, keeping continuous typing behavior deterministic. This
+/// legacy text-only operation fails closed when an atom exists at either
+/// endpoint or inside the range because only an [`crate::selection::InlinePoint`]
+/// can distinguish the canonical gaps at that seam.
 pub fn replace_text(
     inline: &InlineContent,
     range: TextRange,
     replacement: &str,
 ) -> Result<InlineContent> {
     validate_inline_range(inline, range)?;
+    validate_text_replacement_against_atoms(inline, range)?;
 
     let mut output: Vec<Piece> = Vec::new();
     let mut offset = 0usize;
@@ -154,13 +206,15 @@ pub fn replace_text(
         output.push(Piece::new(inherited, replacement));
     }
 
-    rebuild(output)
+    let atoms = mapped_atom_placements_after_text_replace(inline, range, replacement.len());
+    rebuild(output, &atoms)
 }
 
 /// Returns inline content with `mark` applied to `range`.
 ///
 /// An existing mark of the same kind inside the range is replaced so a run
-/// never carries two competing values for one semantic mark.
+/// never carries two competing values for one semantic mark. Atom placements
+/// are preserved exactly because mark edits do not move text coordinates.
 pub fn add_mark(inline: &InlineContent, range: TextRange, mark: Mark) -> Result<InlineContent> {
     let mut pieces = split_pieces(inline, range)?;
     let mut offset = 0usize;
@@ -184,7 +238,7 @@ pub fn add_mark(inline: &InlineContent, range: TextRange, mark: Mark) -> Result<
         }
     }
 
-    rebuild(pieces)
+    rebuild(pieces, inline.atoms())
 }
 
 /// Returns inline content with all marks of `kind` removed from `range`.
@@ -215,13 +269,13 @@ pub fn remove_mark(
         }
     }
 
-    rebuild(pieces)
+    rebuild(pieces, inline.atoms())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::LinkMark;
+    use crate::document::{LinkMark, NodeAttrs, NodeContent, NodeKind, NodeStoreBuilder};
 
     fn inline(text: &str, marks: MarkSet) -> InlineContent {
         InlineContent::new([TextRun::new(text, marks).unwrap()]).unwrap()
@@ -236,6 +290,21 @@ mod tests {
         crate::text::TextBuffer::from(SCRATCH)
             .offset_at(raw)
             .unwrap()
+    }
+
+    fn distinct_node_ids(count: usize) -> Vec<crate::document::NodeId> {
+        let mut builder = NodeStoreBuilder::new();
+        (0..count)
+            .map(|_| {
+                builder
+                    .insert(
+                        NodeKind::Paragraph,
+                        NodeAttrs::empty(),
+                        NodeContent::empty_inline(),
+                    )
+                    .unwrap()
+            })
+            .collect()
     }
 
     #[test]
@@ -271,6 +340,64 @@ mod tests {
         let content = inline("中文", MarkSet::empty());
         let next = replace_text(&content, range(0, 6), "").unwrap();
         assert!(next.is_empty());
+    }
+
+    #[test]
+    fn replacement_shifts_later_atom_placements_without_fake_bytes() {
+        let atom = distinct_node_ids(1)[0];
+        let content = InlineContent::with_atoms(
+            [TextRun::new("abcd", MarkSet::empty()).unwrap()],
+            [InlineAtomPlacement::new(atom, offset_at(3))],
+        )
+        .unwrap();
+
+        let next = replace_text(&content, range(0, 1), "XX").unwrap();
+        assert_eq!(next.len_bytes(), 5);
+        assert_eq!(next.atoms().len(), 1);
+        assert_eq!(next.atoms()[0].atom(), atom);
+        assert_eq!(next.atoms()[0].text_offset(), offset_at(4));
+    }
+
+    #[test]
+    fn legacy_text_replacement_fails_closed_at_atom_seam() {
+        let atom = distinct_node_ids(1)[0];
+        let content = InlineContent::with_atoms(
+            [TextRun::new("ab", MarkSet::empty()).unwrap()],
+            [InlineAtomPlacement::new(atom, offset_at(1))],
+        )
+        .unwrap();
+
+        assert_eq!(
+            replace_text(&content, range(1, 1), "x"),
+            Err(Error::InvalidTransaction)
+        );
+        assert_eq!(
+            replace_text(&content, range(0, 1), "x"),
+            Err(Error::InvalidTransaction)
+        );
+        assert_eq!(
+            replace_text(&content, range(1, 2), "x"),
+            Err(Error::InvalidTransaction)
+        );
+        assert_eq!(
+            replace_text(&content, range(0, 2), "x"),
+            Err(Error::InvalidTransaction)
+        );
+    }
+
+    #[test]
+    fn mark_ops_preserve_atom_placements() {
+        let atom = distinct_node_ids(1)[0];
+        let content = InlineContent::with_atoms(
+            [TextRun::new("abcd", MarkSet::empty()).unwrap()],
+            [InlineAtomPlacement::new(atom, offset_at(2))],
+        )
+        .unwrap();
+
+        let marked = add_mark(&content, range(1, 3), Mark::Bold).unwrap();
+        assert_eq!(marked.atoms(), content.atoms());
+        let cleared = remove_mark(&marked, range(0, 4), MarkKind::Bold).unwrap();
+        assert_eq!(cleared.atoms(), content.atoms());
     }
 
     #[test]

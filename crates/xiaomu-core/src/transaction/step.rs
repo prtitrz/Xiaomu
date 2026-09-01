@@ -1,6 +1,9 @@
 //! Typed transaction steps.
 
-use crate::document::{Mark, MarkKind, Node, NodeAttrs, NodeContent, NodeId};
+use crate::document::{
+    AtomKind, InlineAtomContent, Mark, MarkKind, Node, NodeAttrs, NodeContent, NodeId,
+};
+use crate::selection::InlinePoint;
 use crate::text::{TextOffset, TextRange};
 
 /// One typed canonical mutation inside a [`Transaction`](super::Transaction).
@@ -21,6 +24,41 @@ pub enum TransactionStep {
         range: TextRange,
         /// UTF-8 replacement text; may be empty.
         replacement: String,
+    },
+    /// Inserts one new canonical inline atom at an exact mixed-inline gap.
+    ///
+    /// `at.node_id()` is the inline-bearing parent. `at.text_offset()` is a
+    /// UTF-8 text boundary and `at.atom_index()` selects one of the `0..=N`
+    /// gaps around the atoms already anchored at that boundary. The new atom
+    /// receives a fresh stable [`NodeId`].
+    InsertInlineAtom {
+        /// Exact mixed-inline gap receiving the new atom.
+        at: InlinePoint,
+        /// Stable semantic atom kind.
+        kind: AtomKind,
+        /// Extension payload carried by canonical node attributes.
+        attrs: NodeAttrs,
+        /// Host-neutral canonical atom content.
+        content: InlineAtomContent,
+    },
+    /// Removes one canonical inline atom by stable identity.
+    ///
+    /// The atom must currently be referenced by exactly one inline parent.
+    RemoveInlineAtom {
+        /// Inline-atom node to remove.
+        atom: NodeId,
+    },
+    /// Restores a previously removed inline atom with its exact identity.
+    ///
+    /// This inverse-oriented step mirrors [`TransactionStep::RestoreSubtree`]:
+    /// callers cannot mint the [`Node`] identity, every restored identity must
+    /// currently be absent, and the final snapshot still passes full document
+    /// validation. `at` addresses the exact gap in the post-removal parent.
+    RestoreInlineAtom {
+        /// Exact mixed-inline gap receiving the restored atom.
+        at: InlinePoint,
+        /// Previously removed canonical atom node payload.
+        node: Node,
     },
     /// Inserts a newly allocated node as a child of `parent` at `index`.
     ///
