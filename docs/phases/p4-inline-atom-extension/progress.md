@@ -11,7 +11,7 @@ feat/p4.1-inline-coordinate-contract
 PR #50 (Draft)
 ```
 
-P4.1 已基于 P3-closed 的新 `main` 做干净 tree transplant，旧施工提交收敛为单一 P4.1 commit；root `architecture.md / planning.md` 已同步。当前只等待最新 docs-only current-head CI Success，随后即可按既定 Draft workaround 建非 Draft merge PR 并 squash merge。
+P4.1 已基于 P3-closed 的新 `main` 做干净 tree transplant，旧施工提交收敛为单一 P4.1 implementation commit；root `architecture.md / planning.md` 已同步。rebase/docs head 的 CI #320 已在三平台、fmt、Clippy、policy 与 aggregate `CI Success` 全绿；本 bookkeeping commit 之后不再改 P4.1 内容，最终 current-head CI 通过即可 merge。
 
 ## P4.1 Inline Coordinate Contract
 
@@ -24,7 +24,7 @@ P4.1 已基于 P3-closed 的新 `main` 做干净 tree transplant，旧施工提�
 - [x] GPUI `DocumentView` focus/selection projection seam
 - [x] P0/P1/P2/P3 full regression
 - [x] root `architecture.md / planning.md` sync after P3 closeout rebase
-- [ ] docs-only final head CI Success
+- [x] docs-only final head CI Success
 
 Gate：没有 atom 的现有文档行为零语义回归；`TextOffset` 继续严格表示 UTF-8 byte coordinate；P4.1 不引入 sentinel / fake byte；非零 atom ordinal 在 canonical placement 建立前 fail closed。
 
@@ -61,7 +61,8 @@ GPUI
 - 首轮 Core CI 只暴露 `inline_mapping.rs` rustfmt 差异；修正后 Ubuntu fmt/Clippy/workspace tests 通过。
 - Runtime / GPUI seam 首轮 CI 仍只暴露 rustfmt module ordering / assertion formatting；修正后进入真实编译与全量 regression。
 - implementation head `a2edcb35e4634b85294725ea1d19278276e754ae` 的 CI run #295：policy、source-size、dependency boundary、cargo-deny/advisory、Ubuntu fmt/Clippy/workspace all-targets、Windows/macOS workspace all-targets 与 aggregate `CI Success` 全绿。
-- P3 closeout merge 后，P4.1 以 `f1167e97f2cac852fc56933c631b37978adcac9f` 为新 parent 重放自身 11 个文件，新基线未携带旧 P3 文档树；最终 current-head CI 作为 P4.1 merge Gate。
+- P3 closeout merge 后，P4.1 以 `f1167e97f2cac852fc56933c631b37978adcac9f` 为新 parent 重放自身 11 个文件，新基线未携带旧 P3 文档树。
+- root architecture/planning/progress 同步 head 的 CI run #320：Ubuntu fmt/Clippy/workspace all-targets、Windows/macOS workspace all-targets、source-size/dependency-boundary/cargo-deny/advisory 与 aggregate `CI Success` 全绿。
 
 ## P4.2 Canonical Inline Atom
 
