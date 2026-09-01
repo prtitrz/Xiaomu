@@ -4,7 +4,7 @@
 >
 > Date: 2026-09-01
 >
-> 当前里程碑：**P0 / P1 / P2 / P3 CLOSED；下一阶段 P4 — Inline Atom / Extension Seam。**
+> 当前里程碑：**P0 / P1 / P2 / P3 CLOSED；P4 — Inline Atom / Extension Seam IN PROGRESS，P4.1 mixed-inline coordinate contract 已完成。**
 >
 > 定位：独立演进、可嵌入宿主应用的 **Rust Native Structured Rich-Text / Block Editor Engine**。首个原生前端基于 GPUI，但核心架构不绑定 GPUI。
 
@@ -408,17 +408,18 @@ UTF-8 / UTF-16 转换集中在 text boundary 层。
 
 单一 `node_id + offset` 不足以覆盖完整结构化编辑器。
 
-从架构上预留：
+当前已建立 / 预留：
 
 ```text
 TextPoint
+InlinePoint
 NodeGap
 NodeSelection
 TextSelection
 CellSelection
 ```
 
-文本位置概念上类似：
+纯文本位置：
 
 ```rust
 pub struct TextPoint {
@@ -427,6 +428,14 @@ pub struct TextPoint {
     pub affinity: CursorAffinity,
 }
 ```
+
+P4.1 已建立 mixed-inline coordinate：
+
+```text
+InlinePoint(node_id, text_offset, atom_index, affinity)
+```
+
+其中 `text_offset` 继续严格表示 UTF-8 canonical text bytes；同一 text boundary 上 N 个 atom 对应 `atom_index = 0..=N` 的 N+1 个 caret gap。atom 不占 fake byte，不采用 U+FFFC/private-use sentinel，`CursorAffinity` 不承担 canonical atom order。当前 canonical atom placement 尚未合入，因此现有纯文本路径只承认 ordinal 0；后续 atom placement、transaction、mapping 与 Runtime editing 必须沿这一 contract 扩展。
 
 `CursorAffinity` 用于处理 soft wrap、BiDi 等同一逻辑位置对应多个视觉 caret 位置的情况。
 
@@ -479,6 +488,8 @@ metadata
 
 Core mutation 返回 inverse transaction 或足够生成 inverse 的 change set。
 
+P4.1 已明确后续 mixed-inline mutation 的额外约束：atom 前后 caret 可能共享同一 `TextOffset`，因此 atom seam 上的文本 replacement 必须消费 `InlinePoint.atom_index`；旧 `ReplaceText(TextRange)` 只能继续服务其语义无歧义的纯文本路径，不能被扩张成会丢失 atom order 的隐式 mixed-inline contract。
+
 ### 6.1 Position Mapping
 
 Position Mapping 是 P0/P2 之间必须建立的基础能力，不能等到协作或复杂 history 出现后再补。
@@ -506,7 +517,7 @@ decorations
 future collaboration adapters
 ```
 
-禁止各模块自行维护 offset 修补逻辑。
+禁止各模块自行维护 offset 修补逻辑。P4.1 已让 `StepMap / ChangeMap` 暴露 `map_inline_point` seam；未来 atom-changing step 必须进入这条同一 mapping engine。
 
 ### 6.2 Collaboration stance
 
@@ -729,6 +740,13 @@ Decoration 不写入 `XiaomuDocument`，也不参与文档 codec。`xiaomu-runti
 ## 11. Inline Atom / Extension Boundary
 
 Atomic inline extension 提前于 Table，用它验证扩展边界是否足够干净。
+
+P4.1 已先固定 coordinate seam，防止 canonical atom 引入后再返工 P0-P3 的 UTF-8 text contract：
+
+```text
+TextOffset = text bytes only
+InlinePoint = text boundary + atom ordinal + visual affinity
+```
 
 第一阶段保留两个 registry：
 
@@ -1041,13 +1059,24 @@ Gate：固定 Unicode cross-block + visual-line matrix、exact undo/redo 与 ran
 
 ### P4 — Inline Atom / Extension Seam
 
-状态：**NEXT**
+状态：**IN PROGRESS**
 
-完成目标：
+P4.1 已完成：
+
+```text
+ADR 0005 mixed-inline coordinate contract
+InlinePoint(node_id, text_offset, atom_index, affinity)
+TextPoint ↔ InlinePoint ordinal-0 compatibility
+StepMap / ChangeMap mixed-inline mapping seam
+Runtime DocumentPosition / DocumentSelection compatibility seam
+GPUI DocumentView mixed-inline focus / selection projection
+P0-P3 zero-semantic-regression gate
+```
+
+继续完成：
 
 ```text
 InlineAtom canonical model
-mixed-inline coordinate contract
 atom navigation/delete/copy
 atom-aware transaction / mapping / inverse
 renderer registry

@@ -22,5 +22,6 @@ pub mod text;
 pub mod transaction;
 
 mod error;
+mod inline_mapping;
 
 pub use error::{Error, Result};

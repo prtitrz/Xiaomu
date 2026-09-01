@@ -10,6 +10,7 @@
 //! (GPUI first) sit on top of this crate and their types never leak into it.
 
 mod line_break;
+mod runtime_inline_position;
 mod session_clipboard;
 
 pub mod clipboard;
