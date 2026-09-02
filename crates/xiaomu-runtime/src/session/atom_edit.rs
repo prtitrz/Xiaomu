@@ -157,6 +157,52 @@ pub(crate) fn plan_text_input(
     plan_inline_replacement(inline, anchor, focus, text, stored_marks, requested_history)
 }
 
+/// Builds the plan for an IME composition commit in a node with atoms.
+///
+/// The composition range is a plain text span produced by the frontend, so
+/// it carries no seam ordinal of its own: atoms anchored at either boundary
+/// sit outside the composed text and survive it, while an atom strictly
+/// inside the range fails the commit — IME composition can never enter an
+/// atom.
+pub(crate) fn plan_ime_commit(
+    inline: &InlineContent,
+    node: NodeId,
+    range: TextRange,
+    text: &str,
+    stored_marks: Option<&MarkSet>,
+) -> Result<PlannedAction, SessionError> {
+    let start = range.start();
+    let at = InlinePoint::new(
+        node,
+        start,
+        inline.atom_count_at(start),
+        xiaomu_core::selection::CursorAffinity::Before,
+    );
+    let mut transaction = edit_transaction(TransactionStep::ReplaceInlineText {
+        at,
+        end: range.end(),
+        replacement: text.to_owned(),
+    });
+    if let Some(marks) = stored_marks
+        && !text.is_empty()
+    {
+        push_exact_insert_marks(&mut transaction, inline, node, range, text, marks)?;
+    }
+
+    Ok(PlannedAction::Commit(
+        EditPlan::new(
+            transaction,
+            SelectionUpdate::CaretAfterReplacement,
+            Some(PrimaryEdit {
+                node,
+                range,
+                inserted_len: text.len(),
+            }),
+        )
+        .with_history_policy(HistoryPolicy::Isolated),
+    ))
+}
+
 /// Replaces the span between two mixed-inline endpoints of one node.
 ///
 /// The selection's atoms (same-boundary atoms at or after the start gap, and
