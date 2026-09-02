@@ -2,35 +2,37 @@
 //!
 //! P1 kept the session selection inside one inline node (`TextSelection`,
 //! a Core type). P2 upgrades the session to a runtime-owned
-//! [`DocumentSelection`] whose endpoints may sit anywhere in the tree: a
-//! [`TextPoint`] inside one inline-bearing node, or a [`NodeGap`] between
+//! [`DocumentSelection`] whose endpoints may sit anywhere in the tree: an
+//! [`InlinePoint`] inside one inline-bearing node, or a [`NodeGap`] between
 //! two children of one container.
 //!
-//! The Core selection types stay unchanged; `TextSelection` remains the
-//! single-block special case and keeps its own validation semantics. The
-//! visual projection of a cross-block selection onto mounted blocks is a
-//! frontend concern and does not belong here.
+//! Since P4.3 the text endpoints carry the full mixed-inline coordinate
+//! `(text_offset, atom_index)`: a caret between same-boundary atoms is a
+//! first-class position. Plain-text endpoints keep `atom_index == 0`, which
+//! is exactly the P0-P3 `TextPoint` coordinate space. The visual projection
+//! of a cross-block selection onto mounted blocks is a frontend concern and
+//! does not belong here.
 
 use std::collections::HashMap;
 
 use xiaomu_core::document::{NodeId, XiaomuDocument};
 use xiaomu_core::mapping::{ChangeMap, MapBias, MappedPosition};
-use xiaomu_core::selection::{NodeGap, TextPoint, TextSelection};
+use xiaomu_core::selection::{InlinePoint, NodeGap, TextPoint, TextSelection};
 
 use super::SessionError;
 
 /// One endpoint of a [`DocumentSelection`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DocumentPosition {
-    /// A text position inside one inline-bearing node.
-    Text(TextPoint),
+    /// A mixed-inline text position inside one inline-bearing node.
+    Inline(InlinePoint),
     /// A structural boundary between two children of one container.
     Gap(NodeGap),
 }
 
 impl From<TextPoint> for DocumentPosition {
     fn from(point: TextPoint) -> Self {
-        Self::Text(point)
+        Self::Inline(InlinePoint::from(point))
     }
 }
 
@@ -73,14 +75,14 @@ impl DocumentSelection {
 
     /// Adapts a single-block Core selection into the document-level form.
     ///
-    /// Both endpoints become text positions; validation against a snapshot
-    /// happens through [`Self::validate`], exactly like for native gap
-    /// endpoints.
+    /// Both endpoints become inline positions with atom ordinal zero;
+    /// validation against a snapshot happens through [`Self::validate`],
+    /// exactly like for native gap endpoints.
     #[must_use]
     pub fn text(selection: TextSelection) -> Self {
         Self::new(
-            DocumentPosition::Text(selection.anchor()),
-            DocumentPosition::Text(selection.focus()),
+            DocumentPosition::from(selection.anchor()),
+            DocumentPosition::from(selection.focus()),
         )
     }
 
@@ -102,15 +104,25 @@ impl DocumentSelection {
         self.anchor == self.focus
     }
 
-    /// Returns the single-block Core selection when both endpoints are text
-    /// positions of the same inline node.
+    /// Returns the single-block Core selection when both endpoints are
+    /// plain-text positions (atom ordinal zero) of the same inline node.
+    ///
+    /// A selection that carries a non-zero atom ordinal cannot degrade to
+    /// the text-only `TextSelection` without losing the seam information;
+    /// callers that must edit such a selection use the mixed-inline
+    /// transaction contract instead.
     #[must_use]
     pub fn as_single_node(&self) -> Option<TextSelection> {
         match (self.anchor, self.focus) {
-            (DocumentPosition::Text(anchor), DocumentPosition::Text(focus))
-                if anchor.node_id() == focus.node_id() =>
+            (DocumentPosition::Inline(anchor), DocumentPosition::Inline(focus))
+                if anchor.node_id() == focus.node_id()
+                    && anchor.atom_index() == 0
+                    && focus.atom_index() == 0 =>
             {
-                Some(TextSelection::new(anchor, focus))
+                Some(TextSelection::new(
+                    anchor.to_text_point().ok()?,
+                    focus.to_text_point().ok()?,
+                ))
             }
             _ => None,
         }
@@ -119,7 +131,7 @@ impl DocumentSelection {
     /// Validates both endpoints against `document`.
     pub fn validate(&self, document: &XiaomuDocument) -> Result<(), SessionError> {
         let check = |position: DocumentPosition| match position {
-            DocumentPosition::Text(point) => point.validate(document),
+            DocumentPosition::Inline(point) => point.validate(document),
             DocumentPosition::Gap(gap) => gap.validate(document),
         };
         check(self.anchor).map_err(|_| SessionError::SelectionInvalid)?;
@@ -156,7 +168,7 @@ impl DocumentSelection {
         };
         let map_one = |endpoint: DocumentPosition, bias| -> Result<Self, SessionError> {
             match endpoint {
-                DocumentPosition::Text(point) => match changes.map_text_point(point, bias) {
+                DocumentPosition::Inline(point) => match changes.map_inline_point(point, bias) {
                     MappedPosition::Mapped(mapped) => Ok(Self::collapsed(mapped)),
                     MappedPosition::Deleted => Err(SessionError::SelectionDeleted),
                 },
@@ -201,12 +213,14 @@ impl DocumentSelection {
 ///
 /// Every node receives a monotonically increasing base slot and each child
 /// boundary receives its own slot interleaved between the subtrees. Any two
-/// valid positions then compare lexicographically by `(slot, sub)`, where a
-/// gap's sub-component is zero and a text position uses its byte offset.
+/// valid positions then compare lexicographically by `(slot, sub, ordinal)`,
+/// where a gap's sub-component is zero and an inline position uses its UTF-8
+/// byte offset plus atom ordinal. The ordinal is the canonical same-boundary
+/// order (ADR 0005), so seam gaps order deterministically.
 struct Slots {
     counter: u64,
     node_base: HashMap<NodeId, u64>,
-    gap_keys: HashMap<(NodeId, usize), (u64, u64)>,
+    gap_keys: HashMap<(NodeId, usize), (u64, u64, u64)>,
 }
 
 impl Slots {
@@ -241,19 +255,26 @@ impl Slots {
             // The boundary before the first child shares the parent's slot;
             // every later boundary sits after the previous subtree.
             let gap_slot = if index == 0 { base } else { self.take_slot() };
-            self.gap_keys.insert((id, index), (gap_slot, 0));
+            self.gap_keys.insert((id, index), (gap_slot, 0, 0));
             self.walk(*child, document);
         }
         let after_last = self.take_slot();
-        self.gap_keys.insert((id, children.len()), (after_last, 0));
+        self.gap_keys
+            .insert((id, children.len()), (after_last, 0, 0));
     }
 
-    fn key(&self, position: DocumentPosition) -> Result<(u64, u64), SessionError> {
+    fn key(&self, position: DocumentPosition) -> Result<(u64, u64, u64), SessionError> {
         match position {
-            DocumentPosition::Text(point) => self
+            DocumentPosition::Inline(point) => self
                 .node_base
                 .get(&point.node_id())
-                .map(|base| (*base, point.offset().as_usize() as u64))
+                .map(|base| {
+                    (
+                        *base,
+                        point.text_offset().as_usize() as u64,
+                        point.atom_index() as u64,
+                    )
+                })
                 .ok_or(SessionError::SelectionInvalid),
             DocumentPosition::Gap(gap) => self
                 .gap_keys

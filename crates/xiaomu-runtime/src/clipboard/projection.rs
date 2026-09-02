@@ -22,13 +22,13 @@ pub(crate) fn slice_selection(
     selection.validate(document)?;
 
     let (head, tail) = selection.ordered(document)?;
-    let (DocumentPosition::Text(head), DocumentPosition::Text(tail)) = (head, tail) else {
+    let (DocumentPosition::Inline(head), DocumentPosition::Inline(tail)) = (head, tail) else {
         return Err(SessionError::SelectionInvalid);
     };
 
     // Affinity can distinguish two visual caret positions at one soft-wrap
     // boundary, but it does not select canonical text by itself.
-    if head.node_id() == tail.node_id() && head.offset() == tail.offset() {
+    if head.node_id() == tail.node_id() && head.text_offset() == tail.text_offset() {
         return Ok(None);
     }
 
@@ -51,8 +51,8 @@ pub(crate) fn slice_selection(
         let source = &source_blocks[head_index];
         let inline = slice_inline(
             &source.inline,
-            head.offset().as_usize(),
-            tail.offset().as_usize(),
+            head.text_offset().as_usize(),
+            tail.text_offset().as_usize(),
         )?;
         return Ok(Some(ClipboardSlice::from_roots(vec![ClipboardNode::new(
             source.kind.clone(),
@@ -65,12 +65,12 @@ pub(crate) fn slice_selection(
     for (index, source) in source_blocks[head_index..=tail_index].iter().enumerate() {
         let absolute_index = head_index + index;
         let start = if absolute_index == head_index {
-            head.offset().as_usize()
+            head.text_offset().as_usize()
         } else {
             0
         };
         let end = if absolute_index == tail_index {
-            tail.offset().as_usize()
+            tail.text_offset().as_usize()
         } else {
             source.inline.len_bytes()
         };

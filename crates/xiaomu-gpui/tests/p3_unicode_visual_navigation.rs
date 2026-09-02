@@ -27,7 +27,9 @@ fn point(document: &XiaomuDocument, node: NodeId, raw: usize) -> TextPoint {
 
 fn focus(session: &xiaomu_gpui::block_view::SharedSession) -> TextPoint {
     match session.borrow().selection().focus() {
-        DocumentPosition::Text(point) => point,
+        DocumentPosition::Inline(point) => point
+            .to_text_point()
+            .expect("visual navigation must keep a text focus"),
         DocumentPosition::Gap(_) => panic!("visual navigation must keep a text focus"),
     }
 }

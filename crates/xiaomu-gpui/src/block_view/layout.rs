@@ -331,10 +331,10 @@ impl super::ParagraphView {
     pub(crate) fn focus_caret(&self) -> Option<(usize, CursorAffinity)> {
         let session = self.session.borrow();
         match session.selection().focus() {
-            xiaomu_runtime::session::DocumentPosition::Text(point)
+            xiaomu_runtime::session::DocumentPosition::Inline(point)
                 if point.node_id() == self.node =>
             {
-                Some((point.offset().as_usize(), point.affinity()))
+                Some((point.text_offset().as_usize(), point.affinity()))
             }
             _ => None,
         }

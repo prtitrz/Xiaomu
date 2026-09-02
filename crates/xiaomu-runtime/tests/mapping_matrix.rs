@@ -10,7 +10,7 @@ use xiaomu_core::document::{
     XiaomuDocument,
 };
 use xiaomu_core::mapping::{MapBias, MappedPosition, StepMap};
-use xiaomu_core::selection::{CursorAffinity, TextPoint, TextSelection};
+use xiaomu_core::selection::{CursorAffinity, InlinePoint, TextPoint, TextSelection};
 use xiaomu_core::text::TextOffset;
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 use xiaomu_runtime::session::{
@@ -82,7 +82,7 @@ fn text_of(session: &DocumentSession, node: NodeId) -> String {
 
 fn focus_point(session: &DocumentSession) -> TextPoint {
     match session.selection().focus() {
-        DocumentPosition::Text(point) => point,
+        DocumentPosition::Inline(point) => point.to_text_point().unwrap(),
         DocumentPosition::Gap(_) => panic!("expected a text focus"),
     }
 }
@@ -389,9 +389,10 @@ fn undo_redo_across_structural_edits_restores_recorded_selections() {
     session.undo().unwrap();
     assert_eq!(
         session.selection().focus(),
-        DocumentPosition::Text(TextPoint::new(
+        DocumentPosition::Inline(InlinePoint::new(
             first,
             offset_of(&document, first, 2),
+            0,
             CursorAffinity::Before
         ))
     );
@@ -430,16 +431,17 @@ fn cross_block_map_through_preserves_anchor_focus_direction() {
     let mapped = selection.map_through(applied.changes(), &document).unwrap();
     assert_eq!(
         mapped.anchor(),
-        DocumentPosition::Text(TextPoint::new(
+        DocumentPosition::Inline(InlinePoint::new(
             second,
             offset_of(&document, second, 2),
+            0,
             CursorAffinity::Before
         ))
     );
     match mapped.focus() {
-        DocumentPosition::Text(point) => {
+        DocumentPosition::Inline(point) => {
             assert_eq!(point.node_id(), first);
-            assert_eq!(point.offset().as_usize(), 0);
+            assert_eq!(point.text_offset().as_usize(), 0);
         }
         DocumentPosition::Gap(_) => panic!("focus must remain a text point"),
     }

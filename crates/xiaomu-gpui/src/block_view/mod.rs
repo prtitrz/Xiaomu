@@ -337,7 +337,9 @@ impl ParagraphView {
         let document = session.document();
 
         let endpoint = |position: DocumentPosition| match position {
-            DocumentPosition::Text(point) => Some((point.node_id(), point.offset().as_usize())),
+            DocumentPosition::Inline(point) => {
+                Some((point.node_id(), point.text_offset().as_usize()))
+            }
             DocumentPosition::Gap(_) => None,
         };
 

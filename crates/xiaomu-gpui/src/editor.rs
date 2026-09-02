@@ -298,8 +298,8 @@ mod tests {
     fn editor_instance_restores_cross_block_selection_without_frontend_state() {
         let (document, [first, second]) = two_paragraph_document("alpha", "beta");
         let selection = DocumentSelection::new(
-            xiaomu_runtime::session::DocumentPosition::Text(point(&document, first, 2)),
-            xiaomu_runtime::session::DocumentPosition::Text(point(&document, second, 3)),
+            xiaomu_runtime::session::DocumentPosition::from(point(&document, first, 2)),
+            xiaomu_runtime::session::DocumentPosition::from(point(&document, second, 3)),
         );
 
         let instance = EditorInstance::new(document, selection, EditorHooks::default()).unwrap();

@@ -2,8 +2,12 @@
 //!
 //! Split out of `mod.rs` so P3 visual-line / history growth does not keep
 //! stacking onto the session orchestration file.
+//!
+//! Movement is one caret unit per step (P4.3): an inline atom is an
+//! indivisible single unit at its anchor boundary (ADR 0005), so stepping
+//! walks the same-boundary atom ordinal first and text scalars second.
 
-use xiaomu_core::selection::TextPoint;
+use xiaomu_core::selection::{InlinePoint, TextPoint};
 use xiaomu_core::text::TextOffset;
 
 use super::intent::{self, CaretMove};
@@ -17,24 +21,78 @@ impl DocumentSession {
     ) -> Result<SessionOutcome, SessionError> {
         // Cross-block caret movement arrives with the multi-block frontend;
         // at a gap endpoint there is nothing to move within yet.
-        let Some(focus) = self.text_focus().ok() else {
+        let Some(focus) = self.inline_focus().ok() else {
             return Ok(SessionOutcome::NoChange);
         };
-        let inline = self.inline_of(focus.node_id())?;
+        let node = focus.node_id();
+        let inline = self.inline_of(node)?;
         let text = intent::concatenated(&inline);
-        let current = focus.offset().as_usize();
-        let target = match caret_move {
-            CaretMove::Backward => intent::previous_boundary(&text, current),
-            CaretMove::Forward => intent::next_boundary(&text, current),
-            CaretMove::ToStart => (current != 0).then_some(0),
-            CaretMove::ToEnd => (current != text.len()).then_some(text.len()),
+        let current = focus.text_offset().as_usize();
+        let ordinal = focus.atom_index();
+        let affinity = focus.affinity();
+
+        // Arriving at a boundary from the left puts the caret before every
+        // atom anchored there; arriving from the right puts it after them.
+        let boundary_point = |raw: usize, from_right: bool| -> Result<InlinePoint, SessionError> {
+            let offset = inline.offset_at(raw).map_err(SessionError::Core)?;
+            let ordinal = if from_right {
+                inline.atom_count_at(offset)
+            } else {
+                0
+            };
+            Ok(InlinePoint::new(node, offset, ordinal, affinity))
         };
 
-        let Some(raw) = target else {
+        let target: Option<InlinePoint> = match caret_move {
+            CaretMove::Backward => {
+                if ordinal > 0 {
+                    Some(InlinePoint::new(
+                        node,
+                        focus.text_offset(),
+                        ordinal - 1,
+                        affinity,
+                    ))
+                } else {
+                    intent::previous_boundary(&text, current)
+                        .map(|raw| boundary_point(raw, true))
+                        .transpose()?
+                }
+            }
+            CaretMove::Forward => {
+                if ordinal < inline.atom_count_at(focus.text_offset()) {
+                    Some(InlinePoint::new(
+                        node,
+                        focus.text_offset(),
+                        ordinal + 1,
+                        affinity,
+                    ))
+                } else {
+                    intent::next_boundary(&text, current)
+                        .map(|raw| boundary_point(raw, false))
+                        .transpose()?
+                }
+            }
+            CaretMove::ToStart => {
+                (current != 0).then_some(InlinePoint::new(node, TextOffset::ZERO, 0, affinity))
+            }
+            CaretMove::ToEnd => {
+                if current == text.len() {
+                    None
+                } else {
+                    let end = inline.offset_at(text.len()).map_err(SessionError::Core)?;
+                    Some(InlinePoint::new(
+                        node,
+                        end,
+                        inline.atom_count_at(end),
+                        affinity,
+                    ))
+                }
+            }
+        };
+
+        let Some(moved) = target else {
             return Ok(SessionOutcome::NoChange);
         };
-        let offset = inline.offset_at(raw).map_err(SessionError::Core)?;
-        let moved = TextPoint::new(focus.node_id(), offset, focus.affinity());
         let next = if extend_selection {
             DocumentSelection::new(self.selection.anchor(), moved)
         } else {
@@ -50,14 +108,16 @@ impl DocumentSession {
         extend_selection: bool,
     ) -> Result<SessionOutcome, SessionError> {
         // Hit-testing against the block tree lands on one block's text; gap
-        // endpoints have no in-node coordinates to place into.
-        let Some(focus) = self.text_focus().ok() else {
+        // endpoints have no in-node coordinates to place into. Atom-precise
+        // hit resolution arrives with the atom renderer; a placed caret
+        // resolves to the gap before any atoms anchored at the boundary.
+        let Some(focus) = self.inline_focus().ok() else {
             return Ok(SessionOutcome::NoChange);
         };
         let inline = self.inline_of(focus.node_id())?;
         inline.validate_offset(offset).map_err(SessionError::Core)?;
 
-        let moved = TextPoint::new(focus.node_id(), offset, focus.affinity());
+        let moved = InlinePoint::new(focus.node_id(), offset, 0, focus.affinity());
         let next = if extend_selection {
             DocumentSelection::new(self.selection.anchor(), moved)
         } else {

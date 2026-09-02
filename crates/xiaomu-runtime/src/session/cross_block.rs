@@ -29,7 +29,7 @@ pub(crate) fn plan_delete_selection(
         .validate(document)
         .map_err(|_| SessionError::SelectionInvalid)?;
     let (head, tail) = selection.ordered(document)?;
-    let (DocumentPosition::Text(head), DocumentPosition::Text(tail)) = (head, tail) else {
+    let (DocumentPosition::Inline(head), DocumentPosition::Inline(tail)) = (head, tail) else {
         return Err(SessionError::SelectionInvalid);
     };
     if head.node_id() == tail.node_id() {
@@ -52,10 +52,10 @@ pub(crate) fn plan_delete_selection(
     let head_inline = inline_of(document, head.node_id())?;
     let tail_inline = inline_of(document, tail.node_id())?;
     head_inline
-        .validate_offset(head.offset())
+        .validate_offset(head.text_offset())
         .map_err(SessionError::Core)?;
     tail_inline
-        .validate_offset(tail.offset())
+        .validate_offset(tail.text_offset())
         .map_err(SessionError::Core)?;
 
     let head_parent = document
@@ -72,10 +72,10 @@ pub(crate) fn plan_delete_selection(
     let head_end = head_inline
         .offset_at(head_inline.len_bytes())
         .map_err(SessionError::Core)?;
-    if head.offset() != head_end {
+    if head.text_offset() != head_end {
         transaction.push_step(TransactionStep::ReplaceText {
             node: head.node_id(),
-            range: TextRange::new(head.offset(), head_end).map_err(SessionError::Core)?,
+            range: TextRange::new(head.text_offset(), head_end).map_err(SessionError::Core)?,
             replacement: String::new(),
         });
     }
@@ -97,10 +97,10 @@ pub(crate) fn plan_delete_selection(
     // Keep only the unselected suffix in the now-relocated tail. Joining it
     // next preserves the suffix run/mark segmentation exactly.
     let tail_start = tail_inline.offset_at(0).map_err(SessionError::Core)?;
-    if tail.offset() != tail_start {
+    if tail.text_offset() != tail_start {
         transaction.push_step(TransactionStep::ReplaceText {
             node: tail.node_id(),
-            range: TextRange::new(tail_start, tail.offset()).map_err(SessionError::Core)?,
+            range: TextRange::new(tail_start, tail.text_offset()).map_err(SessionError::Core)?,
             replacement: String::new(),
         });
     }
@@ -126,7 +126,8 @@ pub(crate) fn plan_delete_selection(
         transaction.push_step(TransactionStep::RemoveNode { node: container });
     }
 
-    let caret_range = TextRange::new(head.offset(), head.offset()).map_err(SessionError::Core)?;
+    let caret_range =
+        TextRange::new(head.text_offset(), head.text_offset()).map_err(SessionError::Core)?;
     Ok(PlannedAction::Commit(EditPlan::new(
         transaction,
         SelectionUpdate::CaretAtEditStart,

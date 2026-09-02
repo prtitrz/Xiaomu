@@ -159,7 +159,7 @@ impl DocumentView {
                     let where_am_i = {
                         let session = self.session.borrow();
                         match session.selection().focus() {
-                            DocumentPosition::Text(point) => {
+                            DocumentPosition::Inline(point) => {
                                 let describe = |id| {
                                     session
                                         .document()
@@ -243,7 +243,9 @@ impl DocumentView {
     ) {
         let anchor = if extend {
             match self.session.borrow().selection().anchor() {
-                DocumentPosition::Text(point) => Some(point),
+                // Text-layer anchors keep ordinal zero; a seam anchor has no
+                // text-only projection until the atom renderer (P4.4).
+                DocumentPosition::Inline(point) => point.to_text_point().ok(),
                 DocumentPosition::Gap(_) => None,
             }
         } else {
@@ -258,7 +260,7 @@ impl DocumentView {
     /// Marks the block holding the document focus for one keep-visible pass.
     fn request_focus_scroll(&self, cx: &App) {
         let node = match self.session.borrow().selection().focus() {
-            DocumentPosition::Text(point) => point.node_id(),
+            DocumentPosition::Inline(point) => point.node_id(),
             DocumentPosition::Gap(_) => return,
         };
         if let Some((_, view)) = self.children.iter().find(|(id, _)| *id == node) {

@@ -126,11 +126,11 @@ fn cross_block_delete_is_one_history_entry_and_round_trips_exact_store() {
 
     let after_store = session.document().store().clone();
     let after_selection = session.selection();
-    let DocumentPosition::Text(caret) = after_selection.focus() else {
+    let DocumentPosition::Inline(caret) = after_selection.focus() else {
         panic!("delete must leave a text caret");
     };
     assert_eq!(caret.node_id(), fixture.first);
-    assert_eq!(caret.offset().as_usize(), 1);
+    assert_eq!(caret.text_offset().as_usize(), 1);
     assert_eq!(after_selection.anchor(), after_selection.focus());
 
     assert_eq!(session.undo().unwrap(), SessionOutcome::DocumentChanged);

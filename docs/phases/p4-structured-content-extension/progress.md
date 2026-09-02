@@ -105,10 +105,12 @@ P4.2 Gate：相邻两个 atom 可稳定构造、validate、insert/remove、undo/
 
 ### P4.3 Runtime Atom Editing
 
-- [ ] one-caret-unit Left / Right
+- [x] one-caret-unit Left / Right（Runtime `move_caret` 按 atom ordinal + scalar boundary 步进）
 - [ ] atomic Backspace / Delete
-- [ ] mixed text + atom selection
+- [ ] mixed text + atom selection（存储与 mapping 已升级；编辑语义随后续切片）
 - [ ] atom-aware text input
+
+P4.3a 已交付（PR #58）：Runtime `DocumentPosition::Text(TextPoint)` 升级为 `DocumentPosition::Inline(InlinePoint)`，caret 可停在同一 boundary 的任意 canonical gap；`from_inline_point` 不再丢弃 ordinal，ordinal 合法性统一由 `DocumentSelection::validate` 对 snapshot 校验；`DocumentSelection::map_through` 对 inline endpoint 消费 `ChangeMap::map_inline_point`；document-order 排序把 `atom_index` 计入 seam gap。planner（intent/cross_block/paste）仍走 text-only 路径，seam 上的编辑在下一切片切到 `ReplaceInlineText`。
 - [ ] structured clipboard atom fragment
 - [ ] plain fallback via `fallback_text`
 - [ ] IME cannot enter atom

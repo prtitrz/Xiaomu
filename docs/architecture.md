@@ -262,7 +262,7 @@ DocumentChangeListener
 
 `DocumentSelection` 是 Runtime 的 document-level selection，两端可落在不同 inline block；公开读取点始终针对当前 snapshot 校验。排序使用 snapshot tree order，并保留 anchor / focus 方向。
 
-P4.1 在不改变现有 Runtime selection storage 的前提下增加 mixed-inline compatibility entry points：`DocumentPosition::from_inline_point`、`DocumentPosition::as_inline_point` 与 `DocumentSelection::from_inline_points`。纯文本 ordinal 0 无损工作；当前 canonical document 无法验证的非零 ordinal fail closed。真正能持有 atom ordinal 的 Runtime 存储迁移留给 canonical atom placement 与 atom editing 同步完成。
+P4.1 曾以 ordinal-0 兼容 seam 提供 `DocumentPosition::from_inline_point`、`DocumentPosition::as_inline_point` 与 `DocumentSelection::from_inline_points`。P4.3 完成 Runtime 存储迁移：`DocumentPosition` 的 text endpoint 升级为 `Inline(InlinePoint)`，caret 可落在同一 boundary 的任意 canonical gap；ordinal 合法性由 `DocumentSelection::validate` 对 snapshot 校验（节点存在、UTF-8 boundary、ordinal `0..=N`）；selection mapping 对 inline endpoint 消费 `ChangeMap::map_inline_point`，document-order 排序计入 `atom_index`；Runtime `move_caret` 以 one-caret-unit 步进（atom ordinal 优先、text scalar 其次）。planner 仍以 text-only 路径为主，seam 上的 mutation 在 P4.3 后续切片切到 `ReplaceInlineText`。
 
 当前 `EditIntent` 覆盖：
 
