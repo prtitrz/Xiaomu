@@ -126,6 +126,12 @@ P4.3a 已交付（PR #58）：Runtime `DocumentPosition::Text(TextPoint)` 升级
 - [ ] host capability callback
 - [x] missing renderer fallback（确定性回落到 `FallbackAtomRenderer`）
 
+P4.4 剩余切片的实施计划（调研已定稿）：
+
+- **P4.4b Mixed inline layout / paint / hit-test**：`project_display_content` 在每个 atom placement 锚点 splice `renderer.display_text()`（默认 fallback_text）并记录 per-atom display byte range；`ParagraphElement` prepaint/paint 用 `BlockTextLayout::position_for_index` 量取 chip 包围盒并先于 line paint 画 chip 底色/描边，发布到新的 per-block atom-bounds registry（仿 `BlockBoundsRegistry`）；`mouse.rs hit_test` 先查 atom 包围盒，命中时落到 seam gap（`DocumentPosition::Inline(InlinePoint{node, placement.text_offset, atom_index(按点击侧), affinity})`）；`DocumentView::place / move_focus_to / set_selection` 接受 inline point。注意 `LayoutCacheKey` 仍以 epoch 为主，registry 变更需 bump epoch 或注明缓存语义。
+- **P4.4c Seam navigation + host capability + harness demo**：`visual_focus_location` / `horizontal_target` 保留 `InlinePoint`（不再 `to_text_point()` fail closed），Left/Right 跨 atom 落到 canonical gap；`EditorHooks` 增加 host capability 回调（`InlineAtomHostCapability::atom_action(AtomAction{node, kind key, action key, attrs})`），demo renderer 的动作经此 seam 上抛，宿主业务类型不进 Core/Runtime；`examples/editor_harness` 接 mention demo atom（in-memory fixture 或扩展 harness 格式使其支持 atom，当前 fail closed）。
+- Gate 后进入 P4.5 Integration Gate（P4A 收口），随后 P4B。
+
 ### P4.5 Inline Atom Integration Gate
 
 - [ ] realistic extension fixture
