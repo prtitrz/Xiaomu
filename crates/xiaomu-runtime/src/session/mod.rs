@@ -11,6 +11,7 @@
 //! at all. The session selection is valid for the current snapshot at every
 //! public read.
 
+mod atom_edit;
 mod caret;
 mod cross_block;
 mod history;
@@ -161,7 +162,7 @@ impl DocumentSession {
         // same cross-block delete plan. Single-block forms continue through
         // the normal inline planners below.
         if matches!(intent, EditIntent::Backspace | EditIntent::Delete)
-            && self.selection.as_single_node().is_none()
+            && self.selection.as_same_node_inline().is_none()
         {
             self.history.break_group();
             let action = cross_block::plan_delete_selection(&self.document, self.selection)?;
@@ -173,17 +174,25 @@ impl DocumentSession {
         }
 
         // Remaining content and structural intents in this slice act from one
-        // inline node.
+        // inline node. The endpoints keep their mixed-inline coordinates;
+        // planners decide between the text-only and atom-aware contracts.
         let focus = self.inline_focus()?;
         let inline = self.inline_of(focus.node_id())?;
-        let selection = self
-            .selection
-            .as_single_node()
-            .ok_or(SessionError::SelectionInvalid)?;
+        let anchor = if self.selection.is_collapsed() {
+            None
+        } else {
+            match self.selection.anchor() {
+                DocumentPosition::Inline(point) if point.node_id() == focus.node_id() => {
+                    Some(point)
+                }
+                _ => return Err(SessionError::SelectionInvalid),
+            }
+        };
         let action = match intent {
-            EditIntent::InsertText { text } => intent::plan_insert_text(
+            EditIntent::InsertText { text } => atom_edit::plan_text_input(
                 &inline,
-                selection,
+                anchor,
+                focus,
                 text,
                 self.stored_marks.as_ref(),
                 HistoryPolicy::Typing,
@@ -212,7 +221,7 @@ impl DocumentSession {
                 self.history.break_group();
                 intent::plan_insert_text(
                     &inline,
-                    selection,
+                    atom_edit::text_selection_from(anchor, focus)?,
                     text,
                     self.stored_marks.as_ref(),
                     HistoryPolicy::Isolated,
@@ -220,14 +229,15 @@ impl DocumentSession {
             }
             EditIntent::Backspace => {
                 self.history.break_group();
-                let at_block_start =
-                    selection.is_collapsed() && focus.text_offset().as_usize() == 0;
+                let at_block_start = self.selection.is_collapsed()
+                    && focus.text_offset().as_usize() == 0
+                    && focus.atom_index() == 0;
                 // Priority at a block start: merge into the previous block
                 // (same parent), then into the previous list item's tail,
                 // then leave the list itself (outdent when nested, lift out
                 // at the top level).
                 if !at_block_start {
-                    intent::plan_backspace(&inline, selection)?
+                    atom_edit::plan_backspace(&inline, anchor, focus)?
                 } else {
                     match structure::plan_join_with_previous(&self.document, focus.node_id())? {
                         PlannedAction::NoChange => {
@@ -259,20 +269,30 @@ impl DocumentSession {
             }
             EditIntent::Delete => {
                 self.history.break_group();
-                intent::plan_delete(&inline, selection)?
+                atom_edit::plan_delete(&inline, anchor, focus)?
             }
-            EditIntent::ToggleMark { mark } if selection.is_collapsed() => {
+            EditIntent::ToggleMark { mark } if self.selection.is_collapsed() => {
                 return self.toggle_stored_mark(&inline, mark);
             }
             EditIntent::ToggleMark { mark } => {
                 self.history.break_group();
                 self.clear_stored_marks();
+                // Mark edits stay text-only: a selection that carries seam
+                // ordinals cannot address text ranges without losing them.
+                let selection = self
+                    .selection
+                    .as_single_node()
+                    .ok_or(SessionError::SelectionInvalid)?;
                 intent::plan_toggle_mark(&inline, selection, mark)?
             }
             EditIntent::SplitBlock => {
                 // Split is an explicit history boundary, but pending marks are
                 // intentionally inherited into the new tail block.
                 self.history.break_group();
+                let selection = self
+                    .selection
+                    .as_single_node()
+                    .ok_or(SessionError::SelectionInvalid)?;
                 split::plan_split_block(&self.document, selection)?
             }
             EditIntent::JoinWithPrevious => {

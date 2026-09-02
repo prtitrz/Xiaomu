@@ -5,7 +5,7 @@
 //! only the session knows which after-selection a command promises.
 
 use xiaomu_core::document::{InlineContent, Mark, MarkKind, MarkSet, NodeId, NodeKind};
-use xiaomu_core::selection::{TextPoint, TextSelection};
+use xiaomu_core::selection::{InlinePoint, TextPoint, TextSelection};
 use xiaomu_core::text::{TextBuffer, TextOffset, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
@@ -204,6 +204,16 @@ pub enum SelectionUpdate {
     /// Used when text appends at a container tail: the junction sits at the
     /// pre-edit seam, not after the inserted span.
     CaretAtJoinPoint,
+    /// Collapse the caret onto an exact mixed-inline gap in the
+    /// post-command snapshot.
+    ///
+    /// Atom edits know their resulting caret gap (for example the gap an
+    /// atomic Backspace leaves behind); the point is validated against the
+    /// post-command snapshot like any other stale coordinate.
+    CaretAtInline {
+        /// The exact post-edit caret gap.
+        caret: InlinePoint,
+    },
     /// The focus endpoint keeps its node and offset; the selection
     /// collapses.
     ///
@@ -390,48 +400,6 @@ pub(crate) fn plan_insert_text(
     ))
 }
 
-/// Builds the plan for Backspace.
-pub(crate) fn plan_backspace(
-    inline: &InlineContent,
-    selection: TextSelection,
-) -> Result<PlannedAction, SessionError> {
-    let node = selection.focus().node_id();
-    let range = if selection.is_collapsed() {
-        let focus = selection.focus().offset().as_usize();
-        let text = concatenated(inline);
-        match previous_boundary(&text, focus) {
-            Some(start) => TextRange::new(inline.offset_at(start)?, selection.focus().offset())
-                .map_err(SessionError::Core)?,
-            None => return Ok(PlannedAction::NoChange),
-        }
-    } else {
-        ordered_range(selection)?
-    };
-
-    Ok(PlannedAction::Commit(deletion_plan(node, range)))
-}
-
-/// Builds the plan for forward Delete.
-pub(crate) fn plan_delete(
-    inline: &InlineContent,
-    selection: TextSelection,
-) -> Result<PlannedAction, SessionError> {
-    let node = selection.focus().node_id();
-    let range = if selection.is_collapsed() {
-        let focus = selection.focus().offset().as_usize();
-        let text = concatenated(inline);
-        match next_boundary(&text, focus) {
-            Some(end) => TextRange::new(selection.focus().offset(), inline.offset_at(end)?)
-                .map_err(SessionError::Core)?,
-            None => return Ok(PlannedAction::NoChange),
-        }
-    } else {
-        ordered_range(selection)?
-    };
-
-    Ok(PlannedAction::Commit(deletion_plan(node, range)))
-}
-
 /// Builds the plan for toggling one mark over a non-collapsed selection.
 pub(crate) fn plan_toggle_mark(
     inline: &InlineContent,
@@ -470,7 +438,7 @@ pub(crate) fn map_existing_plan(transaction: Transaction) -> EditPlan {
     EditPlan::new(transaction, SelectionUpdate::MapExisting, None)
 }
 
-fn push_exact_insert_marks(
+pub(crate) fn push_exact_insert_marks(
     transaction: &mut Transaction,
     inline: &InlineContent,
     node: NodeId,
@@ -509,17 +477,17 @@ fn push_exact_insert_marks(
     Ok(())
 }
 
-fn ordered_range(selection: TextSelection) -> Result<TextRange, SessionError> {
+pub(crate) fn ordered_range(selection: TextSelection) -> Result<TextRange, SessionError> {
     selection
         .ordered_range()
         .map_err(|_| SessionError::SelectionInvalid)
 }
 
-fn edit_transaction(step: TransactionStep) -> Transaction {
+pub(crate) fn edit_transaction(step: TransactionStep) -> Transaction {
     Transaction::new(TransactionOrigin::UserInput).with_step(step)
 }
 
-fn deletion_plan(node: NodeId, range: TextRange) -> EditPlan {
+pub(crate) fn deletion_plan(node: NodeId, range: TextRange) -> EditPlan {
     EditPlan::new(
         edit_transaction(TransactionStep::ReplaceText {
             node,

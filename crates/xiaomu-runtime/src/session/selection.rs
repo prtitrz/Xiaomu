@@ -113,16 +113,24 @@ impl DocumentSelection {
     /// transaction contract instead.
     #[must_use]
     pub fn as_single_node(&self) -> Option<TextSelection> {
+        let (anchor, focus) = self.as_same_node_inline()?;
+        Some(TextSelection::new(
+            anchor.to_text_point().ok()?,
+            focus.to_text_point().ok()?,
+        ))
+    }
+
+    /// Returns both endpoints as mixed-inline points of one inline node.
+    ///
+    /// `None` for gap endpoints or endpoints on different nodes: the
+    /// cross-block code paths own those selections.
+    #[must_use]
+    pub fn as_same_node_inline(&self) -> Option<(InlinePoint, InlinePoint)> {
         match (self.anchor, self.focus) {
             (DocumentPosition::Inline(anchor), DocumentPosition::Inline(focus))
-                if anchor.node_id() == focus.node_id()
-                    && anchor.atom_index() == 0
-                    && focus.atom_index() == 0 =>
+                if anchor.node_id() == focus.node_id() =>
             {
-                Some(TextSelection::new(
-                    anchor.to_text_point().ok()?,
-                    focus.to_text_point().ok()?,
-                ))
+                Some((anchor, focus))
             }
             _ => None,
         }

@@ -84,6 +84,13 @@ pub(super) fn resolve_selection(
                 .ok_or(SessionError::SelectionInvalid)?;
             collapsed_caret(document, first, first_len, affinity_of(before))
         }
+        SelectionUpdate::CaretAtInline { caret } => {
+            let selection = DocumentSelection::collapsed(*caret);
+            selection
+                .validate(document)
+                .map_err(|_| SessionError::SelectionInvalid)?;
+            Ok(selection)
+        }
         // Single-transaction plans may promise PreserveFocus when the
         // focused block's identity survives a structural move (lift out,
         // outdent); staged list commands resolve the same policy in
