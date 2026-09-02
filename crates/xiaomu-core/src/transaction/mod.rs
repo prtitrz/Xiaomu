@@ -10,6 +10,7 @@
 
 mod apply;
 mod inline;
+mod inline_atom;
 mod inverse;
 mod step;
 

@@ -13,18 +13,18 @@ P4B Atomic Block / Media          ← P4A 后继续
 
 此前两个并列目录 `p4-inline-atom-extension` 与 `p4-atomic-media-extension` 已收敛为统一目录 `p4-structured-content-extension`，避免出现两套冲突的 P4.1/P4.2 编号。
 
-当前 P4.1 分支 / PR：
+P4.1 与 P4.2A/P4.2B 已分别通过 PR #54、#55、#56 squash merge 到 `main`（2026-09-01），早期 Draft PR #50/#51/#52 已由上述重放 PR 取代并关闭。
+
+当前 P4.2 收尾分支 / PR：
 
 ```text
-feat/p4.1-inline-coordinate-contract
-PR #50 (Draft)
+feat/p4.2-atom-aware-replacement
+PR #57（atom-aware text replacement contract + mapping/inverse）
 ```
-
-P4.1 已基于 P3-closed 的新 `main` 做干净 tree transplant；root `architecture.md / planning.md` 已同步。CI #320 与 bookkeeping head CI #321 均完整 success。由于本次又进行了 P4 文档结构统一，merge 前仍以最新 current-head CI 为最终 Gate。
 
 ## P4A — Inline Atom / Extension Seam
 
-### P4.1 Inline Coordinate Contract
+### P4.1 Inline Coordinate Contract（CLOSED，PR #54）
 
 - [x] P4 overall design
 - [x] mixed-inline coordinate ADR 0005
@@ -37,7 +37,7 @@ P4.1 已基于 P3-closed 的新 `main` 做干净 tree transplant；root `archite
 - [x] root `architecture.md / planning.md` sync after P3 closeout rebase
 - [x] CI #320 full success
 - [x] bookkeeping head CI #321 full success
-- [ ] unified-P4 docs current-head CI Success
+- [x] unified-P4 docs current-head CI Success（merge Gate，PR #54）
 
 Gate：无 atom 文档零语义回归；`TextOffset` 继续严格表示 UTF-8 byte coordinate；P4.1 不引入 sentinel / fake byte；canonical atom placement 建立前非零 ordinal fail closed。
 
@@ -65,25 +65,16 @@ GPUI
 
 关键约束：atom seam 两侧可能共享同一个 `TextOffset`，旧 `ReplaceText(TextRange)` 无法区分“在 atom 前输入”和“在 atom 后输入”。后续 mutation / mapping 必须消费 `InlinePoint.atom_index`。
 
-验证证据：
-
-- implementation head `a2edcb35e4634b85294725ea1d19278276e754ae` CI #295 完整 success；
-- P3 closeout 后重放到新 main，root docs 同步后 CI #320 完整 success；
-- final bookkeeping head `e098a25a2f6f6a7cf7dc50b7c60a0eb5da70b1a4` CI #321 完整 success；
-- 本次仅统一 P4 docs 结构，最新 head 仍需再跑一次 current-head CI 后方可 merge #50。
-
-### P4.2 Canonical Inline Atom
-
-当前已有 Draft PR #51，历史 implementation head `22720ca9d2abf241484e854908ecd790b5f170b4` 的 CI #306 完整 success。#50 merge 后将只重放 P4.2A 相对 P4.1 的真实 Core 增量。
+### P4.2 Canonical Inline Atom（Core 事实层 CLOSED；运行时消费进入 P4.3）
 
 - [x] `AtomKind`
 - [x] `InlineAtomContent`
 - [x] stable `NodeId` atom identity
 - [x] `InlineContent` ordered atom placement
 - [x] full-tree validation / parent lookup
-- [ ] `InsertInlineAtom` / `RemoveInlineAtom`（P4.2 transaction slice）
-- [ ] atom-aware text replacement contract
-- [ ] mapping / inverse
+- [x] `InsertInlineAtom` / `RemoveInlineAtom`（P4.2 transaction slice，PR #56）
+- [x] atom-aware text replacement contract（`ReplaceInlineText`，PR #57）
+- [x] mapping / inverse（`InlineTextReplaced` StepMap + exact inverse，PR #57）
 - [x] adjacent atom placement invariant tests
 
 已成立的 canonical value-layer 事实：
@@ -95,7 +86,22 @@ InlineAtomPlacement(atom NodeId, text_offset)
 InlineContent = normalized runs + ordered atom placements
 ```
 
-P4.2 Gate：相邻两个 atom 可稳定构造、validate、insert/remove、undo/redo；不存在 sentinel text；atom seam 文本 mutation 不丢失 `atom_index`。
+P4.2 replacement contract 语义（ADR 0005 Transaction consequence 的落地）：
+
+```text
+ReplaceInlineText { at: InlinePoint, end: TextOffset, replacement }
+  - 取代 seam 上歧义的裸 ReplaceText；旧 ReplaceText 在含 atom 的
+    closed boundary span 上继续 fail closed
+  - at.atom_index() 之前的同界 atom 保持锚点；空 range 时其后的
+    seam atom 移到插入文本之后
+  - 非 empty range 的替换区域含 atom 时 fail closed
+    （caller 必须先用 RemoveInlineAtom 显式删除）
+  - end 锚定处及其后的 atom 按 byte-length delta 平移
+  - StepMap::InlineTextReplaced 消费 seam ordinal 做 mixed-inline
+    mapping；inverse 同为 atom-aware 步骤并精确恢复 store
+```
+
+P4.2 Gate：相邻两个 atom 可稳定构造、validate、insert/remove、undo/redo；不存在 sentinel text；atom seam 文本 mutation 不丢失 `atom_index`。Gate 已由 PR #56 / #57 的 transaction、mapping 与 undo round-trip 测试覆盖。`SplitNode / JoinNodes` 遇 atom 仍 fail closed（设计允许，规则未证明前不 ad-hoc 修补）。
 
 ### P4.3 Runtime Atom Editing
 

@@ -17,11 +17,56 @@ use crate::text::{TextOffset, TextRange};
 pub enum TransactionStep {
     /// Replaces `[range.start, range.end)` of one inline node's text with
     /// `replacement`. An empty replacement deletes the span.
+    ///
+    /// This step keeps the text-only contract: it fails closed when the
+    /// closed boundary span touches an inline atom, because a bare
+    /// [`TextRange`] cannot distinguish the caret gaps around same-boundary
+    /// atoms. Atom-seam edits use [`TransactionStep::ReplaceInlineText`].
     ReplaceText {
         /// Inline-bearing node whose concatenated text is edited.
         node: NodeId,
         /// Half-open byte range into the node's concatenated text.
         range: TextRange,
+        /// UTF-8 replacement text; may be empty.
+        replacement: String,
+    },
+    /// Atom-aware mixed-inline text replacement at an exact caret gap.
+    ///
+    /// Replaces `[at.text_offset(), end)` of `at.node_id()`'s concatenated
+    /// text with `replacement`, where `at` addresses the canonical caret gap
+    /// that begins the edited span. `at.atom_index()` counts how many
+    /// same-boundary atoms stay before the edit; the gap itself is the
+    /// boundary between them and the region being replaced:
+    ///
+    /// ```text
+    /// A [atom] B   (atom anchored at text offset 1)
+    /// (1, 0) + "X" over [1, 1) → A X [atom] B
+    /// (1, 1) + "X" over [1, 1) → A [atom] X B
+    /// ```
+    ///
+    /// Placement rules:
+    ///
+    /// - atoms anchored before `at.text_offset()`, and seam atoms with
+    ///   ordinal `< at.atom_index()`, keep their anchor;
+    /// - for an empty range (pure insertion at the seam), seam atoms with
+    ///   ordinal `>= at.atom_index()` move after the replacement text;
+    /// - atoms anchored at or after `end` shift by the byte-length delta.
+    ///
+    /// The step fails closed instead of deleting atomic content: a non-empty
+    /// replacement whose region contains an atom (strictly inside, or a seam
+    /// atom with ordinal `>= at.atom_index()`) is rejected, and callers must
+    /// remove such atoms with [`TransactionStep::RemoveInlineAtom`] first.
+    /// `at.affinity()` is visual bookkeeping and does not change the
+    /// canonical outcome.
+    ReplaceInlineText {
+        /// Exact mixed-inline caret gap where the edited span starts.
+        at: InlinePoint,
+        /// Half-open end of the edited span in the node's concatenated text.
+        ///
+        /// The end boundary stays text-only: atoms anchored exactly at `end`
+        /// sit after the replaced region and always survive it, so no
+        /// ordinal is needed to address them.
+        end: TextOffset,
         /// UTF-8 replacement text; may be empty.
         replacement: String,
     },

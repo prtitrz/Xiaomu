@@ -181,10 +181,44 @@ InsertInlineAtom / RemoveInlineAtom
   → atom 专用 typed step
   → 产生 atom-aware StepMap
 
-mixed-inline text replacement
-  → transaction 必须看到 InlinePoint boundary
+mixed-inline text replacement（P4.2 已交付）
+  → ReplaceInlineText { at: InlinePoint, end: TextOffset, replacement }
+  → transaction 看到 InlinePoint boundary
   → atom_index 参与 canonical order / placement mapping
 ```
+
+`ReplaceInlineText` 的 canonical 规则：
+
+```text
+替换范围 = [at.text_offset(), end)，起始 gap 由 (text_offset, atom_index) 寻址
+
+atom placement
+  - 锚点在 seam 之前、以及 seam 上 ordinal < at.atom_index() 的 atom
+    → 保持锚点不变
+  - 空 range（纯插入）：seam 上 ordinal >= at.atom_index() 的 atom
+    → 移到插入文本之后（anchor = start + len(replacement)）
+  - 非 empty range 且替换区域内存在 atom（严格位于区间内，或 seam 上
+    ordinal >= at.atom_index()）→ fail closed，
+    caller 必须先用 RemoveInlineAtom 显式表达原子删除
+  - 锚点在 end 及之后的 atom → 按 byte-length delta 平移
+    （end 锚定的 atom 位于区域之后，永远存活）
+
+mapping
+  - StepMap::InlineTextReplaced { node, range, replacement_len, seam_atom_index }
+  - 纯 text 坐标与 TextReplaced 完全一致（atom 不占 byte）
+  - mixed-inline ordinal：seam 前 gap 不动；被编辑 gap 由 bias 解析；
+    插入时其后的 gap 跟随移位的 seam atom；纯删除时 end 侧 ordinal
+    合并到保留 seam atom 之后；replacement 场景 end 侧 ordinal 在
+    平移后的自身 boundary 保持
+
+inverse
+  - 逆步骤同样是 ReplaceInlineText（seam 上保留 atom 会让旧
+    ReplaceText fail closed）
+  - 纯 seam 插入的逆是删除插入字节；其余恢复旧文本 + mark strip/re-add
+  - undo 后 store 与原 snapshot 精确相等
+```
+
+Split / Join 遇到 atom 时也必须有明确 placement migration；在规则未证明前允许 fail closed，不能 ad-hoc 修补。当前实现保持 fail closed。
 
 atom 相关 inverse 必须精确恢复：
 
@@ -262,6 +296,8 @@ Gate：无 atom 文档零语义回归；`TextOffset` 仍严格是 UTF-8 byte coo
 实现 head `a2edcb35e4634b85294725ea1d19278276e754ae` 的 CI #295 已完整 success。P3 closeout 后 P4.1 已重放到新的 `main` 并完成 root docs 同步；后续 current-head CI 作为 merge Gate。
 
 ### P4.2 Canonical Inline Atom
+
+已交付：canonical value 层经 PR #55、atom transaction slice 经 PR #56、atom-aware replacement contract（含 mapping/inverse）经 PR #57 进入 `main`。
 
 交付：
 

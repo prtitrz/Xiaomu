@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 与 P3 cross-block selection / history 已完成；P4 已启动，P4.1 mixed-inline coordinate contract 已建立。P3 已覆盖 visual-line geometry / soft-wrap、visual navigation / selection、cross-block editing / structured clipboard、history grouping / StoredMarks / IME、canonical LF HardBreak / CodeBlock multi-line、accessibility projection seam、realistic host integration、Unicode/CJK/emoji/combining/BiDi closeout matrix 与 Windows 最终实机 Gate。P4.1 新增 `InlinePoint(node_id, text_offset, atom_index, affinity)`，保持 `TextOffset` 的 UTF-8 byte contract，不使用 sentinel / fake byte，并在 canonical atom placement 尚未建立时对非零 ordinal fail closed。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step，并继续用 `ReplaceText` 承载 canonical LF；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection、structured paste、local history grouping 与 semantic line-break command；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、soft-wrap / multi-logical-line geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret、list marker 与 CodeBlock multi-line input；可复用 `EditorInstance` 持有独立 session/history/StoredMarks/listener/persistence，并支持完整 `DocumentSelection` restore 与 native focus routing。宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
+当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 与 P3 cross-block selection / history 已完成；P4 已启动，P4.1 mixed-inline coordinate contract 与 P4.2 canonical inline atom value / transaction 层（含 atom-aware `ReplaceInlineText` replacement contract）已建立。P3 已覆盖 visual-line geometry / soft-wrap、visual navigation / selection、cross-block editing / structured clipboard、history grouping / StoredMarks / IME、canonical LF HardBreak / CodeBlock multi-line、accessibility projection seam、realistic host integration、Unicode/CJK/emoji/combining/BiDi closeout matrix 与 Windows 最终实机 Gate。P4.1 新增 `InlinePoint(node_id, text_offset, atom_index, affinity)`，保持 `TextOffset` 的 UTF-8 byte contract，不使用 sentinel / fake byte，并在 canonical atom placement 尚未建立时对非零 ordinal fail closed。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step、P4.2 的 `InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom / ReplaceInlineText` atom-aware step，并继续用 `ReplaceText` 承载 canonical LF；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection、structured paste、local history grouping 与 semantic line-break command；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、soft-wrap / multi-logical-line geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret、list marker 与 CodeBlock multi-line input；可复用 `EditorInstance` 持有独立 session/history/StoredMarks/listener/persistence，并支持完整 `DocumentSelection` restore 与 native focus routing。宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
 
 ## Core 边界
 
@@ -175,6 +175,10 @@ InlinePoint(node_id, text_offset, atom_index, affinity)
 
 ```text
 ReplaceText
+ReplaceInlineText
+InsertInlineAtom
+RemoveInlineAtom
+RestoreInlineAtom
 InsertNode
 RemoveNode
 RestoreSubtree
@@ -194,7 +198,7 @@ JoinNodes
 
 metadata seam 使用 `BTreeMap<String, String>`，不携带宿主专用类型。
 
-P4.1 只建立 coordinate/mapping compatibility seam，不提前增加 atom mutation step。复核已确认：atom 前后可能共享同一 `TextOffset`，因此后续 atom seam 上的文本 mutation 必须消费 `InlinePoint.atom_index`；旧 `ReplaceText(TextRange)` 不能被当成完整 mixed-inline replacement contract。
+P4.2 落地了 atom-aware mutation：`InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom` 以 stable `NodeId` 与 `(text_offset, atom_index)` seam 操作 canonical atom；`ReplaceInlineText` 是 mixed-inline text replacement contract，消费 `InlinePoint` boundary 区分 seam 两侧 caret gap。旧 `ReplaceText / AddMark / RemoveMark` 保持 text-only 语义，在含 atom 的歧义 seam / range 上 fail closed；`ReplaceInlineText` 对"替换区域内含 atom"的 step 同样 fail closed，原子删除必须用 `RemoveInlineAtom` 显式表达；`SplitNode / JoinNodes` 遇 atom 仍 fail closed。
 
 ### Position Mapping
 
@@ -207,9 +211,9 @@ MapBias（Start / End）
 MappedPosition（Mapped / Deleted）
 ```
 
-主要 step map 包括文本 replacement、node insert/remove、`NodeSplit`、`NodeJoined`。目标被删除时返回 `Deleted`，不静默 clamp。split 点、插入点等歧义由显式 `MapBias` 决定。
+主要 step map 包括文本 replacement（`TextReplaced` 与 mixed-inline `InlineTextReplaced`）、atom insert/remove（`InlineAtomInserted / InlineAtomRemoved`）、node insert/remove、`NodeSplit`、`NodeJoined`。目标被删除时返回 `Deleted`，不静默 clamp。split 点、插入点等歧义由显式 `MapBias` 决定。
 
-P4.1 增加 `StepMap::map_inline_point` 与 `ChangeMap::map_inline_point`。在尚无 atom-changing step 的当前阶段，它复用已经验证的 text/node mapping，并保持 `atom_index`；后续 atom-specific step 必须在同一 mapping engine 中显式调整 ordinal，不能建立平行修补逻辑。
+`StepMap::map_inline_point` 与 `ChangeMap::map_inline_point` 在同一 mapping engine 中调整 ordinal：atom insert/remove 平移同界 gap；`InlineTextReplaced` 消费 `seam_atom_index` 重排 seam ordinal——被编辑 gap 由 bias 解析，纯删除时 end 侧 ordinal 合并到保留 seam atom 之后，replacement 场景 end 侧 ordinal 在平移后的自身 boundary 保持。所有 step 共用同一 mapping engine，不存在平行修补逻辑。
 
 `TextSelection` 映射采用向外 bias；collapsed selection 保持 collapsed。长期 mapping 决策见 `docs/adr/0002-position-mapping-policy.md`。
 
@@ -218,15 +222,18 @@ P4.1 增加 `StepMap::map_inline_point` 与 `ChangeMap::map_inline_point`。在�
 `AppliedTransaction::inverse()` 返回 `System` origin 的逆 transaction。inverse 在 apply 时同步记录 before-state，关键对应关系包括：
 
 ```text
-ReplaceText   → 恢复旧文本与旧 marks
-AddMark       → RemoveMark + 恢复冲突旧值
-RemoveMark    → 恢复旧 mark pieces
-InsertNode    → RemoveNode
-RemoveNode    → RestoreSubtree
-SetNodeAttrs  → 恢复旧 attrs
-SetNodeKind   → 恢复旧 kind
-SplitNode     → JoinNodes
-JoinNodes     → 删除追加文本 + RestoreSubtree
+ReplaceText        → 恢复旧文本与旧 marks
+ReplaceInlineText  → 恢复旧文本与旧 marks（atom-aware，seam ordinal 保留）
+InsertInlineAtom   → RemoveInlineAtom
+RemoveInlineAtom   → RestoreInlineAtom（精确恢复 identity/payload/placement）
+AddMark            → RemoveMark + 恢复冲突旧值
+RemoveMark         → 恢复旧 mark pieces
+InsertNode         → RemoveNode
+RemoveNode         → RestoreSubtree
+SetNodeAttrs       → 恢复旧 attrs
+SetNodeKind        → 恢复旧 kind
+SplitNode          → JoinNodes
+JoinNodes          → 删除追加文本 + RestoreSubtree
 ```
 
 多 step inverse 按 step 反序组合。随机 valid transaction 测试持续验证 document validity、position mapping validity、单笔 round-trip 与整链 undo。LF 插入不增加专用 step：它是普通 `ReplaceText`，mapping seam 使用 Start / End bias 区分 LF 前后，并由同一 inverse contract 精确恢复。
@@ -588,6 +595,23 @@ code head `5584d57745fa4bd760f15b5ef7d911f23fb9d6ee` 的 CI #282 与 Gate-docume
 P4.1 固化 ADR 0005：`TextOffset` 继续严格表示 canonical UTF-8 text bytes，atom 不占 fake byte；`InlinePoint` 用 `(text_offset, atom_index)` 表达 mixed-inline order，并保留 `CursorAffinity` 只处理 visual ambiguity。Core mapping、Runtime compatibility seam 与 GPUI selection/focus projection 已接入同一个类型边界；纯文本现有路径保持 ordinal 0，因此 P0-P3 行为无语义变化。
 
 P4.1 也明确了后续 transaction 约束：同一 `TextOffset` 上 atom 前后是不同 canonical caret gap，因此 mixed-inline text replacement 必须消费 atom ordinal；不能把位置先降格成裸 `TextOffset` 再在 Runtime/GPUI 猜顺序。
+
+## P4.2 Canonical Inline Atom 事实
+
+P4.2 在 Core 中建立了 canonical atom value 层与 transaction 层：
+
+```text
+NodeKind::InlineAtom(AtomKind)
+NodeContent::InlineAtom(InlineAtomContent { fallback_text })
+InlineAtomPlacement(atom NodeId, text_offset)
+InlineContent = normalized text runs + ordered atom placements
+```
+
+atom 以 stable `NodeId` 为 identity，不建立第二套 AtomId allocator；同一 text boundary 允许多个 atom，vector order 即 canonical order；full-tree validation 把 inline atom reference 当真实 tree edge（target 存在、shape 正确、单一 parent、不可进入 structural children、不可为 root、unreachable 即 invalid、placement 必须是合法 UTF-8 boundary）。`fallback_text` 是 Core 级通用语义，服务 plain-text clipboard、accessibility 与 unknown renderer fallback。
+
+transaction 层提供 `InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom` 与 mixed-inline `ReplaceInlineText`。`ReplaceInlineText { at: InlinePoint, end, replacement }` 消费 seam ordinal：seam 上 ordinal 之前的 atom 保持锚点，纯插入把其后 seam atom 移到插入文本之后，end 及之后的 atom 按 byte delta 平移；替换区域内含 atom 时 fail closed，原子删除必须显式经过 `RemoveInlineAtom`。mapping 由 `StepMap::InlineTextReplaced` 在同一 mapping engine 中重排 ordinal；inverse 同为 atom-aware 步骤并精确恢复 store。`ReplaceText / AddMark / RemoveMark` 保持 text-only contract 并在含 atom 的歧义 seam / range 上 fail closed；`SplitNode / JoinNodes` 遇 atom fail closed，placement migration 规则未证明前不 ad-hoc 修补。
+
+Runtime position storage 与 GPUI editing path 尚未迁移到 atom ordinal 消费（P4.3/P4.4 范围）；当前 canonical document 已可验证非零 ordinal。
 
 ## 仓库级约束
 
