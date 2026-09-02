@@ -34,6 +34,7 @@ use xiaomu_runtime::persistence::DocumentPersistence;
 
 use crate::accessibility::{AccessibilityProjection, project_accessibility};
 use crate::block_view::{BlockBoundsRegistry, ParagraphView, SharedSession};
+use crate::inline_atom::InlineAtomRendererRegistry;
 use visual_navigation::NavStep;
 
 /// A multi-block editor view over one shared session.
@@ -57,6 +58,9 @@ pub struct DocumentView {
     /// Host adapter for the create → load → edit → save contract; absent
     /// when the host persists through its own channel.
     persistence: Option<Rc<RefCell<dyn DocumentPersistence>>>,
+    /// Host-registered inline-atom renderers; kinds without an entry keep
+    /// the deterministic fallback display.
+    atom_renderers: Rc<InlineAtomRendererRegistry>,
 }
 
 impl DocumentView {
@@ -72,12 +76,28 @@ impl DocumentView {
             is_dragging: false,
             desired_x: None,
             persistence: None,
+            atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
         }
     }
 
     /// Attaches the host persistence adapter (Ctrl/Cmd-S saves).
     pub fn set_persistence(&mut self, persistence: Rc<RefCell<dyn DocumentPersistence>>) {
         self.persistence = Some(persistence);
+    }
+
+    /// Attaches the host's inline-atom renderer registry.
+    ///
+    /// Kinds without a registered renderer keep the deterministic fallback
+    /// (display and read as `fallback_text`), so partial registration can
+    /// never drop atomic content.
+    pub fn set_atom_renderers(&mut self, renderers: Rc<InlineAtomRendererRegistry>) {
+        self.atom_renderers = renderers;
+    }
+
+    /// Returns the view's inline-atom renderer registry.
+    #[must_use]
+    pub fn atom_renderers(&self) -> &InlineAtomRendererRegistry {
+        &self.atom_renderers
     }
 
     /// Returns the shared session this view renders.

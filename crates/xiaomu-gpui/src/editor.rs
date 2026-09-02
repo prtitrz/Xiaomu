@@ -25,6 +25,7 @@ use crate::block_view::{
     ToggleItalic, ToggleStrike, ToggleUnderline, Undo, Up,
 };
 use crate::document_view::{DocumentView, actions::HardBreak};
+use crate::inline_atom::InlineAtomRendererRegistry;
 
 /// Optional host integrations handed to an [`EditorInstance`].
 ///
@@ -37,6 +38,9 @@ pub struct EditorHooks {
     pub persistence: Option<Rc<RefCell<dyn DocumentPersistence>>>,
     /// Listener notified on committed document changes and selection moves.
     pub listener: Option<Box<dyn DocumentChangeListener>>,
+    /// Inline-atom renderer registry; kinds without a renderer keep the
+    /// deterministic fallback display.
+    pub atom_renderers: Option<Rc<InlineAtomRendererRegistry>>,
 }
 
 /// One independent Xiaomu editor instance owned by a host.
@@ -47,6 +51,7 @@ pub struct EditorHooks {
 pub struct EditorInstance {
     session: SharedSession,
     persistence: Option<Rc<RefCell<dyn DocumentPersistence>>>,
+    atom_renderers: Option<Rc<InlineAtomRendererRegistry>>,
 }
 
 impl EditorInstance {
@@ -68,6 +73,7 @@ impl EditorInstance {
         Ok(Self {
             session: Rc::new(RefCell::new(session)),
             persistence: hooks.persistence,
+            atom_renderers: hooks.atom_renderers,
         })
     }
 
@@ -86,6 +92,9 @@ impl EditorInstance {
         let mut view = DocumentView::new(self.session.clone());
         if let Some(persistence) = &self.persistence {
             view.set_persistence(persistence.clone());
+        }
+        if let Some(renderers) = &self.atom_renderers {
+            view.set_atom_renderers(renderers.clone());
         }
         view
     }
@@ -321,6 +330,7 @@ mod tests {
             EditorHooks {
                 persistence: None,
                 listener: Some(Box::new(CountListener(a_changes.clone()))),
+                atom_renderers: None,
             },
         )
         .unwrap();
@@ -330,6 +340,7 @@ mod tests {
             EditorHooks {
                 persistence: None,
                 listener: Some(Box::new(CountListener(b_changes.clone()))),
+                atom_renderers: None,
             },
         )
         .unwrap();

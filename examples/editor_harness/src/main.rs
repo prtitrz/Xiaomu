@@ -55,6 +55,7 @@ fn main() {
     let hooks = EditorHooks {
         persistence: Some(store.clone()),
         listener: Some(Box::new(CounterListener(counter.clone()))),
+        atom_renderers: None,
     };
 
     // The counter survives the run because GPUI quits when the window
