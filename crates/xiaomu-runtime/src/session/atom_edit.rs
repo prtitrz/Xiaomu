@@ -189,25 +189,9 @@ fn plan_inline_replacement(
     let mut transaction = Transaction::new(TransactionOrigin::UserInput);
     if !collapsed {
         // Atoms inside the selection are deleted with the region; they can
-        // never be silently consumed by a text edit. When both endpoints
-        // share one boundary the selection covers a half-open ordinal span.
-        let start_raw = start.text_offset().as_usize();
-        let end_raw = end.text_offset().as_usize();
-        for placement in inline.atoms() {
-            let offset = placement.text_offset().as_usize();
-            let ordinal = same_boundary_ordinal(inline, placement.text_offset(), placement.atom());
-            let inside = if start_raw == end_raw {
-                ordinal >= start.atom_index() && ordinal < end.atom_index()
-            } else {
-                offset == start_raw && ordinal >= start.atom_index()
-                    || (offset > start_raw && offset < end_raw)
-                    || (offset == end_raw && ordinal < end.atom_index())
-            };
-            if inside {
-                transaction.push_step(TransactionStep::RemoveInlineAtom {
-                    atom: placement.atom(),
-                });
-            }
+        // never be silently consumed by a text edit.
+        for atom in atoms_inside_span(inline, start, end) {
+            transaction.push_step(TransactionStep::RemoveInlineAtom { atom });
         }
     }
     transaction.push_step(TransactionStep::ReplaceInlineText {
@@ -250,6 +234,38 @@ fn plan_inline_replacement(
         )
         .with_history_policy(history_policy),
     ))
+}
+
+/// Returns the atoms inside the mixed-inline span between two gaps of one
+/// node, in canonical order.
+///
+/// Same-boundary atoms at or after the start gap and atoms before the end
+/// gap belong to the span; when both gaps share one boundary the span is a
+/// half-open ordinal range. Callers remove these atoms explicitly so a text
+/// replacement never consumes them as a side effect.
+pub(crate) fn atoms_inside_span(
+    inline: &InlineContent,
+    start: InlinePoint,
+    end: InlinePoint,
+) -> Vec<NodeId> {
+    let start_raw = start.text_offset().as_usize();
+    let end_raw = end.text_offset().as_usize();
+    let mut inside = Vec::new();
+    for placement in inline.atoms() {
+        let offset = placement.text_offset().as_usize();
+        let ordinal = same_boundary_ordinal(inline, placement.text_offset(), placement.atom());
+        let contained = if start_raw == end_raw {
+            ordinal >= start.atom_index() && ordinal < end.atom_index()
+        } else {
+            offset == start_raw && ordinal >= start.atom_index()
+                || (offset > start_raw && offset < end_raw)
+                || (offset == end_raw && ordinal < end.atom_index())
+        };
+        if contained {
+            inside.push(placement.atom());
+        }
+    }
+    inside
 }
 
 /// Returns the same-boundary ordinal of one atom placement.

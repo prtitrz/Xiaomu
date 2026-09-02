@@ -8,12 +8,14 @@
 use xiaomu_core::document::{
     InlineContent, MarkKind, NodeContent, NodeId, TextRun, XiaomuDocument,
 };
+use xiaomu_core::selection::InlinePoint;
 use xiaomu_core::text::{TextBuffer, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionStep};
 
-use crate::clipboard::{ClipboardBlock, ClipboardNodeContent, ClipboardSlice};
+use crate::clipboard::{ClipboardBlock, ClipboardInline, ClipboardNodeContent, ClipboardSlice};
 
 use super::cross_block;
+use super::atom_edit::atoms_inside_span;
 use super::intent::{EditPlan, PlannedAction, PrimaryEdit, SelectionUpdate, concatenated};
 use super::paste_hierarchy;
 use super::structure::{children_of, user_transaction};
@@ -51,16 +53,19 @@ pub(crate) fn plan_paste_slice(
     }
 
     let mut transaction = user_transaction();
-    let (working, node, range) = prepare_target(document, selection, &mut transaction)?;
+    let (working, node, start_gap, end_gap) =
+        prepare_target(document, selection, &mut transaction)?;
     let blocks = slice.blocks();
 
     if blocks.len() == 1 {
         let source = blocks[0].inline();
-        let source_text = concatenated(source);
-        if source_text.is_empty() && range.is_empty() && transaction.steps().is_empty() {
+        let source_text = source.text();
+        if source.is_empty() && start_gap == end_gap && transaction.steps().is_empty() {
             return Ok(PlannedAction::NoChange);
         }
-        plan_single_block(&working, node, range, source, &mut transaction)?;
+        plan_single_block(&working, node, start_gap, end_gap, source, &mut transaction)?;
+        let range = TextRange::new(start_gap.text_offset(), end_gap.text_offset())
+            .map_err(SessionError::Core)?;
         return Ok(PlannedAction::Commit(EditPlan::new(
             transaction,
             SelectionUpdate::CaretAfterReplacement,
@@ -76,6 +81,8 @@ pub(crate) fn plan_paste_slice(
         .last()
         .map(|block| block.inline().len_bytes())
         .ok_or(SessionError::SelectionInvalid)?;
+    let range = TextRange::new(start_gap.text_offset(), end_gap.text_offset())
+        .map_err(SessionError::Core)?;
     plan_multiple_blocks(&working, node, range, blocks, &mut transaction)?;
     Ok(PlannedAction::Commit(EditPlan::new(
         transaction,
@@ -86,26 +93,24 @@ pub(crate) fn plan_paste_slice(
     )))
 }
 
-/// Resolves the snapshot and empty/single-node range against which paste steps
-/// are planned. Cross-block deletion is applied only to a temporary snapshot;
-/// its steps are copied into the final transaction so no intermediate state
-/// ever becomes visible to the session.
+/// Resolves the snapshot and mixed-inline replacement span against which
+/// paste steps are planned. Cross-block deletion is applied only to a
+/// temporary snapshot; its steps are copied into the final transaction so no
+/// intermediate state ever becomes visible to the session.
 fn prepare_target(
     document: &XiaomuDocument,
     selection: DocumentSelection,
     transaction: &mut Transaction,
-) -> Result<(XiaomuDocument, NodeId, TextRange), SessionError> {
-    if let Some(single) = selection.as_single_node() {
-        let range = single
-            .ordered_range()
-            .map_err(|_| SessionError::SelectionInvalid)?;
-        return Ok((document.clone(), single.focus().node_id(), range));
-    }
-
-    let (head, _) = selection.ordered(document)?;
-    let DocumentPosition::Inline(head) = head else {
+) -> Result<(XiaomuDocument, NodeId, InlinePoint, InlinePoint), SessionError> {
+    let (head, tail) = selection.ordered(document)?;
+    let (DocumentPosition::Inline(head), DocumentPosition::Inline(tail)) = (head, tail) else {
         return Err(SessionError::SelectionInvalid);
     };
+
+    if head.node_id() == tail.node_id() {
+        return Ok((document.clone(), head.node_id(), head, tail));
+    }
+
     let action = cross_block::plan_delete_selection(document, selection)?;
     let PlannedAction::Commit(delete_plan) = action else {
         return Err(SessionError::SelectionInvalid);
@@ -121,26 +126,23 @@ fn prepare_target(
     inline
         .validate_offset(head.text_offset())
         .map_err(SessionError::Core)?;
-    Ok((
-        working,
-        head.node_id(),
-        TextRange::empty(head.text_offset()),
-    ))
+    Ok((working, head.node_id(), head, head))
 }
 
 fn plan_single_block(
     document: &XiaomuDocument,
     node: NodeId,
-    range: TextRange,
-    source: &InlineContent,
+    start_gap: InlinePoint,
+    end_gap: InlinePoint,
+    source: &ClipboardInline,
     transaction: &mut Transaction,
 ) -> Result<(), SessionError> {
     let target = inline_of(document, node)?;
-    validate_inline_range(target, range)?;
+    validate_inline_range(target, text_range_of(start_gap, end_gap)?)?;
     let target_text = concatenated(target);
-    let source_text = concatenated(source);
-    let start = range.start().as_usize();
-    let end = range.end().as_usize();
+    let source_text = source.text();
+    let start = start_gap.text_offset().as_usize();
+    let end = end_gap.text_offset().as_usize();
     let post_text = format!(
         "{}{}{}",
         &target_text[..start],
@@ -148,12 +150,62 @@ fn plan_single_block(
         &target_text[end..]
     );
 
-    transaction.push_step(TransactionStep::ReplaceText {
-        node,
-        range,
-        replacement: concatenated(source),
+    // Atoms inside the replaced target span are removed by identity; the
+    // seam ordinal of `start_gap` already excludes them.
+    for atom in atoms_inside_span(target, start_gap, end_gap) {
+        transaction.push_step(TransactionStep::RemoveInlineAtom { atom });
+    }
+    transaction.push_step(TransactionStep::ReplaceInlineText {
+        at: start_gap,
+        end: end_gap.text_offset(),
+        replacement: source_text.clone(),
     });
-    push_exact_marks(transaction, node, source, start, &post_text)
+    push_exact_marks(transaction, node, source.runs(), start, &post_text)?;
+
+    // Re-anchor the detached source atoms: a paste allocates fresh
+    // identities, and each insertion addresses the exact same-boundary gap
+    // that reproduces the source order around the pasted text.
+    let source_len = source.len_bytes();
+    let mut previous_anchor: Option<usize> = None;
+    let mut same_anchor_seen = 0usize;
+    for atom in source.atoms() {
+        let anchor = atom.anchor().as_usize();
+        if previous_anchor == Some(anchor) {
+            same_anchor_seen += 1;
+        } else {
+            same_anchor_seen = 0;
+            previous_anchor = Some(anchor);
+        }
+        let ordinal = if anchor == 0 {
+            start_gap.atom_index() + same_anchor_seen
+        } else {
+            same_anchor_seen
+        };
+        let at = InlinePoint::new(
+            node,
+            target
+                .offset_at(start + anchor)
+                .map_err(SessionError::Core)?,
+            ordinal,
+            start_gap.affinity(),
+        );
+        transaction.push_step(TransactionStep::InsertInlineAtom {
+            at,
+            kind: atom.kind().clone(),
+            attrs: atom.attrs().clone(),
+            content: atom.content().clone(),
+        });
+    }
+    let _ = source_len;
+    Ok(())
+}
+
+fn text_range_of(
+    start_gap: InlinePoint,
+    end_gap: InlinePoint,
+) -> Result<TextRange, SessionError> {
+    TextRange::new(start_gap.text_offset(), end_gap.text_offset())
+        .map_err(SessionError::Core)
 }
 
 fn plan_multiple_blocks(
@@ -163,6 +215,11 @@ fn plan_multiple_blocks(
     blocks: &[ClipboardBlock],
     transaction: &mut Transaction,
 ) -> Result<(), SessionError> {
+    if blocks.iter().any(|block| !block.inline().atoms().is_empty()) {
+        // One declarative transaction cannot address the freshly allocated
+        // blocks; fail closed instead of downgrading atoms to text.
+        return Err(SessionError::ClipboardAtomsUnsupported);
+    }
     let target = inline_of(document, node)?;
     validate_inline_range(target, range)?;
     let parent = document
@@ -177,7 +234,7 @@ fn plan_multiple_blocks(
     let start = range.start().as_usize();
     let end = range.end().as_usize();
     let first = blocks.first().ok_or(SessionError::SelectionInvalid)?;
-    let first_text = concatenated(first.inline());
+    let first_text = first.inline().text();
     let target_end = target
         .offset_at(target.len_bytes())
         .map_err(SessionError::Core)?;
@@ -187,7 +244,7 @@ fn plan_multiple_blocks(
         replacement: first_text.clone(),
     });
     let post_head = format!("{}{}", &target_text[..start], first_text);
-    push_exact_marks(transaction, node, first.inline(), start, &post_head)?;
+    push_exact_marks(transaction, node, first.inline().runs(), start, &post_head)?;
 
     for (offset, block) in blocks[1..blocks.len() - 1].iter().enumerate() {
         transaction.push_step(TransactionStep::InsertNode {
@@ -195,7 +252,10 @@ fn plan_multiple_blocks(
             index: position + 1 + offset,
             kind: block.kind().clone(),
             attrs: block.attrs().clone(),
-            content: NodeContent::Inline(block.inline().clone()),
+            content: NodeContent::Inline(
+            InlineContent::new(block.inline().runs().iter().cloned())
+                .map_err(SessionError::Core)?,
+        ),
         });
     }
 
@@ -224,16 +284,16 @@ fn plan_multiple_blocks(
 fn push_exact_marks(
     transaction: &mut Transaction,
     node: NodeId,
-    source: &InlineContent,
+    source_runs: &[TextRun],
     inserted_start: usize,
     post_text: &str,
 ) -> Result<(), SessionError> {
-    if source.is_empty() {
+    if source_runs.is_empty() {
         return Ok(());
     }
 
     let buffer = TextBuffer::from_string(post_text.to_owned());
-    let inserted_end = inserted_start + source.len_bytes();
+    let inserted_end = inserted_start + source_runs.iter().map(TextRun::len_bytes).sum::<usize>();
     let whole = buffer
         .range(
             buffer
@@ -251,7 +311,7 @@ fn push_exact_marks(
     }
 
     let mut cursor = inserted_start;
-    for run in source.runs() {
+    for run in source_runs {
         let run_start = cursor;
         let run_end = run_start + run.len_bytes();
         cursor = run_end;
