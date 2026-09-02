@@ -613,6 +613,10 @@ transaction 层提供 `InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom` 
 
 Runtime 自 P4.3 起全链路消费 atom ordinal：session selection 存储 `Inline(InlinePoint)`；`move_caret` 以 one-caret-unit 步进；typing / Backspace / Delete 在含 atom 节点经 `ReplaceInlineText` / `RemoveInlineAtom` 表达（纯文本节点保持 P0-P3 `ReplaceText` 路径）；IME commit 对边界 atom 存活、内部 atom fail closed。structured clipboard 以 detached atom payload（kind / attrs / `fallback_text`）携带 inline atom，plain text 在锚点拼接 fallback，paste 重新分配 canonical identity；携带 atom 的 multi-block / hierarchical paste fail closed。GPUI 渲染层（renderer registry / layout / hit-test / accessibility fallback）属于 P4.4，当前对 seam gap 保持 fail closed 投影。
 
+## P4.4 GPUI Atom Renderer 事实
+
+GPUI 提供 host-neutral 的 inline-atom 渲染 seam：`InlineAtomRendererRegistry` 以 stable `AtomKind` 为 key 解析 `InlineAtomRenderer`，renderer 只消费 canonical 数据（`InlineAtomView`：identity、kind key、`fallback_text`、attrs）。未注册 renderer 的 kind 确定性回落到 `FallbackAtomRenderer`（显示与朗读均为 `fallback_text`），不允许 panic 或丢失 atom。registry 经 `EditorHooks.atom_renderers` → `EditorInstance::new` → `build_view` → `DocumentView::set_atom_renderers` 接入，与 persistence seam 同构。accessibility projection 现在遍历 inline atom placement：每个 atom 投影为携带 `fallback_text` 的非可编辑子节点（`AccessibilityRole::InlineAtom`）。paint 层尚未消费 registry（P4.4 后续切片交付 display splice、chip 样式与 hit-test）。
+
 ## 仓库级约束
 
 架构通过以下机制持续执行：

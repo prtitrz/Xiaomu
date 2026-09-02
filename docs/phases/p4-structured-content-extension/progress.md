@@ -118,13 +118,13 @@ P4.3a 已交付（PR #58）：Runtime `DocumentPosition::Text(TextPoint)` 升级
 
 ### P4.4 GPUI Renderer / Host Capability
 
-- [ ] `InlineAtomRendererRegistry`
+- [x] `InlineAtomRendererRegistry`（PR #61：`AtomKind` -> renderer，只消费 canonical 数据）
 - [ ] demo atom renderer
 - [ ] mixed inline layout / paint
 - [ ] hit-test
-- [ ] accessibility fallback
+- [x] accessibility fallback（atom 投影为携带 `fallback_text` 的非可编辑子节点）
 - [ ] host capability callback
-- [ ] missing renderer fallback
+- [x] missing renderer fallback（确定性回落到 `FallbackAtomRenderer`）
 
 ### P4.5 Inline Atom Integration Gate
 
