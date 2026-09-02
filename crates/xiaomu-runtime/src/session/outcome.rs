@@ -51,9 +51,9 @@ impl fmt::Display for SessionError {
             Self::SelectionInvalid => {
                 f.write_str("selection is invalid for the resulting snapshot")
             }
-            Self::ClipboardAtomsUnsupported => f.write_str(
-                "pasting inline atoms is only supported into one inline block",
-            ),
+            Self::ClipboardAtomsUnsupported => {
+                f.write_str("pasting inline atoms is only supported into one inline block")
+            }
         }
     }
 }

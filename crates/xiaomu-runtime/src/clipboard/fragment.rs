@@ -9,12 +9,12 @@
 
 use std::collections::BTreeMap;
 
+use xiaomu_core::Result;
 use xiaomu_core::document::{
     AtomKind, InlineAtomContent, InlineContent, NodeAttrs, NodeContent, NodeId, NodeKind,
     NodeStoreBuilder, TextRun, XiaomuDocument,
 };
 use xiaomu_core::text::TextOffset;
-use xiaomu_core::Result;
 
 /// One detached inline atom captured by the clipboard.
 ///
@@ -132,10 +132,7 @@ impl ClipboardInline {
     /// alongside as payloads.
     #[must_use]
     pub fn text(&self) -> String {
-        self.runs
-            .iter()
-            .map(|run| run.text().as_str())
-            .collect()
+        self.runs.iter().map(|run| run.text().as_str()).collect()
     }
 
     /// Returns the plain-text fallback with `fallback_text` spliced in at
@@ -167,9 +164,10 @@ impl ClipboardInline {
         &self,
         mut place: impl FnMut() -> NodeId,
     ) -> Result<InlineContent> {
-        let placements = self.atoms.iter().map(|_| {
-            xiaomu_core::document::InlineAtomPlacement::new(place(), TextOffset::ZERO)
-        });
+        let placements = self
+            .atoms
+            .iter()
+            .map(|_| xiaomu_core::document::InlineAtomPlacement::new(place(), TextOffset::ZERO));
         // Rebuild with placements in order; anchors come from the payloads.
         let mut atoms = placements.collect::<Vec<_>>();
         for (index, atom) in self.atoms.iter().enumerate() {
@@ -427,10 +425,7 @@ pub(crate) fn validate_roots(roots: &[ClipboardNode]) -> Result<()> {
     XiaomuDocument::new(root, builder.finish()).map(|_| ())
 }
 
-fn insert_fragment(
-    builder: &mut NodeStoreBuilder,
-    node: &ClipboardNode,
-) -> Result<NodeId> {
+fn insert_fragment(builder: &mut NodeStoreBuilder, node: &ClipboardNode) -> Result<NodeId> {
     let content = match node.content() {
         ClipboardNodeContent::Inline(inline) => {
             // Insert the detached atoms first so every placement can
@@ -444,12 +439,12 @@ fn insert_fragment(
                 )?);
             }
             let mut next_id = fresh_ids.iter();
-            let content = NodeContent::Inline(inline.to_inline_content(|| {
-                next_id.next().copied().unwrap_or_else(|| {
-                    unreachable!("one fresh identity per detached atom")
-                })
-            })?);
-            content
+            NodeContent::Inline(inline.to_inline_content(|| {
+                next_id
+                    .next()
+                    .copied()
+                    .unwrap_or_else(|| unreachable!("one fresh identity per detached atom"))
+            })?)
         }
         ClipboardNodeContent::Children(children) => NodeContent::children(
             children

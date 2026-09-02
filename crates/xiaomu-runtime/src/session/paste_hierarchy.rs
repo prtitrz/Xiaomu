@@ -124,8 +124,7 @@ fn append_node_stages(
     let attrs = node.attrs().clone();
     let content = match node.content() {
         ClipboardNodeContent::Inline(inline) => NodeContent::Inline(
-            InlineContent::new(inline.runs().iter().cloned())
-                .map_err(SessionError::Core)?,
+            InlineContent::new(inline.runs().iter().cloned()).map_err(SessionError::Core)?,
         ),
         ClipboardNodeContent::Children(_) => NodeContent::children([]),
     };

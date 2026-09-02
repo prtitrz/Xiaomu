@@ -10,7 +10,7 @@ use xiaomu_core::document::{
     AtomKind, InlineAtomContent, InlineContent, NodeAttrs, NodeContent, NodeId, NodeKind,
     NodeStoreBuilder, TextRun, XiaomuDocument,
 };
-use xiaomu_core::selection::{CursorAffinity, InlinePoint, TextPoint};
+use xiaomu_core::selection::{CursorAffinity, InlinePoint};
 use xiaomu_core::text::TextBuffer;
 use xiaomu_runtime::clipboard::{decode_metadata, encode_metadata};
 use xiaomu_runtime::session::{
@@ -19,7 +19,9 @@ use xiaomu_runtime::session::{
 
 fn offset_at(raw: usize) -> xiaomu_core::text::TextOffset {
     const SCRATCH: &str = "00000000000000000000000000000000";
-    TextBuffer::from_string(SCRATCH.to_owned()).offset_at(raw).unwrap()
+    TextBuffer::from_string(SCRATCH.to_owned())
+        .offset_at(raw)
+        .unwrap()
 }
 
 /// Builds `Document > [p(text)]` and inserts one mention atom at
@@ -46,17 +48,14 @@ fn document_with_atom(text: &str, atom_char: usize, fallback: &str) -> (XiaomuDo
     document = xiaomu_core::transaction::Transaction::new(
         xiaomu_core::transaction::TransactionOrigin::Extension("atom-test".into()),
     )
-    .with_step(xiaomu_core::transaction::TransactionStep::InsertInlineAtom {
-        at: InlinePoint::new(
-            paragraph,
-            offset_at(atom_char),
-            0,
-            CursorAffinity::Before,
-        ),
-        kind: AtomKind::new("mention").unwrap(),
-        attrs: NodeAttrs::empty(),
-        content: InlineAtomContent::new(fallback).unwrap(),
-    })
+    .with_step(
+        xiaomu_core::transaction::TransactionStep::InsertInlineAtom {
+            at: InlinePoint::new(paragraph, offset_at(atom_char), 0, CursorAffinity::Before),
+            kind: AtomKind::new("mention").unwrap(),
+            attrs: NodeAttrs::empty(),
+            content: InlineAtomContent::new(fallback).unwrap(),
+        },
+    )
     .apply(&document)
     .unwrap();
     (document, paragraph)
@@ -81,7 +80,10 @@ fn plain_document(text: &str) -> (XiaomuDocument, NodeId) {
             NodeContent::children([paragraph]),
         )
         .unwrap();
-    (XiaomuDocument::new(root, builder.finish()).unwrap(), paragraph)
+    (
+        XiaomuDocument::new(root, builder.finish()).unwrap(),
+        paragraph,
+    )
 }
 
 fn caret_point(node: NodeId, raw: usize, ordinal: usize) -> DocumentPosition {
@@ -91,11 +93,6 @@ fn caret_point(node: NodeId, raw: usize, ordinal: usize) -> DocumentPosition {
         ordinal,
         CursorAffinity::Before,
     ))
-}
-
-fn selection(document: &XiaomuDocument, anchor: DocumentPosition, focus: DocumentPosition) -> DocumentSelection {
-    let _ = document;
-    DocumentSelection::new(anchor, focus)
 }
 
 fn plain_text_selection(node: NodeId, anchor_raw: usize, focus_raw: usize) -> DocumentSelection {
@@ -141,11 +138,7 @@ fn atom_fallback(document: &XiaomuDocument, paragraph: NodeId) -> String {
 #[test]
 fn copy_captures_detached_atoms_and_plain_fallback() {
     let (document, paragraph) = document_with_atom("ab", 1, "@Ann");
-    let session = DocumentSession::new(
-        document,
-        plain_text_selection(paragraph, 0, 2),
-    )
-    .unwrap();
+    let session = DocumentSession::new(document, plain_text_selection(paragraph, 0, 2)).unwrap();
 
     let slice = session.clipboard_slice().unwrap().unwrap();
     assert_eq!(slice.plain_text(), "a@Annb");
@@ -164,21 +157,21 @@ fn copy_between_seam_gaps_selects_the_atoms_in_between() {
     let document = xiaomu_core::transaction::Transaction::new(
         xiaomu_core::transaction::TransactionOrigin::Extension("atom-test".into()),
     )
-    .with_step(xiaomu_core::transaction::TransactionStep::InsertInlineAtom {
-        at: InlinePoint::new(paragraph, offset_at(1), 1, CursorAffinity::Before),
-        kind: AtomKind::new("reference").unwrap(),
-        attrs: NodeAttrs::empty(),
-        content: InlineAtomContent::new("ref").unwrap(),
-    })
+    .with_step(
+        xiaomu_core::transaction::TransactionStep::InsertInlineAtom {
+            at: InlinePoint::new(paragraph, offset_at(1), 1, CursorAffinity::Before),
+            kind: AtomKind::new("reference").unwrap(),
+            attrs: NodeAttrs::empty(),
+            content: InlineAtomContent::new("ref").unwrap(),
+        },
+    )
     .apply(&document)
     .unwrap();
 
     // Selection from before both atoms to between the second atom and "b":
     // both atoms are inside, no text is.
-    let selection = DocumentSelection::new(
-        caret_point(paragraph, 1, 0),
-        caret_point(paragraph, 1, 2),
-    );
+    let selection =
+        DocumentSelection::new(caret_point(paragraph, 1, 0), caret_point(paragraph, 1, 2));
     let session = DocumentSession::new(document, selection).unwrap();
     let slice = session.clipboard_slice().unwrap().unwrap();
 
@@ -189,11 +182,7 @@ fn copy_between_seam_gaps_selects_the_atoms_in_between() {
 #[test]
 fn wire_metadata_round_trips_atom_payloads() {
     let (document, paragraph) = document_with_atom("ab", 1, "@Ann");
-    let session = DocumentSession::new(
-        document,
-        plain_text_selection(paragraph, 0, 2),
-    )
-    .unwrap();
+    let session = DocumentSession::new(document, plain_text_selection(paragraph, 0, 2)).unwrap();
     let slice = session.clipboard_slice().unwrap().unwrap();
     let metadata = encode_metadata(&slice).unwrap();
 
@@ -224,8 +213,7 @@ fn paste_restores_atoms_with_fresh_identity() {
                 NodeKind::Paragraph,
                 NodeAttrs::empty(),
                 NodeContent::Inline(
-                    InlineContent::new([TextRun::new("xy", Default::default()).unwrap()])
-                        .unwrap(),
+                    InlineContent::new([TextRun::new("xy", Default::default()).unwrap()]).unwrap(),
                 ),
             )
             .unwrap();
@@ -236,7 +224,10 @@ fn paste_restores_atoms_with_fresh_identity() {
                 NodeContent::children([paragraph]),
             )
             .unwrap();
-        (XiaomuDocument::new(root, builder.finish()).unwrap(), paragraph)
+        (
+            XiaomuDocument::new(root, builder.finish()).unwrap(),
+            paragraph,
+        )
     };
     let mut session = DocumentSession::new(
         target,
@@ -250,7 +241,10 @@ fn paste_restores_atoms_with_fresh_identity() {
     // Text "xy" becomes "x" + pasted content + "y" with the atom restored.
     assert_eq!(atom_fallback(session.document(), target_paragraph), "@Ann");
     let pasted_atom = first_atom_id(session.document(), target_paragraph);
-    assert_eq!(session.document().parent_of(pasted_atom), Some(target_paragraph));
+    assert_eq!(
+        session.document().parent_of(pasted_atom),
+        Some(target_paragraph)
+    );
 
     // NodeIds are per-document, so freshness is proven by pasting again:
     // the second paste must allocate a different identity in the same
@@ -283,11 +277,8 @@ fn paste_over_a_selection_spanning_target_atoms_removes_them() {
 
     // Paste it over a selection that spans the target's atom.
     let (target, target_paragraph) = document_with_atom("ab", 1, "@A");
-    let mut session = DocumentSession::new(
-        target,
-        plain_text_selection(target_paragraph, 0, 2),
-    )
-    .unwrap();
+    let mut session =
+        DocumentSession::new(target, plain_text_selection(target_paragraph, 0, 2)).unwrap();
     session
         .apply_intent(&EditIntent::PasteSlice { slice: text_slice })
         .unwrap();
@@ -344,19 +335,18 @@ fn multi_block_paste_with_atoms_fails_closed() {
     let document = xiaomu_core::transaction::Transaction::new(
         xiaomu_core::transaction::TransactionOrigin::Extension("atom-test".into()),
     )
-    .with_step(xiaomu_core::transaction::TransactionStep::InsertInlineAtom {
-        at: InlinePoint::new(first, offset_at(1), 0, CursorAffinity::Before),
-        kind: AtomKind::new("mention").unwrap(),
-        attrs: NodeAttrs::empty(),
-        content: InlineAtomContent::new("@A").unwrap(),
-    })
+    .with_step(
+        xiaomu_core::transaction::TransactionStep::InsertInlineAtom {
+            at: InlinePoint::new(first, offset_at(1), 0, CursorAffinity::Before),
+            kind: AtomKind::new("mention").unwrap(),
+            attrs: NodeAttrs::empty(),
+            content: InlineAtomContent::new("@A").unwrap(),
+        },
+    )
     .apply(&document)
     .unwrap();
 
-    let selection = DocumentSelection::new(
-        caret_point(first, 0, 0),
-        caret_point(second, 2, 0),
-    );
+    let selection = DocumentSelection::new(caret_point(first, 0, 0), caret_point(second, 2, 0));
     let session = DocumentSession::new(document, selection).unwrap();
     let slice = session.clipboard_slice().unwrap().unwrap();
     assert_eq!(slice.blocks().len(), 2);
@@ -369,8 +359,7 @@ fn multi_block_paste_with_atoms_fails_closed() {
                 NodeKind::Paragraph,
                 NodeAttrs::empty(),
                 NodeContent::Inline(
-                    InlineContent::new([TextRun::new("xy", Default::default()).unwrap()])
-                        .unwrap(),
+                    InlineContent::new([TextRun::new("xy", Default::default()).unwrap()]).unwrap(),
                 ),
             )
             .unwrap();
@@ -381,7 +370,10 @@ fn multi_block_paste_with_atoms_fails_closed() {
                 NodeContent::children([paragraph]),
             )
             .unwrap();
-        (XiaomuDocument::new(root, builder.finish()).unwrap(), paragraph)
+        (
+            XiaomuDocument::new(root, builder.finish()).unwrap(),
+            paragraph,
+        )
     };
     let mut session = DocumentSession::new(
         target,
@@ -414,9 +406,7 @@ fn ime_composition_touching_an_atom_fails_closed_atomically() {
             range,
             text: "X".to_owned(),
         }),
-        Err(SessionError::Core(
-            xiaomu_core::Error::InvalidTransaction
-        ))
+        Err(SessionError::Core(xiaomu_core::Error::InvalidTransaction))
     );
 
     assert_eq!(
@@ -479,11 +469,8 @@ fn ime_composition_clear_of_atoms_commits_normally() {
 fn cut_then_undo_restores_atoms_and_caret() {
     let (document, paragraph) = document_with_atom("ab", 1, "@A");
     // Selection spans the atom.
-    let mut session = DocumentSession::new(
-        document,
-        plain_text_selection(paragraph, 0, 2),
-    )
-    .unwrap();
+    let mut session =
+        DocumentSession::new(document, plain_text_selection(paragraph, 0, 2)).unwrap();
     let slice = session.clipboard_slice().unwrap().unwrap();
     assert!(slice.blocks()[0].inline().atoms().len() == 1);
 

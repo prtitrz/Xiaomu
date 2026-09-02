@@ -14,8 +14,8 @@ use xiaomu_core::transaction::{Transaction, TransactionStep};
 
 use crate::clipboard::{ClipboardBlock, ClipboardInline, ClipboardNodeContent, ClipboardSlice};
 
-use super::cross_block;
 use super::atom_edit::atoms_inside_span;
+use super::cross_block;
 use super::intent::{EditPlan, PlannedAction, PrimaryEdit, SelectionUpdate, concatenated};
 use super::paste_hierarchy;
 use super::structure::{children_of, user_transaction};
@@ -200,12 +200,8 @@ fn plan_single_block(
     Ok(())
 }
 
-fn text_range_of(
-    start_gap: InlinePoint,
-    end_gap: InlinePoint,
-) -> Result<TextRange, SessionError> {
-    TextRange::new(start_gap.text_offset(), end_gap.text_offset())
-        .map_err(SessionError::Core)
+fn text_range_of(start_gap: InlinePoint, end_gap: InlinePoint) -> Result<TextRange, SessionError> {
+    TextRange::new(start_gap.text_offset(), end_gap.text_offset()).map_err(SessionError::Core)
 }
 
 fn plan_multiple_blocks(
@@ -215,7 +211,10 @@ fn plan_multiple_blocks(
     blocks: &[ClipboardBlock],
     transaction: &mut Transaction,
 ) -> Result<(), SessionError> {
-    if blocks.iter().any(|block| !block.inline().atoms().is_empty()) {
+    if blocks
+        .iter()
+        .any(|block| !block.inline().atoms().is_empty())
+    {
         // One declarative transaction cannot address the freshly allocated
         // blocks; fail closed instead of downgrading atoms to text.
         return Err(SessionError::ClipboardAtomsUnsupported);
@@ -253,9 +252,9 @@ fn plan_multiple_blocks(
             kind: block.kind().clone(),
             attrs: block.attrs().clone(),
             content: NodeContent::Inline(
-            InlineContent::new(block.inline().runs().iter().cloned())
-                .map_err(SessionError::Core)?,
-        ),
+                InlineContent::new(block.inline().runs().iter().cloned())
+                    .map_err(SessionError::Core)?,
+            ),
         });
     }
 

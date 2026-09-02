@@ -611,7 +611,7 @@ atom 以 stable `NodeId` 为 identity，不建立第二套 AtomId allocator；�
 
 transaction 层提供 `InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom` 与 mixed-inline `ReplaceInlineText`。`ReplaceInlineText { at: InlinePoint, end, replacement }` 消费 seam ordinal：seam 上 ordinal 之前的 atom 保持锚点，纯插入把其后 seam atom 移到插入文本之后，end 及之后的 atom 按 byte delta 平移；替换区域内含 atom 时 fail closed，原子删除必须显式经过 `RemoveInlineAtom`。mapping 由 `StepMap::InlineTextReplaced` 在同一 mapping engine 中重排 ordinal；inverse 同为 atom-aware 步骤并精确恢复 store。`ReplaceText / AddMark / RemoveMark` 保持 text-only contract 并在含 atom 的歧义 seam / range 上 fail closed；`SplitNode / JoinNodes` 遇 atom fail closed，placement migration 规则未证明前不 ad-hoc 修补。
 
-Runtime position storage 与 GPUI editing path 尚未迁移到 atom ordinal 消费（P4.3/P4.4 范围）；当前 canonical document 已可验证非零 ordinal。
+Runtime 自 P4.3 起全链路消费 atom ordinal：session selection 存储 `Inline(InlinePoint)`；`move_caret` 以 one-caret-unit 步进；typing / Backspace / Delete 在含 atom 节点经 `ReplaceInlineText` / `RemoveInlineAtom` 表达（纯文本节点保持 P0-P3 `ReplaceText` 路径）；IME commit 对边界 atom 存活、内部 atom fail closed。structured clipboard 以 detached atom payload（kind / attrs / `fallback_text`）携带 inline atom，plain text 在锚点拼接 fallback，paste 重新分配 canonical identity；携带 atom 的 multi-block / hierarchical paste fail closed。GPUI 渲染层（renderer registry / layout / hit-test / accessibility fallback）属于 P4.4，当前对 seam gap 保持 fail closed 投影。
 
 ## 仓库级约束
 

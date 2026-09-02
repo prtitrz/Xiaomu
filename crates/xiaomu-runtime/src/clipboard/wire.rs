@@ -202,7 +202,9 @@ enum WireContent {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         atoms: Vec<WireAtom>,
     },
-    Children { children: Vec<WireNode> },
+    Children {
+        children: Vec<WireNode>,
+    },
 }
 
 /// One detached inline-atom payload on the wire: anchor boundary plus the

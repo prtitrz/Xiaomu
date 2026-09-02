@@ -87,7 +87,13 @@ pub(crate) fn slice_selection(
                     true,
                 )
             } else if absolute_index == tail_index {
-                (0, 0, tail.text_offset().as_usize(), tail.atom_index(), false)
+                (
+                    0,
+                    0,
+                    tail.text_offset().as_usize(),
+                    tail.atom_index(),
+                    false,
+                )
             } else {
                 (0, 0, source.inline.len_bytes(), 0, true)
             };
@@ -190,7 +196,9 @@ fn slice_inline(
         if !inside {
             continue;
         }
-        let payload = document.node(placement.atom()).ok_or(SessionError::SelectionInvalid)?;
+        let payload = document
+            .node(placement.atom())
+            .ok_or(SessionError::SelectionInvalid)?;
         let content = payload
             .content()
             .as_inline_atom()
