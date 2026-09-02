@@ -211,11 +211,11 @@ fn single_block_paste_replaces_host_inheritance_with_exact_source_marks() {
     assert!(!mark_at(session.document(), target, 2, MarkKind::Italic));
     assert!(mark_at(session.document(), target, 3, MarkKind::Italic));
 
-    let DocumentPosition::Text(caret) = session.selection().focus() else {
+    let DocumentPosition::Inline(caret) = session.selection().focus() else {
         panic!("paste must leave a text caret");
     };
     assert_eq!(caret.node_id(), target);
-    assert_eq!(caret.offset().as_usize(), 3);
+    assert_eq!(caret.text_offset().as_usize(), 3);
 
     assert_eq!(session.undo().unwrap(), SessionOutcome::DocumentChanged);
     assert_eq!(session.document().store(), &before_store);
@@ -281,11 +281,11 @@ fn multi_block_paste_preserves_inserted_kinds_marks_suffix_and_caret_seam() {
         MarkKind::Italic
     ));
 
-    let DocumentPosition::Text(caret) = session.selection().focus() else {
+    let DocumentPosition::Inline(caret) = session.selection().focus() else {
         panic!("paste must leave a text caret");
     };
     assert_eq!(caret.node_id(), children[2]);
-    assert_eq!(caret.offset().as_usize(), 1);
+    assert_eq!(caret.text_offset().as_usize(), 1);
 
     assert_eq!(session.undo().unwrap(), SessionOutcome::DocumentChanged);
     assert_eq!(session.document().store(), &before_store);
@@ -367,11 +367,11 @@ fn structured_paste_replaces_cross_block_target_as_one_atomic_history_entry() {
     assert_eq!(text(session.document(), children[1]), "R巴");
     assert!(session.document().node(list).is_none());
 
-    let DocumentPosition::Text(caret) = session.selection().focus() else {
+    let DocumentPosition::Inline(caret) = session.selection().focus() else {
         panic!("paste must leave a text caret");
     };
     assert_eq!(caret.node_id(), children[1]);
-    assert_eq!(caret.offset().as_usize(), 1);
+    assert_eq!(caret.text_offset().as_usize(), 1);
 
     assert_eq!(session.undo().unwrap(), SessionOutcome::DocumentChanged);
     assert_eq!(session.document().store(), &before_store);

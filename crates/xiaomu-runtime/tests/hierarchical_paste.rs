@@ -155,11 +155,11 @@ fn list_fragment_pastes_between_target_prefix_and_suffix_as_one_history_entry() 
     let last_leaf = assert_pasted_list(session.document(), roots[1]);
     assert_eq!(text(session.document(), roots[2]), "b");
 
-    let DocumentPosition::Text(caret) = session.selection().focus() else {
+    let DocumentPosition::Inline(caret) = session.selection().focus() else {
         panic!("hierarchical paste must leave a text caret");
     };
     assert_eq!(caret.node_id(), last_leaf);
-    assert_eq!(caret.offset().as_usize(), "尾".len());
+    assert_eq!(caret.text_offset().as_usize(), "尾".len());
 
     let after_store = session.document().store().clone();
     let after_selection = session.selection();
@@ -248,11 +248,11 @@ fn list_fragment_replaces_cross_block_target_atomically() {
     let last_leaf = assert_pasted_list(session.document(), roots[1]);
     assert_eq!(text(session.document(), roots[2]), "巴");
 
-    let DocumentPosition::Text(caret) = session.selection().focus() else {
+    let DocumentPosition::Inline(caret) = session.selection().focus() else {
         panic!("hierarchical paste must leave a text caret");
     };
     assert_eq!(caret.node_id(), last_leaf);
-    assert_eq!(caret.offset().as_usize(), "尾".len());
+    assert_eq!(caret.text_offset().as_usize(), "尾".len());
 
     assert_eq!(session.undo().unwrap(), SessionOutcome::DocumentChanged);
     assert_eq!(session.document().store(), &before_store);

@@ -35,8 +35,11 @@ impl DocumentView {
     fn visual_focus_location(&self) -> Option<(Vec<navigation::TextBlock>, usize, TextPoint)> {
         let session = self.session.borrow();
         let blocks = navigation::text_blocks(session.document());
+        // Visual navigation projects onto the text layer; a caret inside a
+        // same-boundary atom seam has no text-only projection until the
+        // atom renderer (P4.4) provides one.
         let focus = match session.selection().focus() {
-            DocumentPosition::Text(point) => point,
+            DocumentPosition::Inline(point) => point.to_text_point().ok()?,
             DocumentPosition::Gap(_) => return None,
         };
         let index = navigation::block_index(&blocks, focus.node_id())?;

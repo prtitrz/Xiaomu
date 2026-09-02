@@ -87,7 +87,7 @@ fn split_target_transaction(
     }
 
     let (head, _) = selection.ordered(document)?;
-    let DocumentPosition::Text(head) = head else {
+    let DocumentPosition::Inline(head) = head else {
         return Err(SessionError::SelectionInvalid);
     };
     let action = cross_block::plan_delete_selection(document, selection)?;
@@ -97,7 +97,7 @@ fn split_target_transaction(
     let mut transaction = delete_plan.transaction().clone();
     transaction.push_step(TransactionStep::SplitNode {
         node: head.node_id(),
-        at: head.offset(),
+        at: head.text_offset(),
     });
     Ok((head.node_id(), transaction))
 }

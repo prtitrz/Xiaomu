@@ -95,7 +95,7 @@ pub(super) fn resolve_selection(
 /// Focus affinity of `selection`, defaulting to Before at a gap.
 pub(super) fn affinity_of(selection: DocumentSelection) -> CursorAffinity {
     match selection.focus() {
-        DocumentPosition::Text(point) => point.affinity(),
+        DocumentPosition::Inline(point) => point.affinity(),
         DocumentPosition::Gap(_) => CursorAffinity::Before,
     }
 }
@@ -128,7 +128,7 @@ pub(super) fn preserved_focus(
     document: &XiaomuDocument,
 ) -> Result<DocumentSelection, SessionError> {
     let point = match before.focus() {
-        DocumentPosition::Text(point) => point,
+        DocumentPosition::Inline(point) => point,
         DocumentPosition::Gap(_) => return Err(SessionError::SelectionInvalid),
     };
     let selection = DocumentSelection::collapsed(point);

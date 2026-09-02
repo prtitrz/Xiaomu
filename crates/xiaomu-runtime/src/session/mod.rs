@@ -34,7 +34,7 @@ pub use selection::DocumentSelection;
 
 use xiaomu_core::document::{InlineContent, MarkSet, NodeId, XiaomuDocument};
 use xiaomu_core::mapping::StepMap;
-use xiaomu_core::selection::{TextPoint, TextSelection};
+use xiaomu_core::selection::{InlinePoint, TextPoint, TextSelection};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin};
 
 use self::history::{HistoryEntry, HistoryGroup};
@@ -174,7 +174,7 @@ impl DocumentSession {
 
         // Remaining content and structural intents in this slice act from one
         // inline node.
-        let focus = self.text_focus()?;
+        let focus = self.inline_focus()?;
         let inline = self.inline_of(focus.node_id())?;
         let selection = self
             .selection
@@ -220,7 +220,8 @@ impl DocumentSession {
             }
             EditIntent::Backspace => {
                 self.history.break_group();
-                let at_block_start = selection.is_collapsed() && focus.offset().as_usize() == 0;
+                let at_block_start =
+                    selection.is_collapsed() && focus.text_offset().as_usize() == 0;
                 // Priority at a block start: merge into the previous block
                 // (same parent), then into the previous list item's tail,
                 // then leave the list itself (outdent when nested, lift out
@@ -522,11 +523,11 @@ impl DocumentSession {
             .ok_or(SessionError::SelectionInvalid)
     }
 
-    /// Returns the focused text position when the focus endpoint carries
-    /// text coordinates; content-editing intents cannot act on a gap.
-    fn text_focus(&self) -> Result<TextPoint, SessionError> {
+    /// Returns the focused mixed-inline position; content-editing intents
+    /// cannot act on a gap.
+    fn inline_focus(&self) -> Result<InlinePoint, SessionError> {
         match self.selection.focus() {
-            DocumentPosition::Text(point) => Ok(point),
+            DocumentPosition::Inline(point) => Ok(point),
             DocumentPosition::Gap(_) => Err(SessionError::SelectionInvalid),
         }
     }

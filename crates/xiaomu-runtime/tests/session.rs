@@ -7,7 +7,7 @@ use xiaomu_core::document::{
     InlineContent, Mark, MarkKind, MarkSet, NodeAttrs, NodeContent, NodeId, NodeKind,
     NodeStoreBuilder, TextRun, XiaomuDocument,
 };
-use xiaomu_core::selection::{CursorAffinity, TextPoint, TextSelection};
+use xiaomu_core::selection::{CursorAffinity, InlinePoint, TextPoint, TextSelection};
 use xiaomu_core::text::{TextBuffer, TextOffset};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 use xiaomu_runtime::session::DocumentSelection;
@@ -692,11 +692,11 @@ fn set_selection_moves_endpoints_across_blocks_and_validates() {
 
     let selection = session.selection();
     assert!(
-        matches!(selection.focus(), xiaomu_runtime::session::DocumentPosition::Text(point) if point.node_id() == tail)
+        matches!(selection.focus(), xiaomu_runtime::session::DocumentPosition::Inline(point) if point.node_id() == tail)
     );
     // The anchor survives the cross-block extension.
     assert!(
-        matches!(selection.anchor(), xiaomu_runtime::session::DocumentPosition::Text(point) if point.node_id() == head)
+        matches!(selection.anchor(), xiaomu_runtime::session::DocumentPosition::Inline(point) if point.node_id() == head)
     );
 
     // An endpoint outside the focused node's text is rejected atomically:
@@ -729,7 +729,7 @@ fn split_block_then_set_selection_reaches_the_new_block() {
     session.apply_intent(&EditIntent::SplitBlock).unwrap();
 
     let focus_node = match session.selection().focus() {
-        xiaomu_runtime::session::DocumentPosition::Text(point) => point.node_id(),
+        xiaomu_runtime::session::DocumentPosition::Inline(point) => point.node_id(),
         xiaomu_runtime::session::DocumentPosition::Gap(_) => {
             panic!("expected a text position after split")
         }
@@ -837,9 +837,10 @@ fn backspace_at_second_item_start_merges_into_previous_item() {
         .unwrap();
     assert_eq!(
         session.selection().focus(),
-        xiaomu_runtime::session::DocumentPosition::Text(TextPoint::new(
+        xiaomu_runtime::session::DocumentPosition::Inline(InlinePoint::new(
             p1,
             seam,
+            0,
             CursorAffinity::Before
         ))
     );

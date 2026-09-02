@@ -103,7 +103,7 @@ fn prepare_target(
     }
 
     let (head, _) = selection.ordered(document)?;
-    let DocumentPosition::Text(head) = head else {
+    let DocumentPosition::Inline(head) = head else {
         return Err(SessionError::SelectionInvalid);
     };
     let action = cross_block::plan_delete_selection(document, selection)?;
@@ -119,9 +119,13 @@ fn prepare_target(
         .map_err(SessionError::Core)?;
     let inline = inline_of(&working, head.node_id())?;
     inline
-        .validate_offset(head.offset())
+        .validate_offset(head.text_offset())
         .map_err(SessionError::Core)?;
-    Ok((working, head.node_id(), TextRange::empty(head.offset())))
+    Ok((
+        working,
+        head.node_id(),
+        TextRange::empty(head.text_offset()),
+    ))
 }
 
 fn plan_single_block(

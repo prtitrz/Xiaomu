@@ -228,7 +228,7 @@ impl DocumentView {
         let plan = {
             let session = self.session.borrow();
             match session.selection().focus() {
-                DocumentPosition::Text(point) => {
+                DocumentPosition::Inline(point) => {
                     let kind = session
                         .document()
                         .node(point.node_id())
@@ -289,7 +289,7 @@ impl DocumentView {
         let lifts_out = {
             let session = self.session.borrow();
             match session.selection().focus() {
-                DocumentPosition::Text(point) => matches!(
+                DocumentPosition::Inline(point) => matches!(
                     markers::list_context(session.document(), point.node_id()),
                     Some(context) if !context.nested
                 ),
@@ -494,7 +494,7 @@ impl DocumentView {
 
     fn focused_node_kind(&self) -> Option<NodeKind> {
         let session = self.session.borrow();
-        let DocumentPosition::Text(point) = session.selection().focus() else {
+        let DocumentPosition::Inline(point) = session.selection().focus() else {
             return None;
         };
         session
@@ -506,7 +506,7 @@ impl DocumentView {
     /// Moves platform focus to the block holding the selection focus.
     pub(crate) fn route_focus(&self, window: &mut Window, cx: &App) {
         let node = match self.session.borrow().selection().focus() {
-            DocumentPosition::Text(point) => point.node_id(),
+            DocumentPosition::Inline(point) => point.node_id(),
             DocumentPosition::Gap(_) => return,
         };
         if let Some((_, view)) = self.children.iter().find(|(id, _)| *id == node) {
