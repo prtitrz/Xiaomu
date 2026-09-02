@@ -96,6 +96,7 @@ fn instance(
         EditorHooks {
             persistence: Some(Rc::new(RefCell::new(CountPersistence(saves)))),
             listener: Some(Box::new(CountListener(changes))),
+            atom_renderers: None,
         },
     )
     .unwrap()

@@ -23,6 +23,7 @@ pub mod accessibility;
 pub mod block_view;
 pub mod document_view;
 pub mod editor;
+pub mod inline_atom;
 mod inline_position;
 pub mod input;
 
