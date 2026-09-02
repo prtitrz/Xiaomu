@@ -69,6 +69,23 @@ pub enum StepMap {
         /// UTF-8 byte length of the replacement text.
         replacement_len: usize,
     },
+    /// One inline node's text was replaced at a mixed-inline seam.
+    ///
+    /// Pure text coordinates map exactly like [`StepMap::TextReplaced`]; the
+    /// extra `seam_atom_index` records how many same-boundary atoms stayed
+    /// before the edited caret gap, so mixed-inline mapping can redistribute
+    /// seam ordinals instead of preserving them blindly.
+    InlineTextReplaced {
+        /// Inline-bearing node whose concatenated text changed.
+        node: NodeId,
+        /// Half-open replaced byte range in the node's concatenated text.
+        range: TextRange,
+        /// UTF-8 byte length of the replacement text.
+        replacement_len: usize,
+        /// Number of atoms anchored at `range.start()` that stayed before the
+        /// edited gap.
+        seam_atom_index: usize,
+    },
     /// One atom was inserted into an inline parent's same-boundary atom order.
     InlineAtomInserted {
         /// Inline-bearing parent whose placement list gained the atom.
@@ -150,7 +167,9 @@ impl StepMap {
     /// range.end)` resolve to the replacement boundary chosen by `bias`.
     /// An empty range is a pure insertion: the position exactly at its start
     /// is the insertion boundary and also resolves by `bias`. Affinity is
-    /// preserved. Atom-only edits do not move text coordinates.
+    /// preserved. Atom-only edits do not move text coordinates, and the
+    /// mixed-inline replacement maps text coordinates exactly like the
+    /// text-only one because atoms never consume bytes.
     #[must_use]
     pub fn map_text_point(&self, point: TextPoint, bias: MapBias) -> MappedPosition<TextPoint> {
         match self {
@@ -158,38 +177,13 @@ impl StepMap {
                 node,
                 range,
                 replacement_len,
-            } => {
-                if point.node_id() != *node {
-                    return MappedPosition::Mapped(point);
-                }
-
-                let start = range.start().as_usize();
-                let end = range.end().as_usize();
-                let old = point.offset().as_usize();
-
-                let mapped = if old < start || (start == end && old == start) {
-                    // Before the edit, or exactly at an empty-range insertion
-                    // point, which is the insertion boundary itself.
-                    if start == end && old == start && bias == MapBias::End {
-                        start + *replacement_len
-                    } else {
-                        old
-                    }
-                } else if old > end || (old == end && old > start) {
-                    old - (end - start) + *replacement_len
-                } else {
-                    match bias {
-                        MapBias::Start => start,
-                        MapBias::End => start + *replacement_len,
-                    }
-                };
-
-                MappedPosition::Mapped(TextPoint::new(
-                    point.node_id(),
-                    TextOffset::from_validated_byte_index(mapped),
-                    point.affinity(),
-                ))
             }
+            | Self::InlineTextReplaced {
+                node,
+                range,
+                replacement_len,
+                ..
+            } => map_text_point_over_range(point, *node, *range, *replacement_len, bias),
             Self::InlineAtomInserted { .. }
             | Self::InlineAtomRemoved { .. }
             | Self::NodeInserted { .. } => MappedPosition::Mapped(point),
@@ -255,6 +249,7 @@ impl StepMap {
     pub fn map_node_gap(&self, gap: NodeGap, bias: MapBias) -> MappedPosition<NodeGap> {
         match self {
             Self::TextReplaced { .. }
+            | Self::InlineTextReplaced { .. }
             | Self::InlineAtomInserted { .. }
             | Self::InlineAtomRemoved { .. } => MappedPosition::Mapped(gap),
             Self::NodeInserted { parent, index, .. } | Self::NodeSplit { parent, index, .. } => {
@@ -316,6 +311,50 @@ impl StepMap {
             _ => MappedPosition::Mapped(selection),
         }
     }
+}
+
+/// Maps one text point across a replaced byte range of one node.
+///
+/// Shared by [`StepMap::TextReplaced`] and [`StepMap::InlineTextReplaced`]:
+/// atoms never consume text bytes, so both replacements move UTF-8
+/// coordinates identically.
+fn map_text_point_over_range(
+    point: TextPoint,
+    node: NodeId,
+    range: TextRange,
+    replacement_len: usize,
+    bias: MapBias,
+) -> MappedPosition<TextPoint> {
+    if point.node_id() != node {
+        return MappedPosition::Mapped(point);
+    }
+
+    let start = range.start().as_usize();
+    let end = range.end().as_usize();
+    let old = point.offset().as_usize();
+
+    let mapped = if old < start || (start == end && old == start) {
+        // Before the edit, or exactly at an empty-range insertion
+        // point, which is the insertion boundary itself.
+        if start == end && old == start && bias == MapBias::End {
+            start + replacement_len
+        } else {
+            old
+        }
+    } else if old > end || (old == end && old > start) {
+        old - (end - start) + replacement_len
+    } else {
+        match bias {
+            MapBias::Start => start,
+            MapBias::End => start + replacement_len,
+        }
+    };
+
+    MappedPosition::Mapped(TextPoint::new(
+        point.node_id(),
+        TextOffset::from_validated_byte_index(mapped),
+        point.affinity(),
+    ))
 }
 
 /// Composed mapping data for one applied transaction.

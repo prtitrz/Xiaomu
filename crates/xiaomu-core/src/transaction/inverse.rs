@@ -7,6 +7,7 @@
 
 use crate::Result;
 use crate::document::{InlineContent, MarkKind, MarkSet, NodeId};
+use crate::selection::InlinePoint;
 use crate::text::{TextOffset, TextRange};
 
 use super::step::TransactionStep;
@@ -135,6 +136,70 @@ pub(super) fn replace_text_inverse(
         for mark in span.marks.as_slice() {
             steps.push(TransactionStep::AddMark {
                 node,
+                range: span.range,
+                mark: mark.clone(),
+            });
+        }
+    }
+
+    steps
+}
+
+/// Builds the inverse steps of one applied `ReplaceInlineText`.
+///
+/// The inverse is itself atom-aware: the seam still carries the atoms that
+/// stayed before the edit, so restoring the old text through the text-only
+/// [`TransactionStep::ReplaceText`] would fail closed. For a pure seam
+/// insertion the inverse deletes the inserted bytes; otherwise it restores
+/// the old text and mirrors `replace_text_inverse`'s mark strip/re-add so
+/// replacements crossing differently-marked runs round-trip exactly.
+pub(super) fn replace_inline_text_inverse(
+    at: InlinePoint,
+    range: TextRange,
+    replacement: &str,
+    pre: &InlineContent,
+    spans: &[InlineSpan],
+) -> Vec<TransactionStep> {
+    let start = range.start().as_usize();
+    let seam = InlinePoint::new(at.node_id(), range.start(), at.atom_index(), at.affinity());
+
+    if spans.is_empty() {
+        // Empty range: a pure insertion, and deleting the inserted bytes is
+        // the exact inverse. Seam atoms that moved after the insertion sit
+        // exactly at the inverse's end boundary and shift back with it.
+        return vec![TransactionStep::ReplaceInlineText {
+            at: seam,
+            end: offset(start + replacement.len()),
+            replacement: String::new(),
+        }];
+    }
+
+    let old_text: String = spans.iter().map(|span| span.text.as_str()).collect();
+    let old_len = old_text.len();
+    let mut steps = vec![TransactionStep::ReplaceInlineText {
+        at: seam,
+        end: offset(start + replacement.len()),
+        replacement: old_text,
+    }];
+
+    // After the restoring replacement, the restored span carries exactly the
+    // marks the original replacement had inherited. Strip them so the
+    // per-span re-add below reconstructs the original segmentation. Mark
+    // steps never move text or atoms, so the preserved seam stays intact.
+    let restored_span =
+        TextRange::new(offset(start), offset(start + old_len)).expect("inverse span stays ordered");
+    for mark in inherited_marks_at(pre, start).as_slice() {
+        steps.push(TransactionStep::RemoveMark {
+            node: at.node_id(),
+            range: restored_span,
+            mark_kind: mark.kind(),
+        });
+    }
+
+    for span in spans {
+        for mark in span.marks.as_slice() {
+            steps.push(TransactionStep::AddMark {
+                node: at.node_id(),
                 range: span.range,
                 mark: mark.clone(),
             });

@@ -10,9 +10,9 @@ use crate::text::{TextOffset, TextRange};
 use crate::{Error, Result};
 
 /// One contiguous piece of inline text carrying one mark set.
-struct Piece {
-    marks: MarkSet,
-    text: String,
+pub(super) struct Piece {
+    pub(super) marks: MarkSet,
+    pub(super) text: String,
 }
 
 impl Piece {
@@ -101,7 +101,7 @@ fn split_pieces(inline: &InlineContent, range: TextRange) -> Result<Vec<Piece>> 
     Ok(pieces)
 }
 
-fn rebuild(pieces: Vec<Piece>, atoms: &[InlineAtomPlacement]) -> Result<InlineContent> {
+pub(super) fn rebuild(pieces: Vec<Piece>, atoms: &[InlineAtomPlacement]) -> Result<InlineContent> {
     let mut runs = Vec::new();
     for piece in pieces {
         if !piece.text.is_empty() {
@@ -153,6 +153,23 @@ pub fn replace_text(
     validate_inline_range(inline, range)?;
     validate_text_replacement_against_atoms(inline, range)?;
 
+    let pieces = splice_pieces(inline, range, replacement);
+    let atoms = mapped_atom_placements_after_text_replace(inline, range, replacement.len());
+    rebuild(pieces, &atoms)
+}
+
+/// Splices `replacement` into `inline` at `range`, keeping the surrounding
+/// pieces and their marks.
+///
+/// The replacement inherits the marks of the piece containing `range.start`;
+/// an empty range is a pure insertion at that boundary. Shared by the
+/// text-only and atom-aware replacement contracts, which differ only in how
+/// atom placements are validated and remapped.
+pub(super) fn splice_pieces(
+    inline: &InlineContent,
+    range: TextRange,
+    replacement: &str,
+) -> Vec<Piece> {
     let mut output: Vec<Piece> = Vec::new();
     let mut offset = 0usize;
     let mut replaced = false;
@@ -177,7 +194,7 @@ pub fn replace_text(
         // Replacement goes where the affected span begins.
         if !replaced && range_start <= end {
             let inherited = run.marks().clone();
-            output.push(Piece::new(inherited.clone(), replacement));
+            output.push(Piece::new(inherited, replacement));
             replaced = true;
         }
 
@@ -201,8 +218,7 @@ pub fn replace_text(
         output.push(Piece::new(inherited, replacement));
     }
 
-    let atoms = mapped_atom_placements_after_text_replace(inline, range, replacement.len());
-    rebuild(output, &atoms)
+    output
 }
 
 /// Returns inline content with `mark` applied to `range`.

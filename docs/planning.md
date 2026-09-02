@@ -4,7 +4,7 @@
 >
 > Date: 2026-09-01
 >
-> 当前里程碑：**P0 / P1 / P2 / P3 CLOSED；P4 — Inline Atom / Extension Seam IN PROGRESS，P4.1 mixed-inline coordinate contract 已完成。**
+> 当前里程碑：**P0 / P1 / P2 / P3 CLOSED；P4 — Inline Atom / Extension Seam IN PROGRESS，P4.1 mixed-inline coordinate contract 与 P4.2 canonical inline atom Core 层已完成。**
 >
 > 定位：独立演进、可嵌入宿主应用的 **Rust Native Structured Rich-Text / Block Editor Engine**。首个原生前端基于 GPUI，但核心架构不绑定 GPUI。
 
@@ -435,7 +435,7 @@ P4.1 已建立 mixed-inline coordinate：
 InlinePoint(node_id, text_offset, atom_index, affinity)
 ```
 
-其中 `text_offset` 继续严格表示 UTF-8 canonical text bytes；同一 text boundary 上 N 个 atom 对应 `atom_index = 0..=N` 的 N+1 个 caret gap。atom 不占 fake byte，不采用 U+FFFC/private-use sentinel，`CursorAffinity` 不承担 canonical atom order。当前 canonical atom placement 尚未合入，因此现有纯文本路径只承认 ordinal 0；后续 atom placement、transaction、mapping 与 Runtime editing 必须沿这一 contract 扩展。
+其中 `text_offset` 继续严格表示 UTF-8 canonical text bytes；同一 text boundary 上 N 个 atom 对应 `atom_index = 0..=N` 的 N+1 个 caret gap。atom 不占 fake byte，不采用 U+FFFC/private-use sentinel，`CursorAffinity` 不承担 canonical atom order。P4.2 已合入 canonical atom placement 与 full-tree validation，Core document 可验证非零 ordinal；Runtime editing path 对 ordinal 的消费在 P4.3 完成，纯文本兼容路径继续使用 ordinal 0。
 
 `CursorAffinity` 用于处理 soft wrap、BiDi 等同一逻辑位置对应多个视觉 caret 位置的情况。
 
@@ -488,7 +488,7 @@ metadata
 
 Core mutation 返回 inverse transaction 或足够生成 inverse 的 change set。
 
-P4.1 已明确后续 mixed-inline mutation 的额外约束：atom 前后 caret 可能共享同一 `TextOffset`，因此 atom seam 上的文本 replacement 必须消费 `InlinePoint.atom_index`；旧 `ReplaceText(TextRange)` 只能继续服务其语义无歧义的纯文本路径，不能被扩张成会丢失 atom order 的隐式 mixed-inline contract。
+P4.1 确立、P4.2 落地的 mixed-inline mutation 约束：atom 前后 caret 可能共享同一 `TextOffset`，因此 atom seam 上的文本 replacement 由 `ReplaceInlineText { at: InlinePoint, end, replacement }` 消费 `InlinePoint.atom_index`；旧 `ReplaceText(TextRange)` 只能继续服务其语义无歧义的纯文本路径，在含 atom 的歧义 seam / range 上 fail closed。`ReplaceInlineText` 的替换区域内含 atom 时同样 fail closed，原子删除必须显式经过 `RemoveInlineAtom`。
 
 ### 6.1 Position Mapping
 
@@ -517,7 +517,7 @@ decorations
 future collaboration adapters
 ```
 
-禁止各模块自行维护 offset 修补逻辑。P4.1 已让 `StepMap / ChangeMap` 暴露 `map_inline_point` seam；未来 atom-changing step 必须进入这条同一 mapping engine。
+禁止各模块自行维护 offset 修补逻辑。P4.1 已让 `StepMap / ChangeMap` 暴露 `map_inline_point` seam；P4.2 的 atom-changing step（insert / remove / `InlineTextReplaced`）已进入这条同一 mapping engine 并显式调整 ordinal。
 
 ### 6.2 Collaboration stance
 
@@ -1061,7 +1061,7 @@ Gate：固定 Unicode cross-block + visual-line matrix、exact undo/redo 与 ran
 
 状态：**IN PROGRESS**
 
-P4.1 已完成：
+P4.1 与 P4.2 Core 层已完成：
 
 ```text
 ADR 0005 mixed-inline coordinate contract
@@ -1071,14 +1071,15 @@ StepMap / ChangeMap mixed-inline mapping seam
 Runtime DocumentPosition / DocumentSelection compatibility seam
 GPUI DocumentView mixed-inline focus / selection projection
 P0-P3 zero-semantic-regression gate
+InlineAtom canonical model（AtomKind / InlineAtomContent / placement / validation）
+InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom
+atom-aware ReplaceInlineText contract + InlineTextReplaced mapping + exact inverse
 ```
 
 继续完成：
 
 ```text
-InlineAtom canonical model
-atom navigation/delete/copy
-atom-aware transaction / mapping / inverse
+atom navigation/delete/copy（Runtime / GPUI）
 renderer registry
 block renderer registry
 host capability callbacks

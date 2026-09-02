@@ -83,6 +83,11 @@ impl ApplyContext {
                 range,
                 replacement,
             } => self.apply_replace_text(*node, *range, replacement),
+            TransactionStep::ReplaceInlineText {
+                at,
+                end,
+                replacement,
+            } => self.apply_replace_inline_text(*at, *end, replacement),
             TransactionStep::InsertInlineAtom {
                 at,
                 kind,

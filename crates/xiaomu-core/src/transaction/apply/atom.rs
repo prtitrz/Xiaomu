@@ -7,12 +7,46 @@ use crate::document::{
 };
 use crate::mapping::StepMap;
 use crate::selection::{CursorAffinity, InlinePoint};
+use crate::text::{TextOffset, TextRange};
 use crate::{Error, Result};
 
 use super::ApplyContext;
-use crate::transaction::step::TransactionStep;
+use crate::transaction::{inline_atom, inverse, step::TransactionStep};
 
 impl ApplyContext {
+    /// Applies the atom-aware mixed-inline text replacement.
+    ///
+    /// The seam ordinal is consumed here: application validates that the
+    /// caret gap exists and lets [`inline_atom::replace_inline_text`] decide
+    /// which atom placements survive, shift, or fail the step.
+    pub(super) fn apply_replace_inline_text(
+        &mut self,
+        at: InlinePoint,
+        end: TextOffset,
+        replacement: &str,
+    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+        let node = at.node_id();
+        let content = self.inline_content(node)?;
+        let range = TextRange::new(at.text_offset(), end)?;
+        let spans = inverse::spans_within(&content, range)?;
+        let next = inline_atom::replace_inline_text(&content, at, end, replacement)?;
+        self.rewrite_node(
+            node,
+            self.attrs_of(node)?,
+            crate::document::NodeContent::Inline(next),
+        )?;
+
+        let step_map = StepMap::InlineTextReplaced {
+            node,
+            range,
+            replacement_len: replacement.len(),
+            seam_atom_index: at.atom_index(),
+        };
+        let inverse_steps =
+            inverse::replace_inline_text_inverse(at, range, replacement, &content, &spans);
+        Ok((Some(step_map), inverse_steps))
+    }
+
     pub(super) fn apply_insert_inline_atom(
         &mut self,
         at: InlinePoint,
