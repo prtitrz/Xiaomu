@@ -10,15 +10,22 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use xiaomu_core::document::{
-    AttrValue, HeadingLevel, InlineContent, LinkMark, Mark, MarkSet, NodeAttrs, NodeKind, TextRun,
+    AtomKind, AttrValue, HeadingLevel, InlineAtomContent, LinkMark, Mark, MarkSet, NodeAttrs,
+    NodeKind, TextRun,
 };
+use xiaomu_core::text::TextBuffer;
 
-use super::fragment::{ClipboardNode, ClipboardNodeContent, ClipboardSlice, validate_roots};
+use super::fragment::{
+    ClipboardAtom, ClipboardInline, ClipboardNode, ClipboardNodeContent, ClipboardSlice,
+    validate_roots,
+};
 
 const FORMAT: &str = "xiaomu.clipboard";
 // v1 carried only a flat leaf list. v2 carries the detached fragment tree so
-// list/quote/container semantics survive Xiaomu-to-Xiaomu copy/paste.
-const VERSION: u32 = 2;
+// list/quote/container semantics survive Xiaomu-to-Xiaomu copy/paste. v3 adds
+// detached inline-atom payloads (kind, attrs, fallback_text) anchored inside
+// the fragment text.
+const VERSION: u32 = 3;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -124,6 +131,11 @@ impl WireNode {
                     .iter()
                     .map(WireRun::from_run)
                     .collect::<Result<_, _>>()?,
+                atoms: inline
+                    .atoms()
+                    .iter()
+                    .map(WireAtom::from_atom)
+                    .collect::<Result<_, _>>()?,
             },
             ClipboardNodeContent::Children(children) => WireContent::Children {
                 children: children
@@ -150,14 +162,23 @@ impl WireNode {
             .map(|(key, value)| Ok((key, value.into_attr()?)))
             .collect::<Result<BTreeMap<_, _>, ClipboardMetadataError>>()?;
         let content = match self.content {
-            WireContent::Inline { runs } => ClipboardNodeContent::Inline(
-                InlineContent::new(
-                    runs.into_iter()
-                        .map(WireRun::into_run)
-                        .collect::<Result<Vec<_>, _>>()?,
+            WireContent::Inline { runs, atoms } => {
+                let runs = runs
+                    .into_iter()
+                    .map(WireRun::into_run)
+                    .collect::<Result<Vec<_>, _>>()?;
+                // Atom anchors are validated against the exact fragment text.
+                let buffer =
+                    TextBuffer::from_string(runs.iter().map(|run| run.text().as_str()).collect());
+                let atoms = atoms
+                    .into_iter()
+                    .map(|atom| atom.into_atom(&buffer))
+                    .collect::<Result<Vec<_>, _>>()?;
+                ClipboardNodeContent::Inline(
+                    ClipboardInline::new(runs, atoms)
+                        .map_err(|_| ClipboardMetadataError::invalid())?,
                 )
-                .map_err(|_| ClipboardMetadataError::invalid())?,
-            ),
+            }
             WireContent::Children { children } => ClipboardNodeContent::Children(
                 children
                     .into_iter()
@@ -176,8 +197,57 @@ impl WireNode {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum WireContent {
-    Inline { runs: Vec<WireRun> },
-    Children { children: Vec<WireNode> },
+    Inline {
+        runs: Vec<WireRun>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        atoms: Vec<WireAtom>,
+    },
+    Children {
+        children: Vec<WireNode>,
+    },
+}
+
+/// One detached inline-atom payload on the wire: anchor boundary plus the
+/// canonical payload a paste re-materializes under a fresh identity.
+#[derive(Serialize, Deserialize)]
+struct WireAtom {
+    anchor: usize,
+    kind: String,
+    attrs: BTreeMap<String, WireAttr>,
+    fallback: String,
+}
+
+impl WireAtom {
+    fn from_atom(atom: &ClipboardAtom) -> Result<Self, ClipboardMetadataError> {
+        let attrs = atom
+            .attrs()
+            .iter()
+            .map(|(key, value)| Ok((key.to_owned(), WireAttr::from_attr(value)?)))
+            .collect::<Result<BTreeMap<_, _>, ClipboardMetadataError>>()?;
+        Ok(Self {
+            anchor: atom.anchor().as_usize(),
+            kind: atom.kind().as_str().to_owned(),
+            attrs,
+            fallback: atom.content().fallback_text().to_owned(),
+        })
+    }
+
+    fn into_atom(self, buffer: &TextBuffer) -> Result<ClipboardAtom, ClipboardMetadataError> {
+        let attrs = self
+            .attrs
+            .into_iter()
+            .map(|(key, value)| Ok((key, value.into_attr()?)))
+            .collect::<Result<BTreeMap<_, _>, ClipboardMetadataError>>()?;
+        let anchor = buffer
+            .offset_at(self.anchor)
+            .map_err(|_| ClipboardMetadataError::invalid())?;
+        Ok(ClipboardAtom::new(
+            anchor,
+            AtomKind::new(self.kind).map_err(|_| ClipboardMetadataError::invalid())?,
+            NodeAttrs::new(attrs).map_err(|_| ClipboardMetadataError::invalid())?,
+            InlineAtomContent::new(self.fallback).map_err(|_| ClipboardMetadataError::invalid())?,
+        ))
+    }
 }
 
 #[derive(Serialize, Deserialize)]

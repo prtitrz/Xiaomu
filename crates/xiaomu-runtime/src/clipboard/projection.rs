@@ -6,7 +6,10 @@ use xiaomu_core::document::{
     InlineContent, NodeAttrs, NodeContent, NodeId, NodeKind, TextRun, XiaomuDocument,
 };
 
-use super::fragment::{ClipboardNode, ClipboardNodeContent, ClipboardSlice, project_roots};
+use super::fragment::{
+    ClipboardAtom, ClipboardInline, ClipboardNode, ClipboardNodeContent, ClipboardSlice,
+    project_roots,
+};
 use crate::session::{DocumentPosition, DocumentSelection, SessionError};
 
 /// Projects a validated document selection into a detached clipboard slice.
@@ -26,9 +29,13 @@ pub(crate) fn slice_selection(
         return Err(SessionError::SelectionInvalid);
     };
 
-    // Affinity can distinguish two visual caret positions at one soft-wrap
-    // boundary, but it does not select canonical text by itself.
-    if head.node_id() == tail.node_id() && head.text_offset() == tail.text_offset() {
+    // Identical endpoints (node, boundary, and atom ordinal) select nothing;
+    // affinity is visual bookkeeping and never selects canonical content.
+    // Two gaps at one text boundary can still select the atoms between them.
+    if head.node_id() == tail.node_id()
+        && head.text_offset() == tail.text_offset()
+        && head.atom_index() == tail.atom_index()
+    {
         return Ok(None);
     }
 
@@ -50,9 +57,13 @@ pub(crate) fn slice_selection(
     if head_index == tail_index {
         let source = &source_blocks[head_index];
         let inline = slice_inline(
+            document,
             &source.inline,
             head.text_offset().as_usize(),
+            head.atom_index(),
             tail.text_offset().as_usize(),
+            tail.atom_index(),
+            false,
         )?;
         return Ok(Some(ClipboardSlice::from_roots(vec![ClipboardNode::new(
             source.kind.clone(),
@@ -61,20 +72,43 @@ pub(crate) fn slice_selection(
         )])));
     }
 
+    // Cross-block selections own every atom of the blocks they span; the
+    // boundary blocks clip by ordinal exactly like the editing contract.
     let mut selected = BTreeMap::new();
     for (index, source) in source_blocks[head_index..=tail_index].iter().enumerate() {
         let absolute_index = head_index + index;
-        let start = if absolute_index == head_index {
-            head.text_offset().as_usize()
-        } else {
-            0
-        };
-        let end = if absolute_index == tail_index {
-            tail.text_offset().as_usize()
-        } else {
-            source.inline.len_bytes()
-        };
-        selected.insert(source.node, slice_inline(&source.inline, start, end)?);
+        let (start_raw, start_ordinal, end_raw, end_ordinal, include_end_atoms) =
+            if absolute_index == head_index {
+                (
+                    head.text_offset().as_usize(),
+                    head.atom_index(),
+                    source.inline.len_bytes(),
+                    0,
+                    true,
+                )
+            } else if absolute_index == tail_index {
+                (
+                    0,
+                    0,
+                    tail.text_offset().as_usize(),
+                    tail.atom_index(),
+                    false,
+                )
+            } else {
+                (0, 0, source.inline.len_bytes(), 0, true)
+            };
+        selected.insert(
+            source.node,
+            slice_inline(
+                document,
+                &source.inline,
+                start_raw,
+                start_ordinal,
+                end_raw,
+                end_ordinal,
+                include_end_atoms,
+            )?,
+        );
     }
 
     let roots = project_roots(document, &selected);
@@ -112,13 +146,17 @@ fn collect_inline_blocks(document: &XiaomuDocument, id: NodeId, out: &mut Vec<So
 }
 
 fn slice_inline(
+    document: &XiaomuDocument,
     inline: &InlineContent,
-    start: usize,
-    end: usize,
-) -> Result<InlineContent, SessionError> {
-    inline.offset_at(start).map_err(SessionError::Core)?;
-    inline.offset_at(end).map_err(SessionError::Core)?;
-    if start > end {
+    start_raw: usize,
+    start_ordinal: usize,
+    end_raw: usize,
+    end_ordinal: usize,
+    include_end_atoms: bool,
+) -> Result<ClipboardInline, SessionError> {
+    inline.offset_at(start_raw).map_err(SessionError::Core)?;
+    inline.offset_at(end_raw).map_err(SessionError::Core)?;
+    if start_raw > end_raw {
         return Err(SessionError::SelectionInvalid);
     }
 
@@ -129,8 +167,8 @@ fn slice_inline(
         let run_end = run_start + run.len_bytes();
         cursor = run_end;
 
-        let overlap_start = start.max(run_start);
-        let overlap_end = end.min(run_end);
+        let overlap_start = start_raw.max(run_start);
+        let overlap_end = end_raw.min(run_end);
         if overlap_start >= overlap_end {
             continue;
         }
@@ -139,7 +177,66 @@ fn slice_inline(
         pieces.push(TextRun::new(text, run.marks().clone()).map_err(SessionError::Core)?);
     }
 
-    InlineContent::new(pieces).map_err(SessionError::Core)
+    // Detach the atoms inside the span, re-anchored to the slice start. The
+    // same-boundary rule mirrors the editing contract: atoms at or after the
+    // start gap and atoms before the end gap belong to the selection.
+    let text_view = InlineContent::new(pieces.iter().cloned()).map_err(SessionError::Core)?;
+    let mut atoms = Vec::new();
+    for placement in inline.atoms() {
+        let offset = placement.text_offset().as_usize();
+        let ordinal = same_boundary_ordinal(inline, placement.text_offset(), placement.atom());
+        let inside = if start_raw == end_raw {
+            offset == start_raw && ordinal >= start_ordinal && ordinal < end_ordinal
+        } else {
+            offset == start_raw && ordinal >= start_ordinal
+                || offset > start_raw
+                    && (offset < end_raw
+                        || (offset == end_raw && (include_end_atoms || ordinal < end_ordinal)))
+        };
+        if !inside {
+            continue;
+        }
+        let payload = document
+            .node(placement.atom())
+            .ok_or(SessionError::SelectionInvalid)?;
+        let content = payload
+            .content()
+            .as_inline_atom()
+            .ok_or(SessionError::SelectionInvalid)?;
+        atoms.push(ClipboardAtom::new(
+            text_view
+                .offset_at(offset - start_raw)
+                .map_err(SessionError::Core)?,
+            atom_kind_of(payload)?,
+            payload.attrs().clone(),
+            content.clone(),
+        ));
+    }
+
+    ClipboardInline::new(pieces, atoms).map_err(SessionError::Core)
+}
+
+fn atom_kind_of(
+    node: &xiaomu_core::document::Node,
+) -> Result<xiaomu_core::document::AtomKind, SessionError> {
+    match node.kind() {
+        NodeKind::InlineAtom(kind) => Ok(kind.clone()),
+        _ => Err(SessionError::SelectionInvalid),
+    }
+}
+
+fn same_boundary_ordinal(
+    inline: &InlineContent,
+    offset: xiaomu_core::text::TextOffset,
+    atom: NodeId,
+) -> usize {
+    inline
+        .atoms()
+        .iter()
+        .take_while(|placement| placement.text_offset() <= offset)
+        .filter(|placement| placement.text_offset() == offset)
+        .take_while(|placement| placement.atom() != atom)
+        .count()
 }
 
 #[cfg(test)]
@@ -244,12 +341,8 @@ mod tests {
         TextPoint::new(node, inline.offset_at(raw).unwrap(), CursorAffinity::Before)
     }
 
-    fn text(inline: &InlineContent) -> String {
-        inline
-            .runs()
-            .iter()
-            .map(|run| run.text().as_str())
-            .collect()
+    fn text(inline: &ClipboardInline) -> String {
+        inline.text()
     }
 
     #[test]

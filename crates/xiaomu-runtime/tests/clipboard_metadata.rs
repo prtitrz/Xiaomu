@@ -211,6 +211,6 @@ fn foreign_stale_and_unknown_metadata_fall_back_instead_of_parsing() {
     assert!(decode_metadata("abc", "{\"format\":\"other\"}").is_none());
     assert!(decode_metadata("abc", "not-json").is_none());
 
-    let unknown_version = metadata.replacen("\"version\":2", "\"version\":999", 1);
+    let unknown_version = metadata.replacen("\"version\":3", "\"version\":999", 1);
     assert!(decode_metadata("abc", &unknown_version).is_none());
 }

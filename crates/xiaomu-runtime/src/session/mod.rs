@@ -205,17 +205,27 @@ impl DocumentSession {
                 inline
                     .validate_offset(range.end())
                     .map_err(SessionError::Core)?;
-                let ime_selection = TextSelection::new(
-                    TextPoint::new(focus.node_id(), range.start(), focus.affinity()),
-                    TextPoint::new(focus.node_id(), range.end(), focus.affinity()),
-                );
-                intent::plan_insert_text(
-                    &inline,
-                    ime_selection,
-                    text,
-                    self.stored_marks.as_ref(),
-                    HistoryPolicy::Isolated,
-                )?
+                if inline.atoms().is_empty() {
+                    let ime_selection = TextSelection::new(
+                        TextPoint::new(focus.node_id(), range.start(), focus.affinity()),
+                        TextPoint::new(focus.node_id(), range.end(), focus.affinity()),
+                    );
+                    intent::plan_insert_text(
+                        &inline,
+                        ime_selection,
+                        text,
+                        self.stored_marks.as_ref(),
+                        HistoryPolicy::Isolated,
+                    )?
+                } else {
+                    atom_edit::plan_ime_commit(
+                        &inline,
+                        focus.node_id(),
+                        *range,
+                        text,
+                        self.stored_marks.as_ref(),
+                    )?
+                }
             }
             EditIntent::PasteText { text } => {
                 self.history.break_group();

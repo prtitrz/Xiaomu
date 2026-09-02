@@ -6,7 +6,7 @@
 //! seam. Intermediate snapshots never escape and the whole paste still records
 //! exactly one history entry.
 
-use xiaomu_core::document::{NodeContent, NodeId, XiaomuDocument};
+use xiaomu_core::document::{InlineContent, NodeContent, NodeId, XiaomuDocument};
 use xiaomu_core::transaction::{Transaction, TransactionStep};
 
 use crate::clipboard::{ClipboardNode, ClipboardNodeContent, ClipboardSlice};
@@ -31,6 +31,17 @@ pub(crate) fn plan_paste_hierarchy(
     selection: DocumentSelection,
     slice: &ClipboardSlice,
 ) -> Result<PlannedAction, SessionError> {
+    if slice
+        .blocks()
+        .iter()
+        .any(|block| !block.inline().atoms().is_empty())
+    {
+        // Hierarchical paste inserts nodes through staged transactions that
+        // cannot address a fresh block's identity inside the same stage; a
+        // fragment with atoms would have to be downgraded to its plain-text
+        // fallback, so it fails closed instead.
+        return Err(SessionError::ClipboardAtomsUnsupported);
+    }
     let last_offset = slice
         .blocks()
         .last()
@@ -52,7 +63,7 @@ pub(crate) fn plan_paste_hierarchy(
                 child_path: Vec::new(),
             },
             root,
-        );
+        )?;
     }
 
     Ok(PlannedAction::CommitStaged(staged))
@@ -107,12 +118,14 @@ fn append_node_stages(
     target: NodeId,
     location: FragmentLocation,
     node: ClipboardNode,
-) -> StagedPlan {
+) -> Result<StagedPlan, SessionError> {
     let insert_location = location.clone();
     let kind = node.kind().clone();
     let attrs = node.attrs().clone();
     let content = match node.content() {
-        ClipboardNodeContent::Inline(inline) => NodeContent::Inline(inline.clone()),
+        ClipboardNodeContent::Inline(inline) => NodeContent::Inline(
+            InlineContent::new(inline.runs().iter().cloned()).map_err(SessionError::Core)?,
+        ),
         ClipboardNodeContent::Children(_) => NodeContent::children([]),
     };
 
@@ -139,11 +152,11 @@ fn append_node_stages(
                     child_path,
                 },
                 child,
-            );
+            )?;
         }
     }
 
-    staged
+    Ok(staged)
 }
 
 fn insertion_point(

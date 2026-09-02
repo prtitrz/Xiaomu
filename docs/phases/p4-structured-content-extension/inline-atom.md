@@ -235,18 +235,18 @@ Split / Join 遇到 atom 时也必须有明确 placement migration；在规则�
 
 ## 7. Runtime editing semantics
 
-P4.3 负责：
+P4.3 已交付（PR #58 / #59 / #60）：
 
 ```text
-Left / Right 跨 atom 一次一个 unit
-Backspace / Delete 在 atom 邻接处原子删除
-selection 可跨 text + atom
-atom seam text input 使用 atom-aware replacement
-copy/cut 产生 detached atom fragment
-plain fallback 使用 fallback_text
-paste 恢复 identity-independent atom fragment
-undo / redo 恢复 selection
-IME composition 永远不能进入 atom 内部
+Left / Right 跨 atom 一次一个 unit                → Runtime move_caret 按 ordinal 步进
+Backspace / Delete 在 atom 邻接处原子删除          → RemoveInlineAtom / ReplaceInlineText 分派
+selection 可跨 text + atom                        → DocumentPosition::Inline 全链路
+atom seam text input 使用 atom-aware replacement  → ReplaceInlineText 消费 caret ordinal
+copy/cut 产生 detached atom fragment              → ClipboardInline / ClipboardAtom（无 NodeId）
+plain fallback 使用 fallback_text                 → plain text 在锚点拼接
+paste 恢复 identity-independent atom fragment     → InsertInlineAtom 分配 fresh identity
+undo / redo 恢复 selection                        → CaretAtInline / 精确 store round-trip
+IME composition 永远不能进入 atom 内部            → 内部 atom fail closed，边界 atom 存活
 ```
 
 clipboard fragment 不复制 live `NodeId`，粘贴时重新分配 canonical identity，保持 P3 structured clipboard 的 detached-value 原则。
