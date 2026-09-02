@@ -11,6 +11,7 @@
 //! at all. The session selection is valid for the current snapshot at every
 //! public read.
 
+mod atom_edit;
 mod caret;
 mod cross_block;
 mod history;
@@ -188,7 +189,7 @@ impl DocumentSession {
             }
         };
         let action = match intent {
-            EditIntent::InsertText { text } => intent::plan_text_input(
+            EditIntent::InsertText { text } => atom_edit::plan_text_input(
                 &inline,
                 anchor,
                 focus,
@@ -220,7 +221,7 @@ impl DocumentSession {
                 self.history.break_group();
                 intent::plan_insert_text(
                     &inline,
-                    intent::text_selection_from(anchor, focus)?,
+                    atom_edit::text_selection_from(anchor, focus)?,
                     text,
                     self.stored_marks.as_ref(),
                     HistoryPolicy::Isolated,
@@ -236,7 +237,7 @@ impl DocumentSession {
                 // then leave the list itself (outdent when nested, lift out
                 // at the top level).
                 if !at_block_start {
-                    intent::plan_backspace(&inline, anchor, focus)?
+                    atom_edit::plan_backspace(&inline, anchor, focus)?
                 } else {
                     match structure::plan_join_with_previous(&self.document, focus.node_id())? {
                         PlannedAction::NoChange => {
@@ -268,7 +269,7 @@ impl DocumentSession {
             }
             EditIntent::Delete => {
                 self.history.break_group();
-                intent::plan_delete(&inline, anchor, focus)?
+                atom_edit::plan_delete(&inline, anchor, focus)?
             }
             EditIntent::ToggleMark { mark } if self.selection.is_collapsed() => {
                 return self.toggle_stored_mark(&inline, mark);
