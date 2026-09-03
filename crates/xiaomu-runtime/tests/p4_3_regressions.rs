@@ -43,10 +43,7 @@ fn document_with_blocks(texts: &[&str]) -> (XiaomuDocument, Vec<NodeId>) {
             NodeContent::children(blocks.iter().copied()),
         )
         .unwrap();
-    (
-        XiaomuDocument::new(root, builder.finish()).unwrap(),
-        blocks,
-    )
+    (XiaomuDocument::new(root, builder.finish()).unwrap(), blocks)
 }
 
 fn point(node: NodeId, raw: usize, ordinal: usize) -> InlinePoint {
@@ -137,13 +134,16 @@ fn home_and_end_cross_outer_atom_gaps_at_same_text_offset() {
         .unwrap(),
         SessionOutcome::SelectionChanged
     );
-    assert_eq!((caret(&home).text_offset().as_usize(), caret(&home).atom_index()), (0, 0));
+    assert_eq!(
+        (
+            caret(&home).text_offset().as_usize(),
+            caret(&home).atom_index()
+        ),
+        (0, 0)
+    );
 
-    let mut end = DocumentSession::new(
-        document,
-        DocumentSelection::collapsed(position(node, 2, 0)),
-    )
-    .unwrap();
+    let mut end =
+        DocumentSession::new(document, DocumentSelection::collapsed(position(node, 2, 0))).unwrap();
     assert_eq!(
         end.apply_intent(&EditIntent::MoveCaret {
             caret_move: CaretMove::ToEnd,
@@ -152,7 +152,13 @@ fn home_and_end_cross_outer_atom_gaps_at_same_text_offset() {
         .unwrap(),
         SessionOutcome::SelectionChanged
     );
-    assert_eq!((caret(&end).text_offset().as_usize(), caret(&end).atom_index()), (2, 1));
+    assert_eq!(
+        (
+            caret(&end).text_offset().as_usize(),
+            caret(&end).atom_index()
+        ),
+        (2, 1)
+    );
 }
 
 #[test]
@@ -245,7 +251,13 @@ fn cross_block_delete_moves_unselected_tail_atoms_and_undo_restores_store() {
         .map(|placement| placement.atom())
         .collect();
     assert_eq!(seam_atoms, [head_keep, tail_keep]);
-    assert_eq!((caret(&session).text_offset().as_usize(), caret(&session).atom_index()), (1, 1));
+    assert_eq!(
+        (
+            caret(&session).text_offset().as_usize(),
+            caret(&session).atom_index()
+        ),
+        (1, 1)
+    );
 
     session.undo().unwrap();
     assert_eq!(session.document().store(), &original_store);
