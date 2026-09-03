@@ -326,9 +326,14 @@ impl DocumentView {
             .collect();
 
         let scroll_handle = self.scroll_handle.clone();
+        let atom_renderers = self.atom_renderers.clone();
         for (_, child) in &self.children {
             let scroll_handle = scroll_handle.clone();
-            child.update(cx, |view, _| view.attach_scroll_handle(scroll_handle));
+            let atom_renderers = atom_renderers.clone();
+            child.update(cx, |view, _| {
+                view.attach_scroll_handle(scroll_handle);
+                view.attach_atom_renderers(atom_renderers);
+            });
         }
         // Stale entries dropped with `pool`.
     }
