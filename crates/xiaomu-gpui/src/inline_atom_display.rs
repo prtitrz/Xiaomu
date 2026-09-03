@@ -94,7 +94,10 @@ impl InlineAtomDisplayProjection {
 
         for placement in inline.atoms() {
             let raw = placement.text_offset().as_usize();
-            if raw < canonical_cursor || canonical_text.validate_offset(placement.text_offset()).is_err()
+            if raw < canonical_cursor
+                || canonical_text
+                    .validate_offset(placement.text_offset())
+                    .is_err()
             {
                 return None;
             }
@@ -175,7 +178,11 @@ impl InlineAtomDisplayProjection {
     /// returned byte index is always a UTF-8 boundary in [`Self::display_text`].
     #[must_use]
     pub fn display_offset_for_inline_point(&self, point: InlinePoint) -> Option<usize> {
-        if point.node_id() != self.node || self.canonical_text.validate_offset(point.text_offset()).is_err()
+        if point.node_id() != self.node
+            || self
+                .canonical_text
+                .validate_offset(point.text_offset())
+                .is_err()
         {
             return None;
         }
@@ -220,7 +227,8 @@ impl InlineAtomDisplayProjection {
         }
 
         for atom in &self.atoms {
-            if display_offset > atom.display_range.start && display_offset < atom.display_range.end {
+            if display_offset > atom.display_range.start && display_offset < atom.display_range.end
+            {
                 return None;
             }
             if display_offset == atom.display_range.start {
@@ -300,7 +308,8 @@ mod tests {
                 NodeKind::Paragraph,
                 NodeAttrs::empty(),
                 NodeContent::Inline(
-                    InlineContent::new([TextRun::new("A中B", Default::default()).unwrap()]).unwrap(),
+                    InlineContent::new([TextRun::new("A中B", Default::default()).unwrap()])
+                        .unwrap(),
                 ),
             )
             .unwrap();
@@ -311,7 +320,10 @@ mod tests {
                 NodeContent::children([paragraph]),
             )
             .unwrap();
-        (XiaomuDocument::new(root, builder.finish()).unwrap(), paragraph)
+        (
+            XiaomuDocument::new(root, builder.finish()).unwrap(),
+            paragraph,
+        )
     }
 
     fn insert_atom(
@@ -330,15 +342,17 @@ mod tests {
             .unwrap()
             .offset_at(raw)
             .unwrap();
-        Transaction::new(TransactionOrigin::Extension("display-projection-test".into()))
-            .with_step(TransactionStep::InsertInlineAtom {
-                at: InlinePoint::new(paragraph, offset, ordinal, CursorAffinity::Before),
-                kind: AtomKind::new(kind).unwrap(),
-                attrs: NodeAttrs::empty(),
-                content: InlineAtomContent::new(fallback).unwrap(),
-            })
-            .apply(&document)
-            .unwrap()
+        Transaction::new(TransactionOrigin::Extension(
+            "display-projection-test".into(),
+        ))
+        .with_step(TransactionStep::InsertInlineAtom {
+            at: InlinePoint::new(paragraph, offset, ordinal, CursorAffinity::Before),
+            kind: AtomKind::new(kind).unwrap(),
+            attrs: NodeAttrs::empty(),
+            content: InlineAtomContent::new(fallback).unwrap(),
+        })
+        .apply(&document)
+        .unwrap()
     }
 
     fn projection() -> InlineAtomDisplayProjection {
@@ -347,19 +361,15 @@ mod tests {
         let document = insert_atom(document, paragraph, 1, 1, "reference", "R");
         let document = insert_atom(document, paragraph, 5, 0, "unknown", "!");
         let mut renderers = InlineAtomRendererRegistry::new();
-        renderers.register(
-            &AtomKind::new("mention").unwrap(),
-            Rc::new(WrappedRenderer),
-        );
-        renderers.register(
-            &AtomKind::new("reference").unwrap(),
-            Rc::new(EmptyRenderer),
-        );
+        renderers.register(&AtomKind::new("mention").unwrap(), Rc::new(WrappedRenderer));
+        renderers.register(&AtomKind::new("reference").unwrap(), Rc::new(EmptyRenderer));
         InlineAtomDisplayProjection::build(&document, paragraph, &renderers).unwrap()
     }
 
     fn offset(raw: usize) -> TextOffset {
-        TextBuffer::from_string("A中B".to_owned()).offset_at(raw).unwrap()
+        TextBuffer::from_string("A中B".to_owned())
+            .offset_at(raw)
+            .unwrap()
     }
 
     #[test]
@@ -394,7 +404,10 @@ mod tests {
         ];
 
         for (point, display) in cases {
-            assert_eq!(projection.display_offset_for_inline_point(point), Some(display));
+            assert_eq!(
+                projection.display_offset_for_inline_point(point),
+                Some(display)
+            );
             assert_eq!(
                 projection.inline_point_for_display_boundary(display, before),
                 Some(point)
@@ -405,7 +418,11 @@ mod tests {
     #[test]
     fn renderer_interior_is_not_a_canonical_caret_boundary() {
         let projection = projection();
-        assert!(projection.inline_point_for_display_boundary(3, CursorAffinity::Before).is_none());
+        assert!(
+            projection
+                .inline_point_for_display_boundary(3, CursorAffinity::Before)
+                .is_none()
+        );
         let atom = projection.atom_at_display_offset(3).unwrap();
         assert_eq!(atom.atom_index(), 0);
         assert_eq!(atom.text_offset().as_usize(), 1);
@@ -416,6 +433,9 @@ mod tests {
         let projection = projection();
         let reference = &projection.atoms()[1];
         assert_eq!(reference.display_range().len(), 1);
-        assert_eq!(&projection.display_text()[reference.display_range().clone()], "R");
+        assert_eq!(
+            &projection.display_text()[reference.display_range().clone()],
+            "R"
+        );
     }
 }
