@@ -212,17 +212,16 @@ mod tests {
             .unwrap();
 
         for (ordinal, kind, fallback) in [(0, "mention", "@A"), (1, "tag", "#B")] {
-            document = Transaction::new(TransactionOrigin::Extension(
-                "inline-selection-test".into(),
-            ))
-            .with_step(TransactionStep::InsertInlineAtom {
-                at: InlinePoint::new(paragraph, offset, ordinal, CursorAffinity::Before),
-                kind: AtomKind::new(kind).unwrap(),
-                attrs: NodeAttrs::empty(),
-                content: InlineAtomContent::new(fallback).unwrap(),
-            })
-            .apply(&document)
-            .unwrap();
+            document =
+                Transaction::new(TransactionOrigin::Extension("inline-selection-test".into()))
+                    .with_step(TransactionStep::InsertInlineAtom {
+                        at: InlinePoint::new(paragraph, offset, ordinal, CursorAffinity::Before),
+                        kind: AtomKind::new(kind).unwrap(),
+                        attrs: NodeAttrs::empty(),
+                        content: InlineAtomContent::new(fallback).unwrap(),
+                    })
+                    .apply(&document)
+                    .unwrap();
         }
 
         (document, paragraph, offset)
