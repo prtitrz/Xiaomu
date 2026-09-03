@@ -2,145 +2,206 @@
 
 ## Current status
 
-P3 已于 2026-09-01 完成 Windows 最终实机 Gate，并通过 PR #53 squash merge 到 `main`（`f1167e97f2cac852fc56933c631b37978adcac9f`），阶段状态 `P3 = CLOSED`。
-
-P4 统一为两条连续子线：
+P0 / P1 / P2 / P3 已关闭。P4 统一为两条连续子线：
 
 ```text
 P4A Inline Atom / Extension Seam  ← 当前施工
 P4B Atomic Block / Media          ← P4A 后继续
 ```
 
-此前两个并列目录 `p4-inline-atom-extension` 与 `p4-atomic-media-extension` 已收敛为统一目录 `p4-structured-content-extension`，避免出现两套冲突的 P4.1/P4.2 编号。
-
-P4.1 与 P4.2A/P4.2B 已分别通过 PR #54、#55、#56 squash merge 到 `main`（2026-09-01），早期 Draft PR #50/#51/#52 已由上述重放 PR 取代并关闭。
-
-当前 P4.2 收尾分支 / PR：
+截至 2026-09-03：
 
 ```text
-feat/p4.2-atom-aware-replacement
-PR #57（atom-aware text replacement contract + mapping/inverse）
+P4.1 Inline Coordinate Contract   CLOSED
+P4.2 Canonical Inline Atom        CLOSED
+P4.3 Runtime Atom Editing         CLOSED pending PR #63 merge
+P4.4 GPUI Renderer / Capability   CURRENT
+P4.5 P4A Integration Gate         NEXT
 ```
+
+P4.3 在 PR #58 / #59 / #60 建立主体能力后，经审计修复 PR #62 与 hierarchical structured-paste 收尾 PR #63 补齐边界矩阵。PR #63 current-head CI #354 已通过 Ubuntu、macOS、Windows、policy 与汇总 `CI Success`。
 
 ## P4A — Inline Atom / Extension Seam
 
-### P4.1 Inline Coordinate Contract（CLOSED，PR #54）
+### P4.1 Inline Coordinate Contract — CLOSED
 
-- [x] P4 overall design
-- [x] mixed-inline coordinate ADR 0005
-- [x] `InlinePoint` Core value type
-- [x] pure-text validation / conversion
-- [x] Runtime `DocumentPosition` compatibility seam
-- [x] Core `StepMap / ChangeMap` mapping seam
-- [x] GPUI `DocumentView` focus/selection projection seam
-- [x] P0/P1/P2/P3 full regression
-- [x] root `architecture.md / planning.md` sync after P3 closeout rebase
-- [x] CI #320 full success
-- [x] bookkeeping head CI #321 full success
-- [x] unified-P4 docs current-head CI Success（merge Gate，PR #54）
+已交付：
 
-Gate：无 atom 文档零语义回归；`TextOffset` 继续严格表示 UTF-8 byte coordinate；P4.1 不引入 sentinel / fake byte；canonical atom placement 建立前非零 ordinal fail closed。
+- [x] `InlinePoint(node_id, text_offset, atom_index, affinity)`
+- [x] `TextOffset` 继续严格表示 UTF-8 text byte offset
+- [x] Core `StepMap / ChangeMap` mixed-inline mapping seam
+- [x] Runtime `DocumentPosition::Inline`
+- [x] GPUI focus / selection compatibility seam
+- [x] ADR 0005
+- [x] P0-P3 regression
 
-实现事实：
+核心约束：同一 text boundary 上的多个 atom 通过 `atom_index` 区分 caret gap；不使用 sentinel、fake byte，也不滥用 `CursorAffinity` 表示 atom order。
 
-```text
-TextPoint
-↕ exact while atom_index == 0
-InlinePoint(node_id, text_offset, atom_index, affinity)
+### P4.2 Canonical Inline Atom — CLOSED
 
-Core
-  InlinePoint::validate
-  StepMap::map_inline_point
-  ChangeMap::map_inline_point
-
-Runtime
-  DocumentPosition::from_inline_point
-  DocumentPosition::as_inline_point
-  DocumentSelection::from_inline_points
-
-GPUI
-  DocumentView::inline_focus_point
-  DocumentView::inline_selection_points
-```
-
-关键约束：atom seam 两侧可能共享同一个 `TextOffset`，旧 `ReplaceText(TextRange)` 无法区分“在 atom 前输入”和“在 atom 后输入”。后续 mutation / mapping 必须消费 `InlinePoint.atom_index`。
-
-### P4.2 Canonical Inline Atom（Core 事实层 CLOSED；运行时消费进入 P4.3）
+已交付：
 
 - [x] `AtomKind`
-- [x] `InlineAtomContent`
+- [x] `InlineAtomContent { fallback_text }`
 - [x] stable `NodeId` atom identity
-- [x] `InlineContent` ordered atom placement
+- [x] `InlineContent` ordered atom placements
 - [x] full-tree validation / parent lookup
-- [x] `InsertInlineAtom` / `RemoveInlineAtom`（P4.2 transaction slice，PR #56）
-- [x] atom-aware text replacement contract（`ReplaceInlineText`，PR #57）
-- [x] mapping / inverse（`InlineTextReplaced` StepMap + exact inverse，PR #57）
-- [x] adjacent atom placement invariant tests
+- [x] `InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom`
+- [x] `ReplaceInlineText { at: InlinePoint, end, replacement }`
+- [x] mixed-inline mapping / inverse
+- [x] adjacent atom invariant / undo round-trip
 
-已成立的 canonical value-layer 事实：
+Canonical 事实：
 
 ```text
 NodeKind::InlineAtom(AtomKind)
 NodeContent::InlineAtom(InlineAtomContent)
 InlineAtomPlacement(atom NodeId, text_offset)
-InlineContent = normalized runs + ordered atom placements
+InlineContent = normalized text runs + ordered atom placements
 ```
 
-P4.2 replacement contract 语义（ADR 0005 Transaction consequence 的落地）：
+Core `SplitNode / JoinNodes` 遇 atom 继续 fail closed。Runtime 需要结构迁移时必须显式搬运 atom identity 与 placement，不能通过放宽 Core 规则掩盖语义。
+
+### P4.3 Runtime Atom Editing — CLOSED pending PR #63 merge
+
+已交付并通过回归：
+
+- [x] Left / Right one-caret-unit atom navigation
+- [x] Home / End 正确处理 leading / trailing atom outer gap
+- [x] atomic Backspace / Delete
+- [x] mixed text + atom selection
+- [x] atom-aware text input
+- [x] same-boundary adjacent atom editing
+- [x] cross-block atom selection / delete / cut
+- [x] detached `ClipboardInline / ClipboardAtom`
+- [x] plain-text fallback 使用 `fallback_text`
+- [x] single-block structured paste 分配 fresh atom identity
+- [x] Unicode / trailing atom paste 使用 post-edit text coordinate
+- [x] cross-block clipboard 保留边界 atom
+- [x] cross-block paste 使用 atom-aware deletion planner
+- [x] hierarchical structured paste 支持 atom-bearing target
+- [x] hierarchical clipboard leaf 支持 detached atom materialization
+- [x] IME composition 不进入 atom 内部，边界 atom 保持
+- [x] undo / redo 精确恢复 selection、store 与 stable identity
+
+P4.3 的结构编辑原则：
 
 ```text
-ReplaceInlineText { at: InlinePoint, end: TextOffset, replacement }
-  - 取代 seam 上歧义的裸 ReplaceText；旧 ReplaceText 在含 atom 的
-    closed boundary span 上继续 fail closed
-  - at.atom_index() 之前的同界 atom 保持锚点；空 range 时其后的
-    seam atom 移到插入文本之后
-  - 非 empty range 的替换区域含 atom 时 fail closed
-    （caller 必须先用 RemoveInlineAtom 显式删除）
-  - end 锚定处及其后的 atom 按 byte-length delta 平移
-  - StepMap::InlineTextReplaced 消费 seam ordinal 做 mixed-inline
-    mapping；inverse 同为 atom-aware 步骤并精确恢复 store
+Core SplitNode / JoinNodes(atom-bearing) = fail closed
+
+Runtime cross-block / hierarchical command
+  → staged transaction
+  → RemoveInlineAtom + RestoreInlineAtom 显式搬迁 stable NodeId
+  → ReplaceInlineText 处理 text seam
+  → intermediate snapshot 不对 session 可见
+  → 整个命令仅形成一个 history entry
 ```
 
-P4.2 Gate：相邻两个 atom 可稳定构造、validate、insert/remove、undo/redo；不存在 sentinel text；atom seam 文本 mutation 不丢失 `atom_index`。Gate 已由 PR #56 / #57 的 transaction、mapping 与 undo round-trip 测试覆盖。`SplitNode / JoinNodes` 遇 atom 仍 fail closed（设计允许，规则未证明前不 ad-hoc 修补）。
+PR 轨迹：
 
-### P4.3 Runtime Atom Editing
+```text
+#58 mixed-inline session position / navigation
+#59 atom editing semantics
+#60 clipboard / IME / history
+#62 P4.3 audit regressions + atom-aware cross-block deletion
+#63 hierarchical structured paste + atom-aware staged split
+```
 
-- [x] one-caret-unit Left / Right（Runtime `move_caret` 按 atom ordinal + scalar boundary 步进）
-- [ ] atomic Backspace / Delete
-- [ ] mixed text + atom selection（存储与 mapping 已升级；编辑语义随后续切片）
-- [ ] atom-aware text input
+### P4.4 GPUI Renderer / Host Capability — CURRENT
 
-P4.3a 已交付（PR #58）：Runtime `DocumentPosition::Text(TextPoint)` 升级为 `DocumentPosition::Inline(InlinePoint)`，caret 可停在同一 boundary 的任意 canonical gap；`from_inline_point` 不再丢弃 ordinal，ordinal 合法性统一由 `DocumentSelection::validate` 对 snapshot 校验；`DocumentSelection::map_through` 对 inline endpoint 消费 `ChangeMap::map_inline_point`；document-order 排序把 `atom_index` 计入 seam gap。planner（intent/cross_block/paste）仍走 text-only 路径，seam 上的编辑在下一切片切到 `ReplaceInlineText`。
-- [ ] structured clipboard atom fragment
-- [ ] plain fallback via `fallback_text`
-- [ ] IME cannot enter atom
-- [ ] history / undo / redo selection regression
+已交付：
 
-### P4.4 GPUI Renderer / Host Capability
-
-- [x] `InlineAtomRendererRegistry`（PR #61：`AtomKind` -> renderer，只消费 canonical 数据）
+- [x] `InlineAtomRendererRegistry`
+- [x] renderer 只消费 canonical `InlineAtomView`
+- [x] missing renderer deterministic fallback 到 `fallback_text`
+- [x] accessibility fallback：atom 是携带 `fallback_text` 的非编辑子节点
+- [ ] mixed-inline display projection
+- [ ] caret / selection display mapping
+- [ ] layout / paint
+- [ ] atom hit-test
 - [ ] demo atom renderer
-- [ ] mixed inline layout / paint
-- [ ] hit-test
-- [x] accessibility fallback（atom 投影为携带 `fallback_text` 的非可编辑子节点）
 - [ ] host capability callback
-- [x] missing renderer fallback（确定性回落到 `FallbackAtomRenderer`）
+- [ ] harness demo
 
-P4.4 剩余切片的实施计划（调研已定稿）：
+#### P4.4b Mixed-inline display projection
 
-- **P4.4b Mixed inline layout / paint / hit-test**：`project_display_content` 在每个 atom placement 锚点 splice `renderer.display_text()`（默认 fallback_text）并记录 per-atom display byte range；`ParagraphElement` prepaint/paint 用 `BlockTextLayout::position_for_index` 量取 chip 包围盒并先于 line paint 画 chip 底色/描边，发布到新的 per-block atom-bounds registry（仿 `BlockBoundsRegistry`）；`mouse.rs hit_test` 先查 atom 包围盒，命中时落到 seam gap（`DocumentPosition::Inline(InlinePoint{node, placement.text_offset, atom_index(按点击侧), affinity})`）；`DocumentView::place / move_focus_to / set_selection` 接受 inline point。注意 `LayoutCacheKey` 仍以 epoch 为主，registry 变更需 bump epoch 或注明缓存语义。
-- **P4.4c Seam navigation + host capability + harness demo**：`visual_focus_location` / `horizontal_target` 保留 `InlinePoint`（不再 `to_text_point()` fail closed），Left/Right 跨 atom 落到 canonical gap；`EditorHooks` 增加 host capability 回调（`InlineAtomHostCapability::atom_action(AtomAction{node, kind key, action key, attrs})`），demo renderer 的动作经此 seam 上抛，宿主业务类型不进 Core/Runtime；`examples/editor_harness` 接 mention demo atom（in-memory fixture 或扩展 harness 格式使其支持 atom，当前 fail closed）。
-- Gate 后进入 P4.5 Integration Gate（P4A 收口），随后 P4B。
+P4.4b 必须先建立显式坐标投影，再把 renderer text 接入 GPUI layout。禁止假设：
+
+```text
+display byte index == canonical UTF-8 TextOffset
+```
+
+atom 不占 canonical text byte，但 renderer display text 会占 display byte。直接把 `renderer.display_text()` splice 进 paragraph string 后继续使用 canonical byte 做 caret / selection / hit-test，会让第一个 atom 之后的所有几何坐标漂移。
+
+目标 contract：
+
+```text
+canonical InlinePoint
+        ↕
+MixedInlineDisplayProjection
+        ↕
+display byte boundary
+        ↓
+GPUI wrapped layout / paint / hit-test
+```
+
+建议 projection 至少携带：
+
+```text
+DisplayProjection
+  text
+  styled text segments
+  atom display spans
+  canonical-gap -> display-boundary mapping
+  display-boundary -> InlinePoint mapping
+
+DisplayAtomSpan
+  node_id
+  canonical text_offset
+  atom_index
+  display byte range
+```
+
+同一 canonical boundary 上有 N 个相邻 atom 时：
+
+```text
+ordinal 0 → first atom display span 之前
+ordinal 1 → atom 1 / atom 2 之间
+...
+ordinal N → last atom display span 之后
+```
+
+P4.4b 实施顺序：
+
+1. [ ] 建立纯 GPUI-local `MixedInlineDisplayProjection` 与映射测试。
+2. [ ] `ParagraphElement` layout 使用 projection text，不再把 canonical byte 直接传给 display geometry。
+3. [ ] caret / selection 先从 `InlinePoint` 投影成 display byte，再访问 `BlockTextLayout`。
+4. [ ] pointer hit-test 从 display byte 反投影到 `InlinePoint`，atom span 按点击左右半区落到前/后 gap。
+5. [ ] platform UTF-16 / input-handler range 明确区分 display range 与 canonical range。
+6. [ ] projection 稳定后再增加 chip paint / atom bounds registry。
+
+自定义 renderer 若返回空 display text，projection 必须 fail soft 到非空 `fallback_text`，避免 atom 成为零宽且无法命中的 canonical unit。
+
+#### P4.4c Host capability / demo
+
+- [ ] `visual_focus_location / horizontal_target` 全链路保留 `InlinePoint`
+- [ ] host capability action 只传 stable kind / action key / attrs / NodeId
+- [ ] 宿主业务类型不得进入 Core / Runtime
+- [ ] editor harness 接入至少一种 demo atom
+- [ ] renderer / capability 多 editor 隔离
+
+P4.4 Gate：未知 renderer fail soft；相邻 atom 的 caret、selection、layout 与 hit-test 一致；宿主动作不把 business type 带进 Core / Runtime。
 
 ### P4.5 Inline Atom Integration Gate
 
 - [ ] realistic extension fixture
 - [ ] multi-editor extension isolation
 - [ ] Unicode + adjacent atom matrix
+- [ ] composition + boundary atom matrix
 - [ ] inline-atom Windows real-machine Gate
-- [ ] P4A docs sync
+- [ ] P4A root docs sync
 - [ ] source-size / dependency / fmt / Clippy / tests
-- [ ] P4A CI Success
+- [ ] three-platform `CI Success`
 
 P4.5 通过只代表 **P4A CLOSED**，随后继续 P4B，不关闭整个 P4。
 
@@ -149,18 +210,18 @@ P4.5 通过只代表 **P4A CLOSED**，随后继续 P4B，不关闭整个 P4。
 ### P4.6 Atomic Block Contract
 
 - [ ] editable text + atomic traversal model
-- [ ] `NodeSelection` / atomic position contract
+- [ ] `NodeSelection / atomic position` contract
 - [ ] HorizontalRule keyboard traversal
-- [ ] atomic click/select/delete/copy
+- [ ] atomic click / select / delete / copy
 - [ ] mapping / selection fallback
 - [ ] undo / redo invariant tests
 
 ### P4.7 Image Canonical Model / AssetService
 
-- [ ] Image attrs / typed accessor contract
+- [ ] typed Image attrs
 - [ ] frontend-neutral `AssetRef / ImageSource`
 - [ ] image insertion command
-- [ ] `AssetService` host capability seam
+- [ ] `AssetService` capability seam
 - [ ] host-neutral resolve failure model
 - [ ] no local absolute-path canonical identity
 
@@ -169,9 +230,9 @@ P4.5 通过只代表 **P4A CLOSED**，随后继续 P4B，不关闭整个 P4。
 - [ ] async asset resolve
 - [ ] loading / error placeholder
 - [ ] image layout / paint / hit-test
-- [ ] aspect-ratio / intrinsic-size handling
-- [ ] click-to-select image
-- [ ] text ↔ image keyboard traversal
+- [ ] aspect ratio / intrinsic size
+- [ ] mouse + keyboard selection
+- [ ] text ↔ image traversal
 - [ ] Backspace / Delete / undo / redo
 - [ ] accessibility fallback
 
@@ -180,47 +241,44 @@ P4.5 通过只代表 **P4A CLOSED**，随后继续 P4B，不关闭整个 P4。
 - [ ] atomic/image structured clipboard
 - [ ] semantic plain-text / URL fallback
 - [ ] baseline built-in Markdown round-trip
-- [ ] HorizontalRule / Image / marks / links preservation
 - [ ] unknown extension/image attrs preservation
-- [ ] realistic media + extension fixture
+- [ ] realistic media fixture
 - [ ] multi-editor isolation
 - [ ] Unicode + atom + atomic matrix
 - [ ] Windows final real-machine Gate
 - [ ] architecture / planning / progress final sync
-- [ ] source-size / dependency / fmt / Clippy / tests
-- [ ] final CI Success
+- [ ] final three-platform `CI Success`
 
 ## P4 Phase Gate
 
 ### Inline Atom
 
-- [ ] demo atom is a true one-caret-unit canonical value
-- [ ] two adjacent atoms are navigable and independently deletable
-- [ ] atom seam text input preserves `(text_offset, atom_index)` semantics
-- [ ] copy/cut/paste/undo/redo preserve atom semantics
-- [ ] unknown/missing renderer has deterministic fallback
-- [ ] extension action crosses a host capability seam without host business types entering Core/Runtime
-- [ ] accessibility always has `fallback_text`
+- [x] true canonical one-caret-unit atom model
+- [x] adjacent atoms independently navigable / deletable at Runtime
+- [x] atom seam text input preserves `(text_offset, atom_index)`
+- [x] Runtime copy / cut / paste / undo / redo preserve atom semantics
+- [x] accessibility always has `fallback_text`
+- [ ] GPUI mixed-inline projection / hit-test Gate
+- [ ] unknown/missing renderer visual fallback Gate
+- [ ] extension host capability Gate
 
 ### Atomic / Media
 
-- [ ] text ↔ HorizontalRule ↔ text supports stable keyboard navigation and `NodeSelection`
-- [ ] host can insert an Image through public contract
-- [ ] canonical Image stores only frontend-neutral / host-neutral semantics
-- [ ] `AssetService` resolves asynchronously with loading/error fallback
-- [ ] Image supports mouse + keyboard selection
-- [ ] text ↔ Image ↔ text navigation is stable
-- [ ] Backspace/Delete/copy/cut/undo/redo semantics are explicit for atomic/image
-- [ ] structured clipboard carries atomic image payload
-- [ ] baseline Markdown round-trip does not silently lose supported built-in semantics
-- [ ] unknown extension/image attrs preservation passes
+- [ ] text ↔ HorizontalRule ↔ text stable traversal
+- [ ] host can insert Image through public contract
+- [ ] canonical Image stores host-neutral semantics only
+- [ ] `AssetService` async resolve + fallback
+- [ ] Image mouse / keyboard selection
+- [ ] text ↔ Image traversal
+- [ ] atomic/image clipboard + undo/redo
+- [ ] Markdown supported built-ins round-trip
 
 ### Regression / integration
 
-- [x] existing P0-P3 behavior remains green on P4.1 heads
-- [ ] P4A integration Gate passed
-- [ ] P4B integration Gate passed
-- [ ] final Windows real-machine Gate passed
-- [ ] final three-platform CI Success
+- [x] P0-P3 regression remains green through P4.3
+- [ ] P4A integration Gate
+- [ ] P4B integration Gate
+- [ ] final Windows real-machine Gate
+- [ ] final three-platform `CI Success`
 
-只有上述三组 Gate 全部成立，才允许 **P4 = CLOSED** 并进入 P5 Table。
+只有上述 Gate 完成，才允许 **P4 = CLOSED** 并进入 P5 Table。
