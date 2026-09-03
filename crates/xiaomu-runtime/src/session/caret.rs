@@ -73,20 +73,14 @@ impl DocumentSession {
                 }
             }
             CaretMove::ToStart => {
-                (current != 0).then_some(InlinePoint::new(node, TextOffset::ZERO, 0, affinity))
+                (current != 0 || ordinal != 0)
+                    .then_some(InlinePoint::new(node, TextOffset::ZERO, 0, affinity))
             }
             CaretMove::ToEnd => {
-                if current == text.len() {
-                    None
-                } else {
-                    let end = inline.offset_at(text.len()).map_err(SessionError::Core)?;
-                    Some(InlinePoint::new(
-                        node,
-                        end,
-                        inline.atom_count_at(end),
-                        affinity,
-                    ))
-                }
+                let end = inline.offset_at(text.len()).map_err(SessionError::Core)?;
+                let end_ordinal = inline.atom_count_at(end);
+                (current != text.len() || ordinal != end_ordinal)
+                    .then_some(InlinePoint::new(node, end, end_ordinal, affinity))
             }
         };
 
