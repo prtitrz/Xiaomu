@@ -1,9 +1,9 @@
 //! Visual projection for one mixed-inline paragraph.
 //!
 //! Platform text input intentionally keeps using the canonical editable-text
-//! projection from [`project_display_content`]. Layout and paint use the
-//! atom-aware projection in this module so renderer bytes never leak back into
-//! Core coordinates.
+//! projection owned by [`super::ParagraphView::display_content`]. Layout and
+//! paint use the atom-aware projection in this module so renderer bytes never
+//! leak back into Core coordinates.
 
 use xiaomu_core::document::{InlineContent, MarkKind, NodeId};
 use xiaomu_core::selection::InlinePoint;
@@ -12,61 +12,6 @@ use xiaomu_runtime::session::DocumentPosition;
 use crate::inline_atom_display::InlineAtomDisplayProjection;
 
 use super::{DisplaySegment, ParagraphView, SelectionProjection};
-
-pub(super) fn project_display_content(
-    inline: &InlineContent,
-    composition: Option<(std::ops::Range<usize>, &str)>,
-) -> (String, Vec<DisplaySegment>) {
-    let (base_start, base_end, preedit) = composition
-        .as_ref()
-        .map(|(range, text)| (range.start, range.end, *text))
-        .unwrap_or((usize::MAX, usize::MAX, ""));
-    let replaced_len = base_end.saturating_sub(base_start);
-
-    let mut segments = Vec::new();
-    let mut cursor = 0usize;
-    for run in inline.runs() {
-        let run_start = cursor;
-        let run_end = run_start + run.len_bytes();
-        cursor = run_end;
-
-        let style = style_for_run(run.marks());
-        let mut push_piece = |start: usize, end: usize, display_start: usize| {
-            if start < end {
-                segments.push(DisplaySegment {
-                    start: display_start,
-                    text: run.text().as_str()[start - run_start..end - run_start].to_owned(),
-                    bold: style.0,
-                    italic: style.1,
-                    underline: style.2,
-                    strike: style.3,
-                    code: style.4,
-                });
-            }
-        };
-
-        let prefix_end = run_end.min(base_start);
-        push_piece(run_start, prefix_end, run_start);
-
-        let suffix_start = run_start.max(base_end);
-        let suffix_display_start = suffix_start.saturating_sub(replaced_len) + preedit.len();
-        push_piece(suffix_start, run_end, suffix_display_start);
-    }
-
-    if let Some((range, text)) = composition {
-        segments.push(DisplaySegment {
-            start: range.start,
-            text: text.to_owned(),
-            bold: false,
-            italic: false,
-            underline: true,
-            strike: false,
-            code: false,
-        });
-    }
-
-    normalize_segments(segments)
-}
 
 fn project_atom_display_content(
     inline: &InlineContent,
@@ -149,7 +94,6 @@ fn style_for_run(marks: &xiaomu_core::document::MarkSet) -> (bool, bool, bool, b
 }
 
 fn normalize_segments(mut segments: Vec<DisplaySegment>) -> (String, Vec<DisplaySegment>) {
-    segments.sort_by_key(|segment| segment.start);
     let mut text = String::new();
     for segment in &mut segments {
         segment.start = text.len();
@@ -159,19 +103,6 @@ fn normalize_segments(mut segments: Vec<DisplaySegment>) -> (String, Vec<Display
 }
 
 impl ParagraphView {
-    /// Builds the canonical editable-text projection used by platform input.
-    #[must_use]
-    pub(crate) fn display_content(&self) -> (String, Vec<DisplaySegment>) {
-        let Some(inline) = self.inline() else {
-            return (String::new(), Vec::new());
-        };
-        let composition = self
-            .composition
-            .as_ref()
-            .map(|state| (state.base_range(), state.preedit()));
-        project_display_content(&inline, composition)
-    }
-
     /// Builds the visual layout projection.
     ///
     /// During IME composition the existing editable projection remains the
@@ -186,7 +117,7 @@ impl ParagraphView {
             return (String::new(), Vec::new());
         };
         let Some(projection) = self.atom_display_projection() else {
-            return project_display_content(&inline, None);
+            return self.display_content();
         };
         project_atom_display_content(&inline, &projection)
     }
@@ -204,7 +135,7 @@ impl ParagraphView {
     /// their full [`InlinePoint`] ordinal, so a selection spanning one atom at a
     /// zero-byte canonical seam still paints the renderer span.
     #[must_use]
-    pub(crate) fn projected_selection(&self, order: &[NodeId]) -> SelectionProjection {
+    pub(crate) fn projected_display_selection(&self, order: &[NodeId]) -> SelectionProjection {
         let session = self.session.borrow();
         let selection = session.selection();
         let document = session.document();
