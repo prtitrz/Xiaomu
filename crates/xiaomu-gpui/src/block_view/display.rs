@@ -6,7 +6,7 @@
 //! leak back into Core coordinates.
 
 use xiaomu_core::document::{InlineContent, MarkKind, NodeId};
-use xiaomu_core::selection::{CursorAffinity, InlinePoint};
+use xiaomu_core::selection::CursorAffinity;
 use xiaomu_runtime::session::DocumentPosition;
 
 use crate::inline_atom_display::InlineAtomDisplayProjection;
@@ -120,6 +120,9 @@ impl ParagraphView {
         let Some(projection) = self.atom_display_projection() else {
             return self.display_content();
         };
+        if projection.atoms().is_empty() {
+            return self.display_content();
+        }
         project_atom_display_content(&inline, &projection)
     }
 
@@ -133,14 +136,19 @@ impl ParagraphView {
     /// Projects the document selection onto this block's visual display bytes.
     ///
     /// `order` lists inline-bearing nodes in document order. Endpoints retain
-    /// their full [`InlinePoint`] ordinal, so a selection spanning one atom at a
+    /// their full mixed-inline ordinal, so a selection spanning one atom at a
     /// zero-byte canonical seam still paints the renderer span.
     #[must_use]
     pub(crate) fn projected_display_selection(&self, order: &[NodeId]) -> SelectionProjection {
+        let projection = match self.atom_display_projection() {
+            Some(projection) if !projection.atoms().is_empty() => projection,
+            Some(_) => return self.projected_selection(order),
+            None => return SelectionProjection::None,
+        };
+
         let session = self.session.borrow();
         let selection = session.selection();
         let document = session.document();
-
         let endpoint = |position: DocumentPosition| match position {
             DocumentPosition::Inline(point) => Some(point),
             DocumentPosition::Gap(_) => None,
@@ -167,9 +175,6 @@ impl ParagraphView {
             return SelectionProjection::None;
         }
 
-        let Some(projection) = self.atom_display_projection() else {
-            return SelectionProjection::None;
-        };
         let display_len = projection.display_text().len();
         let start = if head.node_id() == self.node {
             let Some(start) = projection.display_offset_for_inline_point(head) else {
@@ -201,13 +206,15 @@ impl ParagraphView {
     /// Projects the focused mixed-inline caret into the visual byte space.
     #[must_use]
     pub(crate) fn display_focus_caret(&self) -> Option<(usize, CursorAffinity)> {
+        let projection = self.atom_display_projection()?;
+        if projection.atoms().is_empty() {
+            return self.focus_caret();
+        }
         let point = match self.session.borrow().selection().focus() {
             DocumentPosition::Inline(point) if point.node_id() == self.node => point,
             _ => return None,
         };
-        let display = self
-            .atom_display_projection()?
-            .display_offset_for_inline_point(point)?;
+        let display = projection.display_offset_for_inline_point(point)?;
         Some((display, point.affinity()))
     }
 }
