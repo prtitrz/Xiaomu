@@ -11,7 +11,7 @@ use std::ops::Range;
 
 use xiaomu_core::document::{NodeId, NodeKind, XiaomuDocument};
 use xiaomu_core::selection::{CursorAffinity, InlinePoint};
-use xiaomu_core::text::TextOffset;
+use xiaomu_core::text::{TextBuffer, TextOffset};
 
 use crate::inline_atom::{InlineAtomRendererRegistry, InlineAtomView};
 
@@ -59,7 +59,7 @@ impl InlineAtomDisplaySpan {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InlineAtomDisplayProjection {
     node: NodeId,
-    canonical_text: String,
+    canonical_text: TextBuffer,
     display_text: String,
     atoms: Vec<InlineAtomDisplaySpan>,
 }
@@ -78,11 +78,13 @@ impl InlineAtomDisplayProjection {
         renderers: &InlineAtomRendererRegistry,
     ) -> Option<Self> {
         let inline = document.node(node)?.content().as_inline()?;
-        let canonical_text: String = inline
-            .runs()
-            .iter()
-            .map(|run| run.text().as_str())
-            .collect();
+        let canonical_text = TextBuffer::from_string(
+            inline
+                .runs()
+                .iter()
+                .map(|run| run.text().as_str())
+                .collect(),
+        );
 
         let mut display_text = String::new();
         let mut atoms = Vec::with_capacity(inline.atoms().len());
@@ -92,10 +94,11 @@ impl InlineAtomDisplayProjection {
 
         for placement in inline.atoms() {
             let raw = placement.text_offset().as_usize();
-            if raw < canonical_cursor || !canonical_text.is_char_boundary(raw) {
+            if raw < canonical_cursor || canonical_text.validate_offset(placement.text_offset()).is_err()
+            {
                 return None;
             }
-            display_text.push_str(&canonical_text[canonical_cursor..raw]);
+            display_text.push_str(&canonical_text.as_str()[canonical_cursor..raw]);
             canonical_cursor = raw;
 
             if previous_offset == Some(raw) {
@@ -133,7 +136,7 @@ impl InlineAtomDisplayProjection {
             });
         }
 
-        display_text.push_str(&canonical_text[canonical_cursor..]);
+        display_text.push_str(&canonical_text.as_str()[canonical_cursor..]);
         Some(Self {
             node,
             canonical_text,
@@ -151,7 +154,7 @@ impl InlineAtomDisplayProjection {
     /// Returns canonical UTF-8 text without atom renderer output.
     #[must_use]
     pub fn canonical_text(&self) -> &str {
-        &self.canonical_text
+        self.canonical_text.as_str()
     }
 
     /// Returns the shaped display text including atom renderer output.
@@ -172,13 +175,11 @@ impl InlineAtomDisplayProjection {
     /// returned byte index is always a UTF-8 boundary in [`Self::display_text`].
     #[must_use]
     pub fn display_offset_for_inline_point(&self, point: InlinePoint) -> Option<usize> {
-        if point.node_id() != self.node {
+        if point.node_id() != self.node || self.canonical_text.validate_offset(point.text_offset()).is_err()
+        {
             return None;
         }
         let raw = point.text_offset().as_usize();
-        if raw > self.canonical_text.len() || !self.canonical_text.is_char_boundary(raw) {
-            return None;
-        }
         let atom_count = self
             .atoms
             .iter()
@@ -247,15 +248,8 @@ impl InlineAtomDisplayProjection {
             .map(|atom| atom.display_range.len())
             .sum();
         let raw = display_offset.checked_sub(inserted_before)?;
-        if raw > self.canonical_text.len() || !self.canonical_text.is_char_boundary(raw) {
-            return None;
-        }
-        Some(InlinePoint::new(
-            self.node,
-            TextOffset::from_validated_byte_index(raw),
-            0,
-            affinity,
-        ))
+        let offset = self.canonical_text.offset_at(raw).ok()?;
+        Some(InlinePoint::new(self.node, offset, 0, affinity))
     }
 
     /// Returns the atom whose rendered bytes contain `display_offset`.
@@ -364,6 +358,10 @@ mod tests {
         InlineAtomDisplayProjection::build(&document, paragraph, &renderers).unwrap()
     }
 
+    fn offset(raw: usize) -> TextOffset {
+        TextBuffer::from_string("A中B".to_owned()).offset_at(raw).unwrap()
+    }
+
     #[test]
     fn projection_splices_renderer_text_without_changing_canonical_text() {
         let projection = projection();
@@ -387,30 +385,12 @@ mod tests {
         let before = CursorAffinity::Before;
         let cases = [
             (InlinePoint::new(node, TextOffset::ZERO, 0, before), 0),
-            (
-                InlinePoint::new(node, TextOffset::from_validated_byte_index(1), 0, before),
-                1,
-            ),
-            (
-                InlinePoint::new(node, TextOffset::from_validated_byte_index(1), 1, before),
-                7,
-            ),
-            (
-                InlinePoint::new(node, TextOffset::from_validated_byte_index(1), 2, before),
-                8,
-            ),
-            (
-                InlinePoint::new(node, TextOffset::from_validated_byte_index(4), 0, before),
-                11,
-            ),
-            (
-                InlinePoint::new(node, TextOffset::from_validated_byte_index(5), 0, before),
-                12,
-            ),
-            (
-                InlinePoint::new(node, TextOffset::from_validated_byte_index(5), 1, before),
-                13,
-            ),
+            (InlinePoint::new(node, offset(1), 0, before), 1),
+            (InlinePoint::new(node, offset(1), 1, before), 7),
+            (InlinePoint::new(node, offset(1), 2, before), 8),
+            (InlinePoint::new(node, offset(4), 0, before), 11),
+            (InlinePoint::new(node, offset(5), 0, before), 12),
+            (InlinePoint::new(node, offset(5), 1, before), 13),
         ];
 
         for (point, display) in cases {
