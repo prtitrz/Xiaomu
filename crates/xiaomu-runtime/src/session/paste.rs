@@ -15,7 +15,7 @@ use xiaomu_core::transaction::{Transaction, TransactionStep};
 use crate::clipboard::{ClipboardBlock, ClipboardInline, ClipboardNodeContent, ClipboardSlice};
 
 use super::atom_edit::atoms_inside_span;
-use super::cross_block;
+use super::cross_block_atom as cross_block;
 use super::intent::{EditPlan, PlannedAction, PrimaryEdit, SelectionUpdate, concatenated};
 use super::paste_hierarchy;
 use super::structure::{children_of, user_transaction};
