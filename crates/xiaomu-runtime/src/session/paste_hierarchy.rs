@@ -6,9 +6,7 @@
 //! seam. Intermediate snapshots never escape and the whole paste still records
 //! exactly one history entry.
 
-use xiaomu_core::document::{
-    InlineContent, Node, NodeContent, NodeId, TextRun, XiaomuDocument,
-};
+use xiaomu_core::document::{InlineContent, Node, NodeContent, NodeId, TextRun, XiaomuDocument};
 use xiaomu_core::selection::{CursorAffinity, InlinePoint};
 use xiaomu_core::text::TextOffset;
 use xiaomu_core::transaction::{Transaction, TransactionStep};
@@ -196,12 +194,7 @@ fn append_target_split_stages(
                 atom: atom.node.id(),
             });
             transaction.push_step(TransactionStep::RestoreInlineAtom {
-                at: InlinePoint::new(
-                    suffix,
-                    destination,
-                    ordinal,
-                    migrate_split.affinity(),
-                ),
+                at: InlinePoint::new(suffix, destination, ordinal, migrate_split.affinity()),
                 node: atom.node,
             });
         }
