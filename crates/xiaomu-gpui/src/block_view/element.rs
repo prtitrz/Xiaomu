@@ -150,7 +150,7 @@ impl Element for ParagraphElement {
         let caret = view
             .composing_caret_byte()
             .map(|byte| (byte, CursorAffinity::Before))
-            .or_else(|| view.focus_caret());
+            .or_else(|| view.display_focus_caret());
         let projection = if composing {
             SelectionProjection::None
         } else {
