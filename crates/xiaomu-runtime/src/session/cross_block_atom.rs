@@ -309,10 +309,7 @@ fn push_exact_marks(
     Ok(())
 }
 
-fn inline_of(
-    document: &XiaomuDocument,
-    node: NodeId,
-) -> Result<&InlineContent, SessionError> {
+fn inline_of(document: &XiaomuDocument, node: NodeId) -> Result<&InlineContent, SessionError> {
     document
         .node(node)
         .ok_or(SessionError::Core(xiaomu_core::Error::UnknownNode))?
