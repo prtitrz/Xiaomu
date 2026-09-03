@@ -10,6 +10,7 @@
 //! a virtual projection (canonical prefix + preedit + suffix); see
 //! [`crate::input::composition`].
 
+mod display;
 mod element;
 mod ime;
 mod input_handler;
@@ -30,6 +31,7 @@ use xiaomu_core::document::{InlineContent, NodeId};
 use xiaomu_runtime::session::{DocumentPosition, DocumentSession, EditIntent};
 
 use crate::document_view::cache_key::LayoutCacheKey;
+use crate::inline_atom::InlineAtomRendererRegistry;
 use crate::input::composition::CompositionState;
 use layout::BlockTextLayout;
 
@@ -215,6 +217,7 @@ pub struct ParagraphView {
     pub(crate) bounds_registry: BlockBoundsRegistry,
     pub(super) scroll_handle: Option<ScrollHandle>,
     pub(super) scroll_caret_pending: Cell<bool>,
+    pub(super) atom_renderers: Rc<InlineAtomRendererRegistry>,
     composition: Option<CompositionState>,
     focus_out_subscription: Option<Subscription>,
 }
@@ -243,6 +246,7 @@ impl ParagraphView {
             bounds_registry,
             scroll_handle: None,
             scroll_caret_pending: Cell::new(true),
+            atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
             composition: None,
             focus_out_subscription: None,
         }
@@ -251,6 +255,11 @@ impl ParagraphView {
     /// Attaches the owning document viewport's scroll handle.
     pub(crate) fn attach_scroll_handle(&mut self, scroll_handle: ScrollHandle) {
         self.scroll_handle = Some(scroll_handle);
+    }
+
+    /// Attaches the owning document view's renderer registry.
+    pub(crate) fn attach_atom_renderers(&mut self, renderers: Rc<InlineAtomRendererRegistry>) {
+        self.atom_renderers = renderers;
     }
 
     /// Returns the shared session rendered by this view.
