@@ -127,20 +127,35 @@ impl DocumentSession {
         self.install_selection(next)
     }
 
-    /// Places both selection endpoints at absolute text positions.
+    /// Places both selection endpoints at exact mixed-inline positions.
     ///
-    /// The document-level escape hatch for cross-block navigation and mouse
-    /// selection. Both endpoints must be valid for the current snapshot;
-    /// otherwise the session is untouched.
-    pub(super) fn set_selection(
+    /// Frontends use this seam when layout or hit-testing resolves a caret to
+    /// a same-boundary atom gap that cannot be represented by `TextPoint`.
+    /// Both endpoints are validated against the current snapshot before any
+    /// session state changes. This is selection-only: it creates no document
+    /// transaction and no history entry.
+    pub fn set_inline_selection(
         &mut self,
-        anchor: TextPoint,
-        focus: TextPoint,
+        anchor: InlinePoint,
+        focus: InlinePoint,
     ) -> Result<SessionOutcome, SessionError> {
         let next = DocumentSelection::new(anchor, focus);
         next.validate(&self.document)
             .map_err(|_| SessionError::SelectionInvalid)?;
         self.install_selection(next)
+    }
+
+    /// Places both selection endpoints at absolute text positions.
+    ///
+    /// Compatibility adapter for the P0-P3 text-only `SetSelection` intent.
+    /// Mixed-inline frontends call [`Self::set_inline_selection`] directly so
+    /// atom ordinals are never discarded.
+    pub(super) fn set_selection(
+        &mut self,
+        anchor: TextPoint,
+        focus: TextPoint,
+    ) -> Result<SessionOutcome, SessionError> {
+        self.set_inline_selection(InlinePoint::from(anchor), InlinePoint::from(focus))
     }
 
     fn install_selection(
