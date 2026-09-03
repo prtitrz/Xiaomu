@@ -6,7 +6,7 @@
 //! leak back into Core coordinates.
 
 use xiaomu_core::document::{InlineContent, MarkKind, NodeId};
-use xiaomu_core::selection::InlinePoint;
+use xiaomu_core::selection::{CursorAffinity, InlinePoint};
 use xiaomu_runtime::session::DocumentPosition;
 
 use crate::inline_atom_display::InlineAtomDisplayProjection;
@@ -197,8 +197,16 @@ impl ParagraphView {
         }
     }
 
-    pub(super) fn display_offset_for_focus(&self, point: InlinePoint) -> Option<usize> {
-        self.atom_display_projection()?
-            .display_offset_for_inline_point(point)
+    /// Projects the focused mixed-inline caret into the visual byte space.
+    #[must_use]
+    pub(crate) fn display_focus_caret(&self) -> Option<(usize, CursorAffinity)> {
+        let point = match self.session.borrow().selection().focus() {
+            DocumentPosition::Inline(point) if point.node_id() == self.node => point,
+            _ => return None,
+        };
+        let display = self
+            .atom_display_projection()?
+            .display_offset_for_inline_point(point)?;
+        Some((display, point.affinity()))
     }
 }
