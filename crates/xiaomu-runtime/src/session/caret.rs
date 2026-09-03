@@ -172,3 +172,86 @@ impl DocumentSession {
         Ok(SessionOutcome::SelectionChanged)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xiaomu_core::document::{
+        AtomKind, InlineAtomContent, InlineContent, NodeAttrs, NodeContent, NodeKind,
+        NodeStoreBuilder, TextRun, XiaomuDocument,
+    };
+    use xiaomu_core::selection::CursorAffinity;
+    use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
+
+    fn atom_fixture() -> (XiaomuDocument, xiaomu_core::document::NodeId, TextOffset) {
+        let mut builder = NodeStoreBuilder::new();
+        let paragraph = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::Inline(
+                    InlineContent::new([TextRun::new("AB", Default::default()).unwrap()]).unwrap(),
+                ),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([paragraph]),
+            )
+            .unwrap();
+        let mut document = XiaomuDocument::new(root, builder.finish()).unwrap();
+        let offset = document
+            .node(paragraph)
+            .unwrap()
+            .content()
+            .as_inline()
+            .unwrap()
+            .offset_at(1)
+            .unwrap();
+
+        for (ordinal, kind, fallback) in [(0, "mention", "@A"), (1, "tag", "#B")] {
+            document = Transaction::new(TransactionOrigin::Extension(
+                "inline-selection-test".into(),
+            ))
+            .with_step(TransactionStep::InsertInlineAtom {
+                at: InlinePoint::new(paragraph, offset, ordinal, CursorAffinity::Before),
+                kind: AtomKind::new(kind).unwrap(),
+                attrs: NodeAttrs::empty(),
+                content: InlineAtomContent::new(fallback).unwrap(),
+            })
+            .apply(&document)
+            .unwrap();
+        }
+
+        (document, paragraph, offset)
+    }
+
+    #[test]
+    fn exact_inline_selection_validates_ordinals_atomically() {
+        let (document, paragraph, offset) = atom_fixture();
+        let before = InlinePoint::new(paragraph, offset, 0, CursorAffinity::Before);
+        let mut session =
+            DocumentSession::new(document, DocumentSelection::collapsed(before)).unwrap();
+        let between = InlinePoint::new(paragraph, offset, 1, CursorAffinity::Before);
+
+        assert_eq!(
+            session.set_inline_selection(between, between).unwrap(),
+            SessionOutcome::SelectionChanged
+        );
+        assert_eq!(session.selection(), DocumentSelection::collapsed(between));
+        assert_eq!(
+            session.set_inline_selection(between, between).unwrap(),
+            SessionOutcome::NoChange
+        );
+
+        let invalid = InlinePoint::new(paragraph, offset, 3, CursorAffinity::Before);
+        let stable = session.selection();
+        assert!(matches!(
+            session.set_inline_selection(invalid, invalid),
+            Err(SessionError::SelectionInvalid)
+        ));
+        assert_eq!(session.selection(), stable);
+    }
+}
