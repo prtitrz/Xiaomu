@@ -15,7 +15,7 @@ use xiaomu_core::transaction::{Transaction, TransactionStep};
 use crate::clipboard::{ClipboardBlock, ClipboardInline, ClipboardNodeContent, ClipboardSlice};
 
 use super::atom_edit::atoms_inside_span;
-use super::cross_block;
+use super::cross_block_atom as cross_block;
 use super::intent::{EditPlan, PlannedAction, PrimaryEdit, SelectionUpdate, concatenated};
 use super::paste_hierarchy;
 use super::structure::{children_of, user_transaction};
@@ -149,6 +149,7 @@ fn plan_single_block(
         source_text,
         &target_text[end..]
     );
+    let post_buffer = TextBuffer::from_string(post_text.clone());
 
     // Atoms inside the replaced target span are removed by identity; the
     // seam ordinal of `start_gap` already excludes them.
@@ -162,10 +163,11 @@ fn plan_single_block(
     });
     push_exact_marks(transaction, node, source.runs(), start, &post_text)?;
 
-    // Re-anchor the detached source atoms: a paste allocates fresh
-    // identities, and each insertion addresses the exact same-boundary gap
-    // that reproduces the source order around the pasted text.
-    let source_len = source.len_bytes();
+    // Re-anchor the detached source atoms against the post-edit text. The
+    // source anchor is relative to the inserted slice, so `start + anchor`
+    // may lie beyond the pre-edit target length (for example a trailing atom
+    // pasted at the target end). Validating against the old target would
+    // reject otherwise valid pasted atoms.
     let mut previous_anchor: Option<usize> = None;
     let mut same_anchor_seen = 0usize;
     for atom in source.atoms() {
@@ -183,7 +185,7 @@ fn plan_single_block(
         };
         let at = InlinePoint::new(
             node,
-            target
+            post_buffer
                 .offset_at(start + anchor)
                 .map_err(SessionError::Core)?,
             ordinal,
@@ -196,7 +198,6 @@ fn plan_single_block(
             content: atom.content().clone(),
         });
     }
-    let _ = source_len;
     Ok(())
 }
 

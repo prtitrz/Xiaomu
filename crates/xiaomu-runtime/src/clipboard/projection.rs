@@ -179,14 +179,20 @@ fn slice_inline(
 
     // Detach the atoms inside the span, re-anchored to the slice start. The
     // same-boundary rule mirrors the editing contract: atoms at or after the
-    // start gap and atoms before the end gap belong to the selection.
+    // start gap and atoms before the end gap belong to the selection. A
+    // cross-block head/middle slice includes atoms at its terminal boundary
+    // even when the selected text part is empty.
     let text_view = InlineContent::new(pieces.iter().cloned()).map_err(SessionError::Core)?;
     let mut atoms = Vec::new();
     for placement in inline.atoms() {
         let offset = placement.text_offset().as_usize();
         let ordinal = same_boundary_ordinal(inline, placement.text_offset(), placement.atom());
         let inside = if start_raw == end_raw {
-            offset == start_raw && ordinal >= start_ordinal && ordinal < end_ordinal
+            if include_end_atoms {
+                offset == start_raw && ordinal >= start_ordinal
+            } else {
+                offset == start_raw && ordinal >= start_ordinal && ordinal < end_ordinal
+            }
         } else {
             offset == start_raw && ordinal >= start_ordinal
                 || offset > start_raw
