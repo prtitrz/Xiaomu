@@ -166,8 +166,7 @@ impl DocumentSession {
             && self.selection.as_same_node_inline().is_none()
         {
             self.history.break_group();
-            let action =
-                cross_block_atom::plan_delete_selection(&self.document, self.selection)?;
+            let action = cross_block_atom::plan_delete_selection(&self.document, self.selection)?;
             return match action {
                 PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
                 PlannedAction::Commit(plan) => self.commit(plan),
