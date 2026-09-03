@@ -218,3 +218,86 @@ impl ParagraphView {
         Some((display, point.affinity()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inline_atom::InlineAtomRendererRegistry;
+    use xiaomu_core::document::{
+        AtomKind, InlineAtomContent, Mark, MarkSet, NodeAttrs, NodeContent, NodeKind,
+        NodeStoreBuilder, TextRun, XiaomuDocument,
+    };
+    use xiaomu_core::selection::{CursorAffinity, InlinePoint};
+    use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
+
+    #[test]
+    fn atom_display_segment_preserves_neighbor_text_marks() {
+        let plain = MarkSet::empty();
+        let bold = MarkSet::new([Mark::Bold]).unwrap();
+        let inline = InlineContent::new([
+            TextRun::new("A", plain).unwrap(),
+            TextRun::new("中B", bold).unwrap(),
+        ])
+        .unwrap();
+
+        let mut builder = NodeStoreBuilder::new();
+        let paragraph = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::Inline(inline),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([paragraph]),
+            )
+            .unwrap();
+        let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+        let offset = document
+            .node(paragraph)
+            .unwrap()
+            .content()
+            .as_inline()
+            .unwrap()
+            .offset_at(1)
+            .unwrap();
+        let document = Transaction::new(TransactionOrigin::Extension(
+            "layout-projection-test".into(),
+        ))
+        .with_step(TransactionStep::InsertInlineAtom {
+            at: InlinePoint::new(paragraph, offset, 0, CursorAffinity::Before),
+            kind: AtomKind::new("mention").unwrap(),
+            attrs: NodeAttrs::empty(),
+            content: InlineAtomContent::new("@Ann").unwrap(),
+        })
+        .apply(&document)
+        .unwrap();
+
+        let renderers = InlineAtomRendererRegistry::new();
+        let projection =
+            InlineAtomDisplayProjection::build(&document, paragraph, &renderers).unwrap();
+        let inline = document
+            .node(paragraph)
+            .unwrap()
+            .content()
+            .as_inline()
+            .unwrap();
+        let (display, segments) = project_atom_display_content(inline, &projection);
+
+        assert_eq!(display, "A@Ann中B");
+        assert_eq!(segments.len(), 3);
+        assert_eq!((segments[0].start, segments[0].text.as_str()), (0, "A"));
+        assert!(!segments[0].bold);
+        assert_eq!((segments[1].start, segments[1].text.as_str()), (1, "@Ann"));
+        assert!(!segments[1].bold);
+        assert!(!segments[1].italic);
+        assert!(!segments[1].underline);
+        assert!(!segments[1].strike);
+        assert!(!segments[1].code);
+        assert_eq!((segments[2].start, segments[2].text.as_str()), (5, "中B"));
+        assert!(segments[2].bold);
+    }
+}
