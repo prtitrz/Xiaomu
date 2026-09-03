@@ -72,15 +72,21 @@ impl DocumentSession {
                         .transpose()?
                 }
             }
-            CaretMove::ToStart => {
-                (current != 0 || ordinal != 0)
-                    .then_some(InlinePoint::new(node, TextOffset::ZERO, 0, affinity))
-            }
+            CaretMove::ToStart => (current != 0 || ordinal != 0).then_some(InlinePoint::new(
+                node,
+                TextOffset::ZERO,
+                0,
+                affinity,
+            )),
             CaretMove::ToEnd => {
                 let end = inline.offset_at(text.len()).map_err(SessionError::Core)?;
                 let end_ordinal = inline.atom_count_at(end);
-                (current != text.len() || ordinal != end_ordinal)
-                    .then_some(InlinePoint::new(node, end, end_ordinal, affinity))
+                (current != text.len() || ordinal != end_ordinal).then_some(InlinePoint::new(
+                    node,
+                    end,
+                    end_ordinal,
+                    affinity,
+                ))
             }
         };
 
