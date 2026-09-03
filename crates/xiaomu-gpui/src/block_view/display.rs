@@ -73,7 +73,8 @@ fn push_styled_text(
         let style = style_for_run(run.marks());
         segments.push(DisplaySegment {
             start: 0,
-            text: run.text().as_str()[overlap_start - run_start..overlap_end - run_start].to_owned(),
+            text: run.text().as_str()[overlap_start - run_start..overlap_end - run_start]
+                .to_owned(),
             bold: style.0,
             italic: style.1,
             underline: style.2,
