@@ -18,12 +18,15 @@
 //! - [`block_view`]: one inline-bearing block view and its custom element.
 //! - [`document_view`]: multi-block editor projection and interaction owner.
 //! - [`editor`]: reusable editor-instance and application assembly helpers.
+//! - [`inline_atom`]: host-neutral renderer registry.
+//! - [`inline_atom_display`]: canonical mixed-inline ↔ display-byte projection.
 
 pub mod accessibility;
 pub mod block_view;
 pub mod document_view;
 pub mod editor;
 pub mod inline_atom;
+pub mod inline_atom_display;
 mod inline_position;
 pub mod input;
 
