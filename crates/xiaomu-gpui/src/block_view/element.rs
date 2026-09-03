@@ -68,7 +68,7 @@ impl Element for ParagraphElement {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let view = self.view.read(cx);
-        let (display_text, segments) = view.display_content();
+        let (display_text, segments) = view.layout_content();
         let composing = view.is_composing();
         let cached_layout = (!composing).then(|| view.last_layout.clone()).flatten();
         let cached_key = (!composing).then_some(view.cache_key).flatten();
@@ -162,7 +162,7 @@ impl Element for ParagraphElement {
                     .map(|block| block.node)
                     .collect()
             };
-            view.projected_selection(&order)
+            view.projected_display_selection(&order)
         };
 
         let focused = view.focus_handle.is_focused(window);
