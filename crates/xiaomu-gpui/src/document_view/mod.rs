@@ -5,7 +5,9 @@
 //! scrollable column. Keyboard navigation translates visual gestures through
 //! the most recent block layouts and applies the resulting Core positions as
 //! runtime [`EditIntent::SetSelection`]s. Mouse drag selection hit-tests
-//! against the per-block bounds published during paint.
+//! against the per-block bounds published during paint and back-projects
+//! renderer display bytes into exact mixed-inline positions through
+//! [`DocumentSession::set_inline_selection`].
 //!
 //! Kind-driven visual distinction lives in [`Self::render_block_tree`]:
 //! headings scale with their level, quote descendants are indented behind a
@@ -27,7 +29,7 @@ use gpui::{
 };
 
 use xiaomu_core::document::{NodeContent, NodeId, NodeKind};
-use xiaomu_core::selection::TextPoint;
+use xiaomu_core::selection::{InlinePoint, TextPoint};
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
 use xiaomu_runtime::persistence::DocumentPersistence;
@@ -225,6 +227,10 @@ impl DocumentView {
     }
 
     /// Places the selection endpoints absolutely, routing focus afterwards.
+    ///
+    /// Text-only compatibility entry for keyboard flows whose positions are
+    /// canonical `TextPoint`s; mouse placement routes through
+    /// [`Self::set_inline_selection`] so atom ordinals survive.
     fn set_selection(
         &mut self,
         anchor: TextPoint,
@@ -232,9 +238,24 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.set_inline_selection(anchor.into(), focus.into(), window, cx);
+    }
+
+    /// Places the selection endpoints at exact mixed-inline positions,
+    /// routing focus afterwards. Same-boundary atom gaps that have no
+    /// text-only projection are preserved verbatim.
+    fn set_inline_selection(
+        &mut self,
+        anchor: InlinePoint,
+        focus: InlinePoint,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.desired_x = None;
-        let intent = EditIntent::SetSelection { anchor, focus };
-        let outcome = self.session.borrow_mut().apply_intent(&intent);
+        let outcome = self
+            .session
+            .borrow_mut()
+            .set_inline_selection(anchor, focus);
         match outcome {
             Ok(xiaomu_runtime::session::SessionOutcome::NoChange) => {}
             Ok(_) => {
@@ -247,32 +268,31 @@ impl DocumentView {
     }
 
     /// Collapses the caret onto `point`.
-    fn place(&mut self, point: TextPoint, window: &mut Window, cx: &mut Context<Self>) {
-        self.set_selection(point, point, window, cx);
+    fn place(&mut self, point: InlinePoint, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_inline_selection(point, point, window, cx);
     }
 
-    /// Moves the focus endpoint to `point`; keeps the current text anchor
-    /// when `extend` is set. A gap anchor collapses onto the target (all
-    /// endpoints are textual in this slice).
+    /// Moves the focus endpoint to `point`; keeps the current mixed-inline
+    /// anchor when `extend` is set. A gap anchor collapses onto the target.
     fn move_focus_to(
         &mut self,
-        point: TextPoint,
+        point: InlinePoint,
         extend: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let anchor = if extend {
             match self.session.borrow().selection().anchor() {
-                // Text-layer anchors keep ordinal zero; a seam anchor has no
-                // text-only projection until the atom renderer (P4.4).
-                DocumentPosition::Inline(point) => point.to_text_point().ok(),
+                // Mixed-inline anchors keep their atom ordinal; keyboard and
+                // pointer callers both route through here.
+                DocumentPosition::Inline(point) => Some(point),
                 DocumentPosition::Gap(_) => None,
             }
         } else {
             None
         };
         match anchor {
-            Some(anchor) => self.set_selection(anchor, point, window, cx),
+            Some(anchor) => self.set_inline_selection(anchor, point, window, cx),
             None => self.place(point, window, cx),
         }
     }

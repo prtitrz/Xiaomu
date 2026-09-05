@@ -115,10 +115,10 @@ PR 轨迹：
 - [x] renderer 只消费 canonical `InlineAtomView`
 - [x] missing renderer deterministic fallback 到 `fallback_text`
 - [x] accessibility fallback：atom 是携带 `fallback_text` 的非编辑子节点
-- [ ] mixed-inline display projection
-- [ ] caret / selection display mapping
-- [ ] layout / paint
-- [ ] atom hit-test
+- [x] mixed-inline display projection（#64 `InlineAtomDisplayProjection`）
+- [x] caret / selection display mapping（#65 projection 化 caret / selection；#66 runtime `set_inline_selection` seam）
+- [x] layout / paint（#65 atom-aware layout；chip quad 随本切片落地）
+- [x] atom hit-test（display byte 反投影 + chip 左右半区规则）
 - [ ] demo atom renderer
 - [ ] host capability callback
 - [ ] harness demo
@@ -173,14 +173,16 @@ ordinal N → last atom display span 之后
 
 P4.4b 实施顺序：
 
-1. [ ] 建立纯 GPUI-local `MixedInlineDisplayProjection` 与映射测试。
-2. [ ] `ParagraphElement` layout 使用 projection text，不再把 canonical byte 直接传给 display geometry。
-3. [ ] caret / selection 先从 `InlinePoint` 投影成 display byte，再访问 `BlockTextLayout`。
-4. [ ] pointer hit-test 从 display byte 反投影到 `InlinePoint`，atom span 按点击左右半区落到前/后 gap。
-5. [ ] platform UTF-16 / input-handler range 明确区分 display range 与 canonical range。
-6. [ ] projection 稳定后再增加 chip paint / atom bounds registry。
+1. [x] 建立纯 GPUI-local `MixedInlineDisplayProjection` 与映射测试（#64 `crates/xiaomu-gpui/src/inline_atom_display.rs`）。
+2. [x] `ParagraphElement` layout 使用 projection text，不再把 canonical byte 直接传给 display geometry（#65 `block_view/display.rs::layout_content`）。
+3. [x] caret / selection 先从 `InlinePoint` 投影成 display byte，再访问 `BlockTextLayout`（#65 `display_focus_caret` / `projected_display_selection`；#66 `DocumentSession::set_inline_selection` 公开 seam，text-only `set_selection` 保留为兼容适配器）。
+4. [x] pointer hit-test 从 display byte 反投影到 `InlinePoint`，atom span 按点击左右半区落到前/后 gap（`inline_point_for_display_hit`：严格小于 span 中点 → before gap，否则 after gap；span 边界与文本字节经 `inline_point_for_display_boundary`）。
+5. [x] platform UTF-16 / input-handler range 明确区分 display range 与 canonical range——设计裁决：input handler / IME 始终消费 canonical editable projection，display range 只存在于 layout / paint / hit-test 内部，永不进入 platform range。
+6. [x] projection 稳定后再增加 chip paint / atom bounds registry——chip 按可视行绘制 tinted quad（selection 高亮覆盖其上）；per-atom 几何由 display span + wrapped layout 按需推导，未引入独立 bounds registry。
 
-自定义 renderer 若返回空 display text，projection 必须 fail soft 到非空 `fallback_text`，避免 atom 成为零宽且无法命中的 canonical unit。
+文档补记：#64 / #65 / #66 合并时漏更本文件，随本切片一并补记。
+
+自定义 renderer 若返回空 display text，projection 必须 fail soft 到非空 `fallback_text`，避免 atom 成为零宽且无法命中的 canonical unit。（已交付：`InlineAtomDisplayProjection::build`。）
 
 #### P4.4c Host capability / demo
 

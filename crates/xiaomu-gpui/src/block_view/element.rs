@@ -36,6 +36,7 @@ pub struct RequestLayoutState(Rc<RefCell<Option<BlockTextLayout>>>);
 pub struct PrepaintState {
     layout: Option<BlockTextLayout>,
     cursor: Option<PaintQuad>,
+    chips: Vec<PaintQuad>,
     selection: Vec<PaintQuad>,
     cache_key: Option<LayoutCacheKey>,
 }
@@ -183,6 +184,35 @@ impl Element for ParagraphElement {
             _ => Vec::new(),
         };
 
+        // Atom chips paint one tinted quad per visual row of every renderer
+        // span. Composition keeps the plain editable projection, which has no
+        // atom spans to decorate.
+        let chips = if composing {
+            Vec::new()
+        } else {
+            view.atom_display_projection()
+                .map(|projection| {
+                    projection
+                        .atoms()
+                        .iter()
+                        .flat_map(|atom| layout.selection_rects(atom.display_range().clone()))
+                        .map(|rect| {
+                            fill(
+                                Bounds::new(
+                                    point(
+                                        bounds.left() + rect.origin.x,
+                                        bounds.top() + rect.origin.y,
+                                    ),
+                                    rect.size,
+                                ),
+                                rgba(0x7755aa30),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
         let caret_bounds = if focused {
             caret.and_then(|(byte, affinity)| {
                 layout.position_for_caret(byte, affinity).map(|position| {
@@ -209,6 +239,7 @@ impl Element for ParagraphElement {
         PrepaintState {
             layout: Some(layout),
             cursor,
+            chips,
             selection,
             cache_key,
         }
@@ -230,6 +261,10 @@ impl Element for ParagraphElement {
             ElementInputHandler::new(bounds, self.view.clone()),
             cx,
         );
+
+        for chip in prepaint.chips.drain(..) {
+            window.paint_quad(chip);
+        }
 
         for selection in prepaint.selection.drain(..) {
             window.paint_quad(selection);

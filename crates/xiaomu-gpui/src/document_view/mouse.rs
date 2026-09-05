@@ -7,7 +7,7 @@ use gpui::{App, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, P
 
 use super::{DocumentView, navigation};
 use xiaomu_core::document::NodeId;
-use xiaomu_core::selection::{CursorAffinity, TextPoint};
+use xiaomu_core::selection::{CursorAffinity, InlinePoint, TextPoint};
 
 impl DocumentView {
     // ---- mouse ----
@@ -41,9 +41,10 @@ impl DocumentView {
                             })
                             .unwrap_or_default();
                         format!(
-                            "{:?}{text} at byte {} ({:?})",
+                            "{:?}{text} at byte {} ordinal {} ({:?})",
                             node.kind(),
-                            point.offset().as_usize(),
+                            point.text_offset().as_usize(),
+                            point.atom_index(),
                             point.affinity()
                         )
                     })
@@ -81,7 +82,13 @@ impl DocumentView {
     /// Maps a window-space point to a validated caret point via the paint
     /// registry: nearest block by vertical position, then two-dimensional
     /// hit-testing inside that block's wrapped text layout.
-    fn hit_test(&self, position: Point<Pixels>, cx: &App) -> Option<TextPoint> {
+    ///
+    /// Blocks carrying inline atoms shape their layout on renderer display
+    /// bytes, so the raw hit is back-projected through the atom display
+    /// projection: chip interiors resolve to the atom's before/after gap by
+    /// click side, everything else maps through exact display boundaries.
+    /// Plain blocks keep the canonical byte path.
+    fn hit_test(&self, position: Point<Pixels>, cx: &App) -> Option<InlinePoint> {
         let registry = self.registry.borrow();
         let mut nearest: Option<(NodeId, Pixels)> = None;
         for (node, bounds) in registry.iter() {
@@ -98,16 +105,26 @@ impl DocumentView {
         }
         let (node, _) = nearest?;
 
-        let session = self.session.borrow();
-        let blocks = navigation::text_blocks(session.document());
-        drop(session);
-        let block = blocks.iter().find(|block| block.node == node)?;
         let child = self
             .children
             .iter()
             .find(|(id, _)| *id == node)
             .map(|(_, view)| view.clone())?;
         let (raw, affinity) = child.read(cx).hit_test_caret_position(position)?;
+
+        // During IME composition the layout falls back to the canonical
+        // editable projection, so the raw hit is a canonical byte again.
+        if !child.read(cx).is_composing()
+            && let Some(projection) = child.read(cx).atom_display_projection()
+            && !projection.atoms().is_empty()
+        {
+            return projection.inline_point_for_display_hit(raw, affinity);
+        }
+
+        let session = self.session.borrow();
+        let blocks = navigation::text_blocks(session.document());
+        drop(session);
+        let block = blocks.iter().find(|block| block.node == node)?;
         let clamped = raw.min(block.text().len());
         let offset = navigation::validated_offset(block, clamped)
             .or_else(|| navigation::validated_offset(block, block.text().len()))?;
@@ -116,6 +133,6 @@ impl DocumentView {
         } else {
             CursorAffinity::Before
         };
-        Some(TextPoint::new(node, offset, affinity))
+        Some(InlinePoint::from(TextPoint::new(node, offset, affinity)))
     }
 }

@@ -211,9 +211,9 @@ impl InlineAtomDisplayProjection {
     /// Maps an exact display byte boundary back to a canonical caret gap.
     ///
     /// Display positions strictly inside an atom renderer span are not
-    /// canonical caret boundaries and therefore return `None`. Hit-testing can
-    /// use [`Self::atom_at_display_offset`] to choose the atom's before/after
-    /// gap based on pointer geometry.
+    /// canonical caret boundaries and therefore return `None`. Hit-testing
+    /// should use [`Self::inline_point_for_display_hit`], which also resolves
+    /// span interiors to the atom's before/after gap by click side.
     #[must_use]
     pub fn inline_point_for_display_boundary(
         &self,
@@ -262,14 +262,44 @@ impl InlineAtomDisplayProjection {
 
     /// Returns the atom whose rendered bytes contain `display_offset`.
     ///
-    /// The end boundary is excluded, matching Rust range semantics. This is
-    /// intended for the later pointer hit-test slice; callers still decide
-    /// whether a hit lands on the before or after canonical gap.
+    /// The end boundary is excluded, matching Rust range semantics. Pointer
+    /// hit-testing combines this with [`Self::inline_point_for_display_hit`].
     #[must_use]
     pub fn atom_at_display_offset(&self, display_offset: usize) -> Option<&InlineAtomDisplaySpan> {
         self.atoms
             .iter()
             .find(|atom| atom.display_range.contains(&display_offset))
+    }
+
+    /// Resolves a pointer hit at `display_offset` into a canonical caret gap.
+    ///
+    /// Display bytes strictly inside an atom span resolve to the span's before
+    /// or after gap by click side: bytes left of the span midpoint keep
+    /// [`InlineAtomDisplaySpan::atom_index`], bytes right of it select the
+    /// following gap (`atom_index + 1`). Every other display boundary maps
+    /// through [`Self::inline_point_for_display_boundary`].
+    #[must_use]
+    pub fn inline_point_for_display_hit(
+        &self,
+        display_offset: usize,
+        affinity: CursorAffinity,
+    ) -> Option<InlinePoint> {
+        if let Some(atom) = self.atom_at_display_offset(display_offset) {
+            let range = atom.display_range();
+            let before = display_offset < range.start + range.len().div_ceil(2);
+            let ordinal = if before {
+                atom.atom_index()
+            } else {
+                atom.atom_index() + 1
+            };
+            return Some(InlinePoint::new(
+                self.node,
+                atom.text_offset(),
+                ordinal,
+                CursorAffinity::Before,
+            ));
+        }
+        self.inline_point_for_display_boundary(display_offset, affinity)
     }
 }
 
@@ -437,5 +467,58 @@ mod tests {
             &projection.display_text()[reference.display_range().clone()],
             "R"
         );
+    }
+
+    #[test]
+    fn display_hit_resolves_atom_interior_by_click_side() {
+        let projection = projection();
+        let node = projection.node();
+        let before = CursorAffinity::Before;
+
+        // «@A» spans display 1..7; the midpoint rule splits 1..4 / 4..7.
+        for display in [1, 2, 3] {
+            assert_eq!(
+                projection.inline_point_for_display_hit(display, before),
+                Some(InlinePoint::new(node, offset(1), 0, before)),
+                "display byte {display} must hit the before gap"
+            );
+        }
+        for display in [4, 5, 6] {
+            assert_eq!(
+                projection.inline_point_for_display_hit(display, before),
+                Some(InlinePoint::new(node, offset(1), 1, before)),
+                "display byte {display} must hit the after gap"
+            );
+        }
+    }
+
+    #[test]
+    fn display_hit_maps_text_and_span_edges_through_boundaries() {
+        let projection = projection();
+        let node = projection.node();
+        let before = CursorAffinity::Before;
+
+        // Text bytes stay canonical text gaps with ordinal zero.
+        assert_eq!(
+            projection.inline_point_for_display_hit(11, before),
+            Some(InlinePoint::new(node, offset(4), 0, before))
+        );
+        // Span end boundaries land on the following gap.
+        assert_eq!(
+            projection.inline_point_for_display_hit(8, before),
+            Some(InlinePoint::new(node, offset(1), 2, before))
+        );
+        // Span start boundaries land on the preceding gap.
+        assert_eq!(
+            projection.inline_point_for_display_hit(7, before),
+            Some(InlinePoint::new(node, offset(1), 1, before))
+        );
+        // End of display text resolves through the last span-end boundary.
+        assert_eq!(
+            projection.inline_point_for_display_hit(13, before),
+            Some(InlinePoint::new(node, offset(5), 1, before))
+        );
+        // Non-boundary bytes inside multi-byte text are no caret gap.
+        assert_eq!(projection.inline_point_for_display_hit(9, before), None);
     }
 }
