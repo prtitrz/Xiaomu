@@ -56,7 +56,7 @@ pub struct DocumentView {
     /// The focus point produced by the previous vertical move plus the x
     /// column to preserve. Pairing x with its anchor makes direct IME/text
     /// edits invalidate stale vertical-navigation state automatically.
-    desired_x: Option<(TextPoint, Pixels)>,
+    desired_x: Option<(InlinePoint, Pixels)>,
     /// Host adapter for the create → load → edit → save contract; absent
     /// when the host persists through its own channel.
     persistence: Option<Rc<RefCell<dyn DocumentPersistence>>>,

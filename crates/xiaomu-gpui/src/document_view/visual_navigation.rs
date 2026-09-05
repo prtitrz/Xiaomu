@@ -1,15 +1,19 @@
 //! Visual-line caret navigation for [`DocumentView`].
 //!
-//! Logical positions remain Core [`TextPoint`] values. This module consults
-//! the last GPUI block layouts to translate vertical and visual-line gestures
-//! while keeping `desired_x` as transient frontend state.
+//! Focus endpoints stay Core [`InlinePoint`] values end to end. Blocks
+//! without inline atoms keep the canonical byte layout path; blocks carrying
+//! atoms translate focus through the display projection, so renderer bytes
+//! never leak into Core coordinates and chip interiors are crossed as one
+//! caret unit instead of becoming caret stops. `desired_x` remains transient
+//! frontend state pairing the x column with its exact anchor.
 
 use gpui::{App, Context, Entity, Pixels, Window};
 use xiaomu_core::document::NodeId;
-use xiaomu_core::selection::{CursorAffinity, InlinePoint, TextPoint};
+use xiaomu_core::selection::{CursorAffinity, InlinePoint};
 use xiaomu_runtime::session::DocumentPosition;
 
 use crate::block_view::ParagraphView;
+use crate::inline_atom_display::InlineAtomDisplayProjection;
 
 use super::{DocumentView, navigation};
 
@@ -31,15 +35,15 @@ pub(super) enum NavStep {
 }
 
 impl DocumentView {
-    /// Resolves the current focus as `(blocks, block index, TextPoint)`.
-    fn visual_focus_location(&self) -> Option<(Vec<navigation::TextBlock>, usize, TextPoint)> {
+    /// Resolves the current focus as `(blocks, block index, InlinePoint)`.
+    ///
+    /// A same-boundary atom seam is a first-class caret position here; the
+    /// per-step helpers decide which coordinate space the block layout speaks.
+    fn visual_focus_location(&self) -> Option<(Vec<navigation::TextBlock>, usize, InlinePoint)> {
         let session = self.session.borrow();
         let blocks = navigation::text_blocks(session.document());
-        // Visual navigation projects onto the text layer; a caret inside a
-        // same-boundary atom seam has no text-only projection until the
-        // atom renderer (P4.4) provides one.
         let focus = match session.selection().focus() {
-            DocumentPosition::Inline(point) => point.to_text_point().ok()?,
+            DocumentPosition::Inline(point) => point,
             DocumentPosition::Gap(_) => return None,
         };
         let index = navigation::block_index(&blocks, focus.node_id())?;
@@ -53,26 +57,74 @@ impl DocumentView {
             .map(|(_, view)| view.clone())
     }
 
-    fn point_for_target(
+    /// Returns the atom display projection for `node`, or `None` when the
+    /// block carries no atoms and its layout bytes stay canonical.
+    fn atom_projection_for(&self, node: NodeId, cx: &App) -> Option<InlineAtomDisplayProjection> {
+        let child = self.child_for_node(node)?;
+        let projection = child.read(cx).atom_display_projection()?;
+        (!projection.atoms().is_empty()).then_some(projection)
+    }
+
+    /// Maps one display byte in `block`'s atom-aware layout back to a caret
+    /// gap. Span interiors resolve by click side; exact boundaries map
+    /// directly.
+    fn point_for_display_byte(
+        projection: &InlineAtomDisplayProjection,
+        raw: usize,
+        affinity: CursorAffinity,
+    ) -> Option<InlinePoint> {
+        projection
+            .inline_point_for_display_boundary(raw, affinity)
+            .or_else(|| projection.inline_point_for_display_hit(raw, affinity))
+    }
+
+    /// Maps one canonical byte in `block` back to a caret gap. Landing on the
+    /// block's final byte selects the gap after any end-anchored atoms.
+    fn point_for_canonical_byte(
+        &self,
         blocks: &[navigation::TextBlock],
         block: usize,
         raw: usize,
         affinity: CursorAffinity,
-    ) -> Option<TextPoint> {
+        cx: &App,
+    ) -> Option<InlinePoint> {
         let target = blocks.get(block)?;
         let offset = navigation::validated_offset(target, raw)?;
-        Some(TextPoint::new(target.node, offset, affinity))
+        let ordinal = if raw == target.text().len() {
+            self.seam_ordinal_after(target.node, raw, cx)
+        } else {
+            0
+        };
+        Some(InlinePoint::new(target.node, offset, ordinal, affinity))
+    }
+
+    /// Number of atoms anchored at a canonical boundary, i.e. the ordinal of
+    /// the gap right after them.
+    fn seam_ordinal_after(&self, node: NodeId, canonical_raw: usize, cx: &App) -> usize {
+        self.atom_projection_for(node, cx)
+            .map(|projection| {
+                projection
+                    .atoms()
+                    .iter()
+                    .filter(|atom| atom.text_offset().as_usize() == canonical_raw)
+                    .count()
+            })
+            .unwrap_or(0)
     }
 
     fn horizontal_target(
         &self,
         blocks: &[navigation::TextBlock],
         block: usize,
-        focus: TextPoint,
+        focus: InlinePoint,
         forward: bool,
         cx: &App,
-    ) -> Option<TextPoint> {
-        let raw = focus.offset().as_usize();
+    ) -> Option<InlinePoint> {
+        if let Some(projection) = self.atom_projection_for(focus.node_id(), cx) {
+            return self.atom_horizontal_target(blocks, block, focus, forward, cx, &projection);
+        }
+
+        let raw = focus.text_offset().as_usize();
         let child = self.child_for_node(focus.node_id());
         let at_wrap = child
             .as_ref()
@@ -82,10 +134,22 @@ impl DocumentView {
         // byte index. Traverse those first, then advance to another scalar.
         if at_wrap {
             if forward && focus.affinity().is_before() {
-                return Self::point_for_target(blocks, block, raw, CursorAffinity::After);
+                return self.point_for_canonical_byte(
+                    blocks,
+                    block,
+                    raw,
+                    CursorAffinity::After,
+                    cx,
+                );
             }
             if !forward && focus.affinity().is_after() {
-                return Self::point_for_target(blocks, block, raw, CursorAffinity::Before);
+                return self.point_for_canonical_byte(
+                    blocks,
+                    block,
+                    raw,
+                    CursorAffinity::Before,
+                    cx,
+                );
             }
         }
 
@@ -99,19 +163,96 @@ impl DocumentView {
         } else {
             CursorAffinity::Before
         };
-        Self::point_for_target(blocks, target_block, target_raw, target_affinity)
+        self.point_for_canonical_byte(blocks, target_block, target_raw, target_affinity, cx)
+    }
+
+    fn atom_horizontal_target(
+        &self,
+        blocks: &[navigation::TextBlock],
+        block: usize,
+        focus: InlinePoint,
+        forward: bool,
+        cx: &App,
+        projection: &InlineAtomDisplayProjection,
+    ) -> Option<InlinePoint> {
+        let raw = projection.display_offset_for_inline_point(focus)?;
+        let child = self.child_for_node(focus.node_id());
+        let at_wrap = child
+            .as_ref()
+            .is_some_and(|view| view.read(cx).visual_is_soft_wrap_boundary(raw));
+        if at_wrap {
+            if forward && focus.affinity().is_before() {
+                return projection.inline_point_for_display_boundary(raw, CursorAffinity::After);
+            }
+            if !forward && focus.affinity().is_after() {
+                return projection.inline_point_for_display_boundary(raw, CursorAffinity::Before);
+            }
+        }
+
+        let display_len = projection.display_text().len();
+        if (forward && raw >= display_len) || (!forward && raw == 0) {
+            // Cross-block: the neighbor walk speaks canonical bytes.
+            let canonical = if forward {
+                projection.canonical_text().len()
+            } else {
+                0
+            };
+            let (target_block, target_raw) =
+                navigation::step_horizontal(blocks, block, canonical, forward)?;
+            return self.point_for_canonical_byte(
+                blocks,
+                target_block,
+                target_raw,
+                CursorAffinity::Before,
+                cx,
+            );
+        }
+
+        // Step one scalar in display space; renderer interiors are skipped as
+        // a single caret unit so a chip never becomes a caret stop.
+        let text = projection.display_text();
+        let stepped = if forward {
+            (raw + 1..=display_len)
+                .find(|&index| text.is_char_boundary(index))
+                .map(|next| match projection.atom_at_display_offset(next) {
+                    Some(atom) => atom.display_range().end,
+                    None => next,
+                })?
+        } else {
+            (0..raw)
+                .rev()
+                .find(|&index| text.is_char_boundary(index))
+                .map(|prev| match projection.atom_at_display_offset(prev) {
+                    Some(atom) => atom.display_range().start,
+                    None => prev,
+                })?
+        };
+        let target_affinity = if !forward
+            && child
+                .as_ref()
+                .is_some_and(|view| view.read(cx).visual_is_soft_wrap_boundary(stepped))
+        {
+            CursorAffinity::After
+        } else {
+            CursorAffinity::Before
+        };
+        Self::point_for_display_byte(projection, stepped, target_affinity)
     }
 
     fn vertical_target(
         &self,
         blocks: &[navigation::TextBlock],
         block: usize,
-        focus: TextPoint,
+        focus: InlinePoint,
         down: bool,
         cx: &App,
-    ) -> Option<(TextPoint, Pixels)> {
+    ) -> Option<(InlinePoint, Pixels)> {
         let current = self.child_for_node(focus.node_id())?;
-        let raw = focus.offset().as_usize();
+        let projection = self.atom_projection_for(focus.node_id(), cx);
+        let raw = match &projection {
+            Some(projection) => projection.display_offset_for_inline_point(focus)?,
+            None => focus.text_offset().as_usize(),
+        };
         let desired_x = match self.desired_x {
             Some((anchor, x)) if anchor == focus => x,
             _ => current.read(cx).visual_caret_x(raw, focus.affinity())?,
@@ -122,7 +263,10 @@ impl DocumentView {
                 .read(cx)
                 .visual_vertical_target(raw, focus.affinity(), desired_x, down)
         {
-            let point = Self::point_for_target(blocks, block, target_raw, affinity)?;
+            let point = match &projection {
+                Some(projection) => Self::point_for_display_byte(projection, target_raw, affinity)?,
+                None => self.point_for_canonical_byte(blocks, block, target_raw, affinity, cx)?,
+            };
             return Some((point, desired_x));
         }
 
@@ -135,7 +279,13 @@ impl DocumentView {
         let (target_raw, affinity) = target_child
             .read(cx)
             .visual_edge_row_target(desired_x, !down)?;
-        let point = Self::point_for_target(blocks, target_block, target_raw, affinity)?;
+        // The neighbor's layout bytes are display space when it carries atoms.
+        if let Some(target_projection) = self.atom_projection_for(blocks[target_block].node, cx) {
+            let point = Self::point_for_display_byte(&target_projection, target_raw, affinity)?;
+            return Some((point, desired_x));
+        }
+        let point =
+            self.point_for_canonical_byte(blocks, target_block, target_raw, affinity, cx)?;
         Some((point, desired_x))
     }
 
@@ -143,22 +293,30 @@ impl DocumentView {
         &self,
         blocks: &[navigation::TextBlock],
         block: usize,
-        focus: TextPoint,
+        focus: InlinePoint,
         to_end: bool,
         cx: &App,
-    ) -> Option<TextPoint> {
-        let raw = focus.offset().as_usize();
+    ) -> Option<InlinePoint> {
+        let projection = self.atom_projection_for(focus.node_id(), cx);
+        let raw = match &projection {
+            Some(projection) => projection.display_offset_for_inline_point(focus)?,
+            None => focus.text_offset().as_usize(),
+        };
         if let Some(child) = self.child_for_node(focus.node_id())
             && let Some((target_raw, affinity)) =
                 child
                     .read(cx)
                     .visual_line_edge_target(raw, focus.affinity(), to_end)
         {
-            return Self::point_for_target(blocks, block, target_raw, affinity);
+            let point = match &projection {
+                Some(projection) => Self::point_for_display_byte(projection, target_raw, affinity)?,
+                None => self.point_for_canonical_byte(blocks, block, target_raw, affinity, cx)?,
+            };
+            return Some(point);
         }
 
         let (target_block, target_raw) = navigation::line_edge(blocks, block, to_end)?;
-        Self::point_for_target(blocks, target_block, target_raw, CursorAffinity::Before)
+        self.point_for_canonical_byte(blocks, target_block, target_raw, CursorAffinity::Before, cx)
     }
 
     /// Translates one keyboard gesture into a document selection update.
@@ -184,9 +342,9 @@ impl DocumentView {
                 else {
                     return;
                 };
-                self.move_focus_to(InlinePoint::from(point), extend, window, cx);
-                // `set_selection` clears transient navigation state. Restore
-                // the continuity anchor only after a successful vertical move.
+                self.move_focus_to(point, extend, window, cx);
+                // `set_inline_selection` clears transient navigation state.
+                // Restore the continuity anchor only after a successful move.
                 self.desired_x = Some((point, desired_x));
             }
             NavStep::Left | NavStep::Right => {
@@ -195,7 +353,7 @@ impl DocumentView {
                 let Some(point) = self.horizontal_target(&blocks, block, focus, forward, cx) else {
                     return;
                 };
-                self.move_focus_to(InlinePoint::from(point), extend, window, cx);
+                self.move_focus_to(point, extend, window, cx);
             }
             NavStep::LineStart | NavStep::LineEnd => {
                 self.desired_x = None;
@@ -203,7 +361,7 @@ impl DocumentView {
                 let Some(point) = self.line_edge_target(&blocks, block, focus, to_end, cx) else {
                     return;
                 };
-                self.move_focus_to(InlinePoint::from(point), extend, window, cx);
+                self.move_focus_to(point, extend, window, cx);
             }
         }
     }
