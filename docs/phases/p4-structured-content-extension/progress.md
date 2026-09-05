@@ -186,7 +186,7 @@ P4.4b 实施顺序：
 
 #### P4.4c Host capability / demo
 
-- [ ] `visual_focus_location / horizontal_target` 全链路保留 `InlinePoint`
+- [x] `visual_focus_location / horizontal_target` 全链路保留 `InlinePoint`——键盘视觉导航按块坐标空间换算：纯文本块保持 canonical byte 路径；含 atom 块经 `InlineAtomDisplayProjection` 在 display 空间步进，chip 内部作为一个 caret unit 跳过（永不成为 caret 停点），跨块行走保持 canonical 并在目标块尾保留 end-anchored seam ordinal；`desired_x` 连续性锚点升级为 `InlinePoint`
 - [ ] host capability action 只传 stable kind / action key / attrs / NodeId
 - [ ] 宿主业务类型不得进入 Core / Runtime
 - [ ] editor harness 接入至少一种 demo atom
