@@ -6,7 +6,7 @@
 
 use gpui::{App, Context, Entity, Pixels, Window};
 use xiaomu_core::document::NodeId;
-use xiaomu_core::selection::{CursorAffinity, TextPoint};
+use xiaomu_core::selection::{CursorAffinity, InlinePoint, TextPoint};
 use xiaomu_runtime::session::DocumentPosition;
 
 use crate::block_view::ParagraphView;
@@ -184,7 +184,7 @@ impl DocumentView {
                 else {
                     return;
                 };
-                self.move_focus_to(point, extend, window, cx);
+                self.move_focus_to(InlinePoint::from(point), extend, window, cx);
                 // `set_selection` clears transient navigation state. Restore
                 // the continuity anchor only after a successful vertical move.
                 self.desired_x = Some((point, desired_x));
@@ -195,7 +195,7 @@ impl DocumentView {
                 let Some(point) = self.horizontal_target(&blocks, block, focus, forward, cx) else {
                     return;
                 };
-                self.move_focus_to(point, extend, window, cx);
+                self.move_focus_to(InlinePoint::from(point), extend, window, cx);
             }
             NavStep::LineStart | NavStep::LineEnd => {
                 self.desired_x = None;
@@ -203,7 +203,7 @@ impl DocumentView {
                 let Some(point) = self.line_edge_target(&blocks, block, focus, to_end, cx) else {
                     return;
                 };
-                self.move_focus_to(point, extend, window, cx);
+                self.move_focus_to(InlinePoint::from(point), extend, window, cx);
             }
         }
     }
