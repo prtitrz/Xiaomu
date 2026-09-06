@@ -5,23 +5,23 @@
 P0-P4 已关闭。P5 于 2026-09-05 启动。
 
 ```text
-P5.1 Table Canonical Model        CURRENT
-P5.2 Runtime Cell Editing         PENDING
+P5.1 Table Canonical Model        CLOSED
+P5.2 Runtime Cell Editing         CURRENT
 P5.3 Row / Column Operations      PENDING
 P5.4 GPUI Table Rendering         PENDING
 P5.5 Cell Selection / Clipboard   PENDING
 P5.6 Integration Gate / Closeout  PENDING
 ```
 
-## P5.1 Table Canonical Model — CURRENT
+## P5.1 Table Canonical Model — CLOSED（PR #80）
 
-- [ ] `NodeKind::Table / TableRow / TableCell` + content-shape validation
-- [ ] `allows_child`：Table/TableRow/TableCell 容器规则，TableCell 可入 Document/Quote/ListItem/TableCell
-- [ ] `validate_tree` 不变量：行数 ≥1、cell 数 ≥1、同表列数一致、cell 非空
-- [ ] builder 构造矩阵 + 非法形状 fail closed 测试
-- [x] 表格构造 = Core 语义步骤 `InsertTable`（实施修订：stage 事务独立验证使纯 `InsertNode` staging 无法表达嵌套构造；见 design.md §1）
-- [x] staged/事务可构造性：runtime `plan_insert_table` 单步 seam + 删除子树 + inverse 验证
-- [ ] P0-P4 regression 保持全绿
+- [x] `NodeKind::Table / TableRow / TableCell` + content-shape validation
+- [x] `allows_child`：Table/TableRow/TableCell 容器规则，TableCell 可入 Document/Quote/ListItem/TableCell
+- [x] `validate_tree` 不变量：行数 ≥1、cell 数 ≥1、同表列数一致、cell 非空；新 `Error::InvalidTableStructure`
+- [x] builder 构造矩阵 + 非法形状 fail closed 测试（`crates/xiaomu-core/tests/table_model.rs`）
+- [x] 表格构造 = Core 语义步骤 `TransactionStep::InsertTable`（实施修订：stage 事务独立验证使纯 `InsertNode` staging 无法表达嵌套构造；见 design.md §1）+ degenerate 尺寸 fail closed + inverse 全子树删除
+- [x] runtime seam：`EditIntent::InsertTable { rows, columns }` 在聚焦块后插入整表（单 isolated history entry，caret 原地保留）
+- [x] P0-P4 regression 保持全绿（419 tests / clippy -D warnings / fmt / size / dependency guards）
 
 ## P5.2 Runtime Cell Editing — PENDING
 
