@@ -63,6 +63,104 @@ pub(crate) fn block_index(blocks: &[TextBlock], node: NodeId) -> Option<usize> {
     blocks.iter().position(|block| block.node == node)
 }
 
+/// One navigation unit in document order: an editable text block or an
+/// atomic block addressed as a whole node (P4.6).
+#[derive(Clone, Debug)]
+pub(crate) enum NavUnit {
+    Text(TextBlock),
+    Atomic(NodeId),
+}
+
+/// Collects the navigation units of a document, depth-first from the root.
+///
+/// This extends [`text_blocks`] with atomic blocks, which participate in
+/// horizontal traversal as whole-node selections.
+pub(crate) fn nav_units(document: &XiaomuDocument) -> Vec<NavUnit> {
+    let mut units = Vec::new();
+    collect_units(document, document.root(), &mut units);
+    units
+}
+
+fn collect_units(document: &XiaomuDocument, id: NodeId, units: &mut Vec<NavUnit>) {
+    let Some(node) = document.node(id) else {
+        return;
+    };
+    match node.content() {
+        NodeContent::Inline(inline) => units.push(NavUnit::Text(TextBlock {
+            node: id,
+            inline: inline.clone(),
+        })),
+        NodeContent::Atomic => units.push(NavUnit::Atomic(id)),
+        NodeContent::Children(children) => {
+            for child in children {
+                collect_units(document, *child, units);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Index of `node` in `units`, whether it is a text block or an atomic one.
+pub(crate) fn unit_index(units: &[NavUnit], node: NodeId) -> Option<usize> {
+    units.iter().position(|unit| match unit {
+        NavUnit::Text(block) => block.node == node,
+        NavUnit::Atomic(id) => *id == node,
+    })
+}
+
+/// Where one horizontal navigation step lands: inside a text block at a raw
+/// byte offset, or on a whole atomic block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HorizontalTarget {
+    InText(usize, usize),
+    OnAtomic(usize),
+}
+
+/// One horizontal navigation step over the unit sequence.
+///
+/// Left at a block start wraps to the previous unit's end (a text block's
+/// last byte or an atomic block selection); Right at a block end wraps to
+/// the next unit. Returns `None` at the document edges. Soft-wrap affinity
+/// is handled by the visual navigation controller before this logical step
+/// runs.
+#[must_use]
+pub(crate) fn step_horizontal(
+    units: &[NavUnit],
+    unit: usize,
+    offset: usize,
+    forward: bool,
+) -> Option<HorizontalTarget> {
+    let text_of = |index: usize| match &units[index] {
+        NavUnit::Text(block) => block.text(),
+        NavUnit::Atomic(_) => String::new(),
+    };
+
+    if forward {
+        if let Some(next) = next_boundary(&text_of(unit), offset) {
+            return Some(HorizontalTarget::InText(unit, next));
+        }
+        let following = unit + 1;
+        match units.get(following)? {
+            NavUnit::Text(_) => Some(HorizontalTarget::InText(following, 0)),
+            NavUnit::Atomic(_) => Some(HorizontalTarget::OnAtomic(following)),
+        }
+    } else {
+        if let Some(previous) = previous_boundary(&text_of(unit), offset) {
+            return Some(HorizontalTarget::InText(unit, previous));
+        }
+        let prior = unit.checked_sub(1)?;
+        match &units[prior] {
+            NavUnit::Text(block) => Some(HorizontalTarget::InText(prior, text_of_last_byte(block))),
+            NavUnit::Atomic(_) => Some(HorizontalTarget::OnAtomic(prior)),
+        }
+    }
+}
+
+/// Last byte offset of one text block's canonical text.
+fn text_of_last_byte(block: &TextBlock) -> usize {
+    block.text().len()
+}
+
 /// Previous Unicode scalar boundary in `text`, or `None` at the start.
 pub(crate) fn previous_boundary(text: &str, offset: usize) -> Option<usize> {
     text[..offset]
@@ -74,37 +172,6 @@ pub(crate) fn previous_boundary(text: &str, offset: usize) -> Option<usize> {
 /// Next Unicode scalar boundary in `text`, or `None` at the end.
 pub(crate) fn next_boundary(text: &str, offset: usize) -> Option<usize> {
     text[offset..].chars().next().map(|c| offset + c.len_utf8())
-}
-
-/// One horizontal navigation step over the whole block sequence.
-///
-/// Left at a block start wraps to the previous block's end; Right at a
-/// block end wraps to the next block's start. Returns `(block, raw byte)`
-/// or `None` at the document edges. Soft-wrap affinity is handled by the
-/// visual navigation controller before this logical step runs.
-#[must_use]
-pub(crate) fn step_horizontal(
-    blocks: &[TextBlock],
-    block: usize,
-    offset: usize,
-    forward: bool,
-) -> Option<(usize, usize)> {
-    let text_of = |index: usize| blocks[index].text();
-
-    if forward {
-        if let Some(next) = next_boundary(&text_of(block), offset) {
-            return Some((block, next));
-        }
-        let following = block + 1;
-        (following < blocks.len()).then_some((following, 0))
-    } else {
-        if let Some(previous) = previous_boundary(&text_of(block), offset) {
-            return Some((block, previous));
-        }
-        block
-            .checked_sub(1)
-            .map(|prior| (prior, text_of(prior).len()))
-    }
 }
 
 /// Start/end of one logical block as `(block, raw byte)` targets.
@@ -212,19 +279,31 @@ mod tests {
     #[test]
     fn horizontal_steps_cross_block_boundaries_by_scalar() {
         let document = sample_document();
-        let blocks = text_blocks(&document);
+        let units = nav_units(&document);
 
         // Right from the end of block 0 wraps to the start of block 1.
-        assert_eq!(step_horizontal(&blocks, 0, 3, true), Some((1, 0)));
+        assert_eq!(
+            step_horizontal(&units, 0, 3, true),
+            Some(HorizontalTarget::InText(1, 0))
+        );
         // Right over "二" (3 bytes) lands on the emoji boundary.
-        assert_eq!(step_horizontal(&blocks, 1, 0, true), Some((1, 3)));
-        assert_eq!(step_horizontal(&blocks, 1, 3, true), Some((1, 7)));
+        assert_eq!(
+            step_horizontal(&units, 1, 0, true),
+            Some(HorizontalTarget::InText(1, 3))
+        );
+        assert_eq!(
+            step_horizontal(&units, 1, 3, true),
+            Some(HorizontalTarget::InText(1, 7))
+        );
         // Left at a block start wraps to the previous block's end.
-        assert_eq!(step_horizontal(&blocks, 1, 0, false), Some((0, 3)));
+        assert_eq!(
+            step_horizontal(&units, 1, 0, false),
+            Some(HorizontalTarget::InText(0, 3))
+        );
 
         // Document edges return None.
-        assert_eq!(step_horizontal(&blocks, 0, 0, false), None);
-        assert_eq!(step_horizontal(&blocks, 2, 4, true), None);
+        assert_eq!(step_horizontal(&units, 0, 0, false), None);
+        assert_eq!(step_horizontal(&units, 2, 4, true), None);
     }
 
     #[test]
@@ -248,12 +327,19 @@ mod tests {
             .unwrap();
         let document = XiaomuDocument::new(root, builder.finish()).unwrap();
         let blocks = text_blocks(&document);
+        let units = nav_units(&document);
 
         assert_eq!(blocks[0].text(), "a\nb");
         assert!(validated_offset(&blocks[0], 1).is_some());
         assert!(validated_offset(&blocks[0], 2).is_some());
-        assert_eq!(step_horizontal(&blocks, 0, 1, true), Some((0, 2)));
-        assert_eq!(step_horizontal(&blocks, 0, 2, false), Some((0, 1)));
+        assert_eq!(
+            step_horizontal(&units, 0, 1, true),
+            Some(HorizontalTarget::InText(0, 2))
+        );
+        assert_eq!(
+            step_horizontal(&units, 0, 2, false),
+            Some(HorizontalTarget::InText(0, 1))
+        );
     }
 
     #[test]
@@ -294,10 +380,16 @@ mod tests {
             )
             .unwrap();
         let document = XiaomuDocument::new(root, builder.finish()).unwrap();
-        let blocks = text_blocks(&document);
+        let units = nav_units(&document);
 
-        assert_eq!(step_horizontal(&blocks, 0, 0, true), Some((1, 0)));
-        assert_eq!(step_horizontal(&blocks, 1, 2, false), Some((1, 1)));
+        assert_eq!(
+            step_horizontal(&units, 0, 0, true),
+            Some(HorizontalTarget::InText(1, 0))
+        );
+        assert_eq!(
+            step_horizontal(&units, 1, 2, false),
+            Some(HorizontalTarget::InText(1, 1))
+        );
         let _ = empty;
     }
 

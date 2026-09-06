@@ -24,8 +24,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    App, Context, Entity, Focusable as _, MouseButton, Pixels, ScrollHandle, Window, div,
-    prelude::*, px,
+    App, Context, Entity, Focusable as _, MouseButton, MouseDownEvent, Pixels, ScrollHandle,
+    Window, div, prelude::*, px,
 };
 
 use xiaomu_core::document::{NodeContent, NodeId, NodeKind};
@@ -282,6 +282,16 @@ impl DocumentView {
         self.set_inline_selection(point, point, window, cx);
     }
 
+    /// Selects an atomic block as a whole node (plain click on its rule).
+    fn select_atomic_block(&mut self, node: NodeId, _window: &mut Window, cx: &mut Context<Self>) {
+        let outcome = self.session.borrow_mut().set_atomic_selection(node);
+        match outcome {
+            Ok(xiaomu_runtime::session::SessionOutcome::NoChange) => {}
+            Ok(_) => cx.notify(),
+            Err(error) => eprintln!("xiaomu: selection rejected: {error}"),
+        }
+    }
+
     /// Moves the focus endpoint to `point`; keeps the current mixed-inline
     /// anchor when `extend` is set. A gap anchor collapses onto the target.
     fn move_focus_to(
@@ -377,6 +387,7 @@ impl DocumentView {
         in_quote: bool,
         list_depth: usize,
         index: usize,
+        cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let node_data = {
             let session = self.session.borrow();
@@ -422,15 +433,36 @@ impl DocumentView {
                         next_quote,
                         next_depth,
                         index + child_index,
+                        cx,
                     ));
                 }
                 column.into_any_element()
             }
-            NodeContent::Atomic => div()
-                .h(px(1.0))
-                .w_full()
-                .bg(gpui::rgba(0xccccccff))
-                .into_any_element(),
+            NodeContent::Atomic => {
+                // Atomic blocks are whole-node selectable: the rule renders
+                // thicker while its node selection is active, and a plain
+                // click selects it instead of placing a text caret.
+                let selected = self.session.borrow().selection().as_atomic_node() == Some(id);
+                let (height, color) = if selected {
+                    (px(5.0), gpui::rgba(0x2b6cb8ff))
+                } else {
+                    (px(3.0), gpui::rgba(0xccccccff))
+                };
+                div()
+                    .id(("atomic-block", index))
+                    .h(height)
+                    .w_full()
+                    .my_3()
+                    .bg(color)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            this.select_atomic_block(id, window, cx);
+                        }),
+                    )
+                    .into_any_element()
+            }
             _ => div().into_any_element(),
         }
     }
@@ -445,7 +477,7 @@ impl Render for DocumentView {
         // Each paint pass repopulates the registry; stale entries must go.
         self.registry.borrow_mut().clear();
 
-        let tree = self.render_block_tree(root, false, 0, 0);
+        let tree = self.render_block_tree(root, false, 0, 0, cx);
 
         div()
             .key_context("XiaomuDocument")

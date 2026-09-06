@@ -19,6 +19,13 @@ use super::{DocumentView, navigation};
 
 /// One navigation step direction for the caret focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Where one navigation step lands: a mixed-inline caret or a whole atomic
+/// block selection.
+pub(super) enum NavTarget {
+    Inline(InlinePoint),
+    Atomic(NodeId),
+}
+
 pub(super) enum NavStep {
     /// One scalar left, respecting soft-wrap affinity before crossing bytes.
     Left,
@@ -119,9 +126,9 @@ impl DocumentView {
         focus: InlinePoint,
         forward: bool,
         cx: &App,
-    ) -> Option<InlinePoint> {
+    ) -> Option<NavTarget> {
         if let Some(projection) = self.atom_projection_for(focus.node_id(), cx) {
-            return self.atom_horizontal_target(blocks, block, focus, forward, cx, &projection);
+            return self.atom_horizontal_target(blocks, focus, forward, cx, &projection);
         }
 
         let raw = focus.text_offset().as_usize();
@@ -134,47 +141,55 @@ impl DocumentView {
         // byte index. Traverse those first, then advance to another scalar.
         if at_wrap {
             if forward && focus.affinity().is_before() {
-                return self.point_for_canonical_byte(
-                    blocks,
-                    block,
-                    raw,
-                    CursorAffinity::After,
-                    cx,
-                );
+                return self
+                    .point_for_canonical_byte(blocks, block, raw, CursorAffinity::After, cx)
+                    .map(NavTarget::Inline);
             }
             if !forward && focus.affinity().is_after() {
-                return self.point_for_canonical_byte(
-                    blocks,
-                    block,
-                    raw,
-                    CursorAffinity::Before,
-                    cx,
-                );
+                return self
+                    .point_for_canonical_byte(blocks, block, raw, CursorAffinity::Before, cx)
+                    .map(NavTarget::Inline);
             }
         }
 
-        let (target_block, target_raw) = navigation::step_horizontal(blocks, block, raw, forward)?;
-        let target_affinity = if !forward
-            && self
-                .child_for_node(blocks[target_block].node)
-                .is_some_and(|view| view.read(cx).visual_is_soft_wrap_boundary(target_raw))
-        {
-            CursorAffinity::After
-        } else {
-            CursorAffinity::Before
-        };
-        self.point_for_canonical_byte(blocks, target_block, target_raw, target_affinity, cx)
+        // The unit sequence may interleave atomic blocks after this one;
+        // horizontal steps stop on them as whole-node selections.
+        let document = self.session.borrow().document().clone();
+        let units = navigation::nav_units(&document);
+        let unit = navigation::unit_index(&units, focus.node_id())?;
+        match navigation::step_horizontal(&units, unit, raw, forward)? {
+            navigation::HorizontalTarget::OnAtomic(unit_index) => match &units[unit_index] {
+                navigation::NavUnit::Atomic(node) => Some(NavTarget::Atomic(*node)),
+                _ => None,
+            },
+            navigation::HorizontalTarget::InText(unit_index, target_raw) => {
+                let navigation::NavUnit::Text(target_block) = &units[unit_index] else {
+                    return None;
+                };
+                let target_block = navigation::block_index(blocks, target_block.node)?;
+                let target_affinity = if !forward
+                    && self
+                        .child_for_node(blocks[target_block].node)
+                        .is_some_and(|view| view.read(cx).visual_is_soft_wrap_boundary(target_raw))
+                {
+                    CursorAffinity::After
+                } else {
+                    CursorAffinity::Before
+                };
+                self.point_for_canonical_byte(blocks, target_block, target_raw, target_affinity, cx)
+                    .map(NavTarget::Inline)
+            }
+        }
     }
 
     fn atom_horizontal_target(
         &self,
         blocks: &[navigation::TextBlock],
-        block: usize,
         focus: InlinePoint,
         forward: bool,
         cx: &App,
         projection: &InlineAtomDisplayProjection,
-    ) -> Option<InlinePoint> {
+    ) -> Option<NavTarget> {
         let raw = projection.display_offset_for_inline_point(focus)?;
         let child = self.child_for_node(focus.node_id());
         let at_wrap = child
@@ -182,30 +197,49 @@ impl DocumentView {
             .is_some_and(|view| view.read(cx).visual_is_soft_wrap_boundary(raw));
         if at_wrap {
             if forward && focus.affinity().is_before() {
-                return projection.inline_point_for_display_boundary(raw, CursorAffinity::After);
+                return projection
+                    .inline_point_for_display_boundary(raw, CursorAffinity::After)
+                    .map(NavTarget::Inline);
             }
             if !forward && focus.affinity().is_after() {
-                return projection.inline_point_for_display_boundary(raw, CursorAffinity::Before);
+                return projection
+                    .inline_point_for_display_boundary(raw, CursorAffinity::Before)
+                    .map(NavTarget::Inline);
             }
         }
 
         let display_len = projection.display_text().len();
         if (forward && raw >= display_len) || (!forward && raw == 0) {
-            // Cross-block: the neighbor walk speaks canonical bytes.
+            // Cross-block: the neighbor walk speaks canonical bytes and may
+            // land on an atomic unit, which selects the block as a whole.
             let canonical = if forward {
                 projection.canonical_text().len()
             } else {
                 0
             };
-            let (target_block, target_raw) =
-                navigation::step_horizontal(blocks, block, canonical, forward)?;
-            return self.point_for_canonical_byte(
-                blocks,
-                target_block,
-                target_raw,
-                CursorAffinity::Before,
-                cx,
-            );
+            let document = self.session.borrow().document().clone();
+            let units = navigation::nav_units(&document);
+            let unit = navigation::unit_index(&units, focus.node_id())?;
+            return match navigation::step_horizontal(&units, unit, canonical, forward)? {
+                navigation::HorizontalTarget::OnAtomic(unit_index) => match &units[unit_index] {
+                    navigation::NavUnit::Atomic(node) => Some(NavTarget::Atomic(*node)),
+                    _ => None,
+                },
+                navigation::HorizontalTarget::InText(unit_index, target_raw) => {
+                    let navigation::NavUnit::Text(target_block) = &units[unit_index] else {
+                        return None;
+                    };
+                    let target_block = navigation::block_index(blocks, target_block.node)?;
+                    self.point_for_canonical_byte(
+                        blocks,
+                        target_block,
+                        target_raw,
+                        CursorAffinity::Before,
+                        cx,
+                    )
+                    .map(NavTarget::Inline)
+                }
+            };
         }
 
         // Step one scalar in display space; renderer interiors are skipped as
@@ -238,7 +272,7 @@ impl DocumentView {
         } else {
             CursorAffinity::Before
         };
-        Self::point_for_display_byte(projection, stepped, target_affinity)
+        Self::point_for_display_byte(projection, stepped, target_affinity).map(NavTarget::Inline)
     }
 
     fn vertical_target(
@@ -332,6 +366,11 @@ impl DocumentView {
         if self.focused_child_composing(window, cx) {
             return;
         }
+        // A whole atomic block selection navigates across the unit sequence.
+        let atomic_focus = self.session.borrow().selection().as_atomic_node();
+        if let Some(node) = atomic_focus {
+            return self.navigate_from_atomic(node, step, extend, window, cx);
+        }
         let Some((blocks, block, focus)) = self.visual_focus_location() else {
             return;
         };
@@ -352,10 +391,14 @@ impl DocumentView {
             NavStep::Left | NavStep::Right => {
                 self.desired_x = None;
                 let forward = matches!(step, NavStep::Right);
-                let Some(point) = self.horizontal_target(&blocks, block, focus, forward, cx) else {
+                let Some(target) = self.horizontal_target(&blocks, block, focus, forward, cx)
+                else {
                     return;
                 };
-                self.move_focus_to(point, extend, window, cx);
+                match target {
+                    NavTarget::Inline(point) => self.move_focus_to(point, extend, window, cx),
+                    NavTarget::Atomic(node) => self.move_focus_to_atomic(node, window, cx),
+                }
             }
             NavStep::LineStart | NavStep::LineEnd => {
                 self.desired_x = None;
@@ -366,5 +409,76 @@ impl DocumentView {
                 self.move_focus_to(point, extend, window, cx);
             }
         }
+    }
+
+    /// Horizontal navigation from a whole atomic block selection: steps to
+    /// the neighboring unit in document order (text block edge or another
+    /// atomic selection). Vertical and line-edge gestures have no visual
+    /// lines to walk on an atomic block and stay no-ops in this slice.
+    fn navigate_from_atomic(
+        &mut self,
+        node: NodeId,
+        step: NavStep,
+        extend: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(
+            step,
+            NavStep::Up | NavStep::Down | NavStep::LineStart | NavStep::LineEnd
+        ) {
+            return;
+        }
+        self.desired_x = None;
+        let forward = matches!(step, NavStep::Right);
+        let document = self.session.borrow().document().clone();
+        let units = navigation::nav_units(&document);
+        let Some(index) = navigation::unit_index(&units, node) else {
+            return;
+        };
+        let Some(target) = navigation::step_horizontal(&units, index, 0, forward) else {
+            return;
+        };
+        match target {
+            navigation::HorizontalTarget::OnAtomic(unit_index) => {
+                if let navigation::NavUnit::Atomic(next) = &units[unit_index] {
+                    self.move_focus_to_atomic(*next, window, cx);
+                }
+            }
+            navigation::HorizontalTarget::InText(unit_index, raw) => {
+                let Some(navigation::NavUnit::Text(block)) = units.get(unit_index) else {
+                    return;
+                };
+                let blocks = navigation::text_blocks(&document);
+                let Some(block_index) = navigation::block_index(&blocks, block.node) else {
+                    return;
+                };
+                let Some(point) = self.point_for_canonical_byte(
+                    &blocks,
+                    block_index,
+                    raw,
+                    CursorAffinity::Before,
+                    cx,
+                ) else {
+                    return;
+                };
+                self.move_focus_to(point, extend, window, cx);
+            }
+        }
+    }
+
+    /// Selects one atomic block as a whole node and routes focus.
+    fn move_focus_to_atomic(&mut self, node: NodeId, window: &mut Window, cx: &mut Context<Self>) {
+        self.desired_x = None;
+        let outcome = self.session.borrow_mut().set_atomic_selection(node);
+        match outcome {
+            Ok(xiaomu_runtime::session::SessionOutcome::NoChange) => {}
+            Ok(_) => {
+                self.route_focus(window, cx);
+                self.request_focus_scroll(cx);
+            }
+            Err(error) => eprintln!("xiaomu: selection rejected: {error}"),
+        }
+        cx.notify();
     }
 }
