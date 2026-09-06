@@ -121,6 +121,24 @@ pub enum TransactionStep {
         /// Content of the created node; child references must already exist.
         content: NodeContent,
     },
+    /// Inserts a whole `rows × columns` table as a child of `parent`.
+    ///
+    /// Core allocates the table, its rows, its cells, and one empty
+    /// paragraph per cell with fresh stable identities; the structural
+    /// invariants (uniform column count, non-empty cells) hold in every
+    /// snapshot this step can produce. Intermediate table shapes cannot be
+    /// expressed through validated `InsertNode` staging, so construction is
+    /// a semantic step the way `InsertInlineAtom` is.
+    InsertTable {
+        /// Existing parent whose child list gains the table.
+        parent: NodeId,
+        /// Number of children before the insertion point.
+        index: usize,
+        /// Number of rows; must be at least one.
+        rows: usize,
+        /// Number of columns; must be at least one and is shared by all rows.
+        columns: usize,
+    },
     /// Removes `node` together with its whole subtree from the document.
     ///
     /// The root cannot be removed.

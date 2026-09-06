@@ -160,11 +160,16 @@ fn validate_tree(root: NodeId, store: &NodeStore) -> Result<()> {
     let mut visited = BTreeSet::new();
     let mut active = BTreeSet::new();
     let mut parent_counts: BTreeMap<NodeId, usize> = BTreeMap::new();
+    // Per-table frame: the column count every visited row must share.
+    let mut table_columns: Vec<Option<usize>> = Vec::new();
     let mut stack = vec![(root, true)];
 
     while let Some((id, entering)) = stack.pop() {
         if !entering {
             active.remove(&id);
+            if matches!(store.get(id).map(Node::kind), Some(NodeKind::Table)) {
+                table_columns.pop();
+            }
             continue;
         }
 
@@ -182,6 +187,38 @@ fn validate_tree(root: NodeId, store: &NodeStore) -> Result<()> {
         let node = store.get(id).ok_or(Error::UnknownNode)?;
 
         if let Some(children) = node.content().as_children() {
+            match node.kind() {
+                NodeKind::Table => {
+                    if children.is_empty() {
+                        return Err(Error::InvalidTableStructure);
+                    }
+                    table_columns.push(None);
+                }
+                NodeKind::TableRow => {
+                    if children.is_empty()
+                        || !children.iter().all(|cell| {
+                            store
+                                .get(*cell)
+                                .is_some_and(|cell| matches!(cell.kind(), NodeKind::TableCell))
+                        })
+                    {
+                        return Err(Error::InvalidTableStructure);
+                    }
+                    let columns = match table_columns.last_mut() {
+                        Some(frame) => frame,
+                        None => return Err(Error::InvalidTableStructure),
+                    };
+                    match columns {
+                        None => *columns = Some(children.len()),
+                        Some(expected) if *expected == children.len() => {}
+                        Some(_) => return Err(Error::InvalidTableStructure),
+                    }
+                }
+                NodeKind::TableCell if children.is_empty() => {
+                    return Err(Error::InvalidTableStructure);
+                }
+                _ => {}
+            }
             for child_id in children.iter().rev() {
                 let child = store.get(*child_id).ok_or(Error::UnknownNode)?;
                 if !allows_child(node.kind(), child.kind()) {

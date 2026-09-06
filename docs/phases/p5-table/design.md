@@ -33,7 +33,7 @@ TableRow 的 children 全是 TableCell 且 ≥1 cell
 TableCell 的 children ≥1 且不含 Table 之外的容器约束沿用 allows_child
 ```
 
-不加新 Core transaction step：插入行/列 = staged `InsertNode`（row → 各 cell，cell 内联 Paragraph）组合；删除 = `RemoveNode`（子树随删）。P4 的 staged transaction 模式（中间 snapshot 不可见、整命令一个 history entry、inverse 自动推导）直接覆盖。
+表格构造是 Core 语义步骤 `TransactionStep::InsertTable { parent, index, rows, columns }`（P5.1 实施修订）：每个 stage 事务都会独立通过 `validate_tree`，而表格中间态（有行无 cell、有 cell 无段落、空表）必然非法，因此 `InsertNode` 分层 staging 无法表达嵌套构造。`InsertTable` 与 `InsertInlineAtom` 同一哲学——Core 分配 table/row/cell/cell 内空 Paragraph 的全部 fresh identity，产出的 snapshot 直接满足表格不变量，inverse 为 `RemoveNode`（子树随删）。行/列级别操作（P5.3）仍然用既有 `InsertNode / RemoveNode` 组合：它们在已有合法表格上插入/删除合法行或列，每个中间态都合法。
 
 ## 2. 位置与选区
 

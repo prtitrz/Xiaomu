@@ -52,6 +52,12 @@ pub enum NodeKind {
     HorizontalRule,
     /// Image atomic block.
     Image,
+    /// Table container of table rows (P5.1).
+    Table,
+    /// One row of a table; children are table cells.
+    TableRow,
+    /// One cell of a table row; children are ordinary blocks.
+    TableCell,
     /// Extension-defined inline atom with a stable semantic key.
     InlineAtom(AtomKind),
     /// Extension-defined block kind preserved by its stable key.

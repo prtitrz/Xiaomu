@@ -69,7 +69,10 @@ fn validate_content_shape(kind: &NodeKind, content: &NodeContent) -> Result<()> 
         | NodeKind::Quote
         | NodeKind::BulletList
         | NodeKind::OrderedList
-        | NodeKind::ListItem => matches!(content, NodeContent::Children(_)),
+        | NodeKind::ListItem
+        | NodeKind::Table
+        | NodeKind::TableRow
+        | NodeKind::TableCell => matches!(content, NodeContent::Children(_)),
         NodeKind::Paragraph | NodeKind::Heading(_) | NodeKind::CodeBlock => {
             matches!(content, NodeContent::Inline(_))
         }

@@ -60,6 +60,17 @@ pub enum EditIntent {
         /// Typed canonical image attrs (source, alt, optional metadata).
         image: ImageAttrs,
     },
+    /// Inserts a `rows × columns` table after the focused block (P5.1).
+    ///
+    /// Core allocates the whole subtree (rows, cells, one empty paragraph
+    /// per cell) as one semantic step; the command is one isolated history
+    /// entry and the caret stays where it was.
+    InsertTable {
+        /// Number of rows; must be at least one.
+        rows: usize,
+        /// Number of columns; must be at least one.
+        columns: usize,
+    },
     /// Commit one native IME composition over an explicit canonical range.
     ///
     /// Composition updates remain frontend-transient. The final committed

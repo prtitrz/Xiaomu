@@ -80,6 +80,8 @@ pub enum Error {
     /// Image node attrs violate the typed image contract (missing or
     /// ambiguous source, empty alternative text, non-positive dimensions).
     InvalidImageAttrs,
+    /// A table violates row/column structural invariants.
+    InvalidTableStructure,
 }
 
 impl fmt::Display for Error {
@@ -128,6 +130,9 @@ impl fmt::Display for Error {
             Self::InvalidSelection => f.write_str("selection is invalid for the document"),
             Self::InvalidDocument => f.write_str("document invariants are not satisfied"),
             Self::InvalidTransaction => f.write_str("transaction cannot be applied"),
+            Self::InvalidTableStructure => {
+                f.write_str("table rows must share one column count with non-empty cells")
+            }
             Self::InvalidImageAttrs => f.write_str("image attrs violate the typed image contract"),
         }
     }
