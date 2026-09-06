@@ -239,8 +239,8 @@ P4.5 gate 审计发现并修复两个不一致（随本切片交付）：
 
 - [x] async asset resolve——`crates/xiaomu-gpui/src/image_block.rs`：paint pass 对 stale 的 Image AssetRef 发起 `AssetService::resolve`；sink 仅落地 cache（`ImageLoadCache`，键 node identity + source key），stale result 按 source 变更丢弃；resolve 回调无前端上下文，re-render 调度归宿主集成（cache 幂等，paint 时重读）
 - [x] loading / error placeholder——Image 块渲染状态化占位：无 service / ExternalUrl → 中性占位 + alt；Loading / Resolved / Failed(AssetError) 各自颜色与标签；invalid attrs fail soft 显示错误占位。**真实 texture 解码绘制留待下一切片**（需引入解码依赖）
-- [ ] image layout / paint / hit-test（texture 绘制切片）
-- [ ] aspect ratio / intrinsic size（占位固定高度；texture 切片按 attrs 宽高比缩放）
+- [x] image layout / paint / hit-test——Resolved 状态经 `gpui::ImageSource::Image`（`img()`）绘制真实纹理：宿主在 `ResolvedAsset` 声明 `AssetFormat::{Png, Jpeg}`，view 缓存 `Arc<gpui::Image>`（与状态同 source-key 校验）；点击命中即 P4.6 atomic 节点选择
+- [x] aspect ratio / intrinsic size——`img()` 以解码源固有尺寸为准，`w_full` + `max_h(320px)` + `ObjectFit::Contain` 约束显示尺寸；attrs width/height 作为元数据随 canonical attrs 保存
 - [x] mouse + keyboard selection——Image 块即 P4.6 atomic 单元：plain click 节点选择、Left/Right 横向 traversal、Backspace/Delete/undo/redo 全部复用 P4.6 seam；e2e `tests/image_block_gpui.rs`
 - [ ] accessibility fallback
 

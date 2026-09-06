@@ -50,22 +50,42 @@ pub enum AssetError {
     Unavailable,
 }
 
+/// The declared encoding of one resolved asset payload.
+///
+/// The host knows what it stored; the frontend uses this to pick its
+/// decoder. The set stays intentionally small until hosts need more.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AssetFormat {
+    /// PNG-encoded raster data.
+    Png,
+    /// JPEG-encoded raster data.
+    Jpeg,
+}
+
 /// The resolved payload for one asset reference.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedAsset {
     asset_ref: AssetRef,
     revision: u64,
+    format: AssetFormat,
     bytes: Vec<u8>,
 }
 
 impl ResolvedAsset {
     /// Builds one resolved asset payload.
-    pub fn new(asset_ref: AssetRef, revision: u64, bytes: Vec<u8>) -> Self {
+    pub fn new(asset_ref: AssetRef, revision: u64, format: AssetFormat, bytes: Vec<u8>) -> Self {
         Self {
             asset_ref,
             revision,
+            format,
             bytes,
         }
+    }
+
+    /// Returns the declared payload encoding.
+    #[must_use]
+    pub const fn format(&self) -> AssetFormat {
+        self.format
     }
 
     /// Returns the reference this payload resolves.

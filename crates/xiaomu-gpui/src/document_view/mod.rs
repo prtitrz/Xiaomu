@@ -38,7 +38,10 @@ use xiaomu_runtime::persistence::DocumentPersistence;
 use crate::accessibility::{AccessibilityProjection, project_accessibility};
 use crate::atom_capability::SharedAtomCapability;
 use crate::block_view::{BlockBoundsRegistry, ParagraphView, SharedSession};
-use crate::image_block::{ImageLoadCache, ImageLoadState, SharedImageLoadCache, sync_image_loads};
+use crate::image_block::{
+    ImageBlockPresentation, ImageLoadCache, ImageLoadState, SharedImageLoadCache,
+    render_image_block, sync_image_loads,
+};
 use crate::inline_atom::InlineAtomRendererRegistry;
 use visual_navigation::NavStep;
 
@@ -309,6 +312,20 @@ impl DocumentView {
         self.set_inline_selection(point, point, window, cx);
     }
 
+    /// Returns the decoded render source of one image block, when a fresh
+    /// resolve has landed.
+    #[must_use]
+    pub fn image_render_source(&self, node: NodeId) -> Option<std::sync::Arc<gpui::Image>> {
+        let document = self.session.borrow().document().clone();
+        let node_data = document.node(node)?;
+        let attrs = ImageAttrs::from_attrs(node_data.attrs()).ok()?;
+        let source_key = match attrs.source() {
+            ImageSource::AssetRef(value) => value.clone(),
+            ImageSource::ExternalUrl(url) => url.clone(),
+        };
+        self.image_loads.render_source(node, &source_key)
+    }
+
     /// Builds the label and background for one image placeholder.
     ///
     /// The state comes from the resolve cache; hosts without an asset
@@ -334,7 +351,12 @@ impl DocumentView {
     }
 
     /// Selects an atomic block as a whole node (plain click on its rule).
-    fn select_atomic_block(&mut self, node: NodeId, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn select_atomic_block(
+        &mut self,
+        node: NodeId,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let outcome = self.session.borrow_mut().set_atomic_selection(node);
         match outcome {
             Ok(xiaomu_runtime::session::SessionOutcome::NoChange) => {}
@@ -490,37 +512,16 @@ impl DocumentView {
                 column.into_any_element()
             }
             NodeContent::Atomic if matches!(kind, NodeKind::Image) => {
-                let (label, state_color) = self.image_placeholder_presentation(id);
                 let selected = self.session.borrow().selection().as_atomic_node() == Some(id);
-                let border = if selected {
-                    gpui::rgba(0x2b6cb8ff)
-                } else {
-                    gpui::rgba(0x00000000)
+                let (label, state_color) = self.image_placeholder_presentation(id);
+                let source = self.image_render_source(id);
+                let presentation = ImageBlockPresentation {
+                    selected,
+                    label,
+                    state_color,
+                    source,
                 };
-                div()
-                    .id(("atomic-block", index))
-                    .h(px(96.0))
-                    .w_full()
-                    .my_3()
-                    .border_2()
-                    .border_color(border)
-                    .bg(state_color)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                            cx.stop_propagation();
-                            this.select_atomic_block(id, window, cx);
-                        }),
-                    )
-                    .child(
-                        div()
-                            .px_3()
-                            .py_2()
-                            .child(label)
-                            .text_size(px(14.0))
-                            .text_color(gpui::rgba(0x555555ff)),
-                    )
-                    .into_any_element()
+                render_image_block(id, index, &presentation, cx)
             }
             NodeContent::Atomic => {
                 // Atomic blocks are whole-node selectable: the rule renders

@@ -11,9 +11,19 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
+use gpui::Image as GpuiImage;
+use gpui::{
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Styled as _,
+    StyledImage as _, px,
+};
 use xiaomu_core::document::{ImageAttrs, ImageSource, NodeContent, NodeId, XiaomuDocument};
-use xiaomu_runtime::assets::{AssetError, AssetRef, AssetService, AssetSink, ResolvedAsset};
+use xiaomu_runtime::assets::{
+    AssetError, AssetFormat, AssetRef, AssetService, AssetSink, ResolvedAsset,
+};
+
+use crate::document_view::DocumentView;
 
 /// Per-node load state of one image block.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,6 +51,9 @@ struct ImageLoadEntry {
 #[derive(Default)]
 pub struct ImageLoadCache {
     entries: RefCell<HashMap<NodeId, ImageLoadEntry>>,
+    /// Decoded-ready render sources per node, validated against the source
+    /// key like the states above.
+    render_sources: RefCell<HashMap<NodeId, (String, Arc<GpuiImage>)>>,
 }
 
 impl ImageLoadCache {
@@ -64,6 +77,24 @@ impl ImageLoadCache {
                 source_key,
             },
         );
+    }
+
+    /// Returns the render source for `node`, or `None` when absent or stale.
+    #[must_use]
+    pub fn render_source(&self, node: NodeId, source_key: &str) -> Option<Arc<GpuiImage>> {
+        self.entries.borrow();
+        self.render_sources
+            .borrow()
+            .get(&node)
+            .filter(|(key, _)| key == source_key)
+            .map(|(_, image)| Arc::clone(image))
+    }
+
+    /// Stores the render source for one fresh resolve.
+    pub fn store_render_source(&self, node: NodeId, source_key: String, image: Arc<GpuiImage>) {
+        self.render_sources
+            .borrow_mut()
+            .insert(node, (source_key, image));
     }
 
     /// Applies a resolve outcome, dropping stale results whose node moved on
@@ -98,10 +129,19 @@ struct NodeImageSink {
 impl AssetSink for NodeImageSink {
     fn resolved(self: Rc<Self>, result: Result<ResolvedAsset, AssetError>) {
         let state = match result {
-            Ok(resolved) => ImageLoadState::Resolved {
-                revision: resolved.revision(),
-                byte_len: resolved.bytes().len(),
-            },
+            Ok(resolved) => {
+                let format = match resolved.format() {
+                    AssetFormat::Png => gpui::ImageFormat::Png,
+                    AssetFormat::Jpeg => gpui::ImageFormat::Jpeg,
+                };
+                let image = Arc::new(GpuiImage::from_bytes(format, resolved.bytes().to_vec()));
+                self.cache
+                    .store_render_source(self.node, self.source_key.clone(), image);
+                ImageLoadState::Resolved {
+                    revision: resolved.revision(),
+                    byte_len: resolved.bytes().len(),
+                }
+            }
             Err(error) => ImageLoadState::Failed(error),
         };
         self.cache.finish(self.node, &self.source_key, state);
@@ -177,5 +217,70 @@ pub(crate) fn sync_image_loads(
                 source_key,
             }),
         );
+    }
+}
+
+/// Everything the image block renderer needs for one paint pass.
+pub struct ImageBlockPresentation {
+    /// Whether the block carries the active whole-node selection.
+    pub selected: bool,
+    /// Placeholder label (alt text plus state prefix).
+    pub label: String,
+    /// Placeholder background tint.
+    pub state_color: gpui::Rgba,
+    /// The decoded-ready render source, when a fresh resolve landed.
+    pub source: Option<Arc<GpuiImage>>,
+}
+
+/// Renders one image block: the resolved texture when available, otherwise
+/// the stateful placeholder. The block stays whole-node selectable either
+/// way; intrinsic aspect ratio comes from the decoded source, capped to a
+/// display height.
+pub(crate) fn render_image_block(
+    node: NodeId,
+    index: usize,
+    presentation: &ImageBlockPresentation,
+    cx: &mut gpui::Context<DocumentView>,
+) -> gpui::AnyElement {
+    let border = if presentation.selected {
+        gpui::rgba(0x2b6cb8ff)
+    } else {
+        gpui::rgba(0x00000000)
+    };
+    let interactive = gpui::div()
+        .id(("atomic-block", index))
+        .w_full()
+        .my_3()
+        .border_2()
+        .border_color(border)
+        .on_mouse_down(
+            gpui::MouseButton::Left,
+            cx.listener(move |this, _: &gpui::MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                this.select_atomic_block(node, window, cx);
+            }),
+        );
+
+    match &presentation.source {
+        Some(image) => interactive
+            .child(
+                gpui::img(gpui::ImageSource::Image(Arc::clone(image)))
+                    .w_full()
+                    .max_h(Pixels::from(320.0))
+                    .object_fit(gpui::ObjectFit::Contain),
+            )
+            .into_any_element(),
+        None => interactive
+            .h(px(96.0))
+            .bg(presentation.state_color)
+            .child(
+                gpui::div()
+                    .px_3()
+                    .py_2()
+                    .child(presentation.label.clone())
+                    .text_size(px(14.0))
+                    .text_color(gpui::rgba(0x555555ff)),
+            )
+            .into_any_element(),
     }
 }
