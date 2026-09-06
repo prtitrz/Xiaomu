@@ -18,6 +18,7 @@ use xiaomu_core::selection::TextSelection;
 use xiaomu_runtime::persistence::DocumentPersistence;
 use xiaomu_runtime::session::{DocumentChangeListener, DocumentSelection, DocumentSession};
 
+use crate::atom_capability::SharedAtomCapability;
 use crate::block_view::{
     Backspace, ClipboardCopy, ClipboardCut, ClipboardPaste, Delete, Down, End, Enter, Home, Left,
     Redo, Right, SaveDocument, SelectAll, SelectDown, SelectEnd, SelectHome, SelectLeft,
@@ -41,6 +42,9 @@ pub struct EditorHooks {
     /// Inline-atom renderer registry; kinds without a renderer keep the
     /// deterministic fallback display.
     pub atom_renderers: Option<Rc<InlineAtomRendererRegistry>>,
+    /// Host adapter receiving atom activations (stable kind / action keys
+    /// and canonical data only); absent means the host ignores activations.
+    pub atom_capability: Option<SharedAtomCapability>,
 }
 
 /// One independent Xiaomu editor instance owned by a host.
@@ -52,6 +56,7 @@ pub struct EditorInstance {
     session: SharedSession,
     persistence: Option<Rc<RefCell<dyn DocumentPersistence>>>,
     atom_renderers: Option<Rc<InlineAtomRendererRegistry>>,
+    atom_capability: Option<SharedAtomCapability>,
 }
 
 impl EditorInstance {
@@ -74,6 +79,7 @@ impl EditorInstance {
             session: Rc::new(RefCell::new(session)),
             persistence: hooks.persistence,
             atom_renderers: hooks.atom_renderers,
+            atom_capability: hooks.atom_capability,
         })
     }
 
@@ -95,6 +101,9 @@ impl EditorInstance {
         }
         if let Some(renderers) = &self.atom_renderers {
             view.set_atom_renderers(renderers.clone());
+        }
+        if let Some(capability) = &self.atom_capability {
+            view.set_atom_capability(capability.clone());
         }
         view
     }
@@ -331,6 +340,7 @@ mod tests {
                 persistence: None,
                 listener: Some(Box::new(CountListener(a_changes.clone()))),
                 atom_renderers: None,
+                atom_capability: None,
             },
         )
         .unwrap();
@@ -341,6 +351,7 @@ mod tests {
                 persistence: None,
                 listener: Some(Box::new(CountListener(b_changes.clone()))),
                 atom_renderers: None,
+                atom_capability: None,
             },
         )
         .unwrap();

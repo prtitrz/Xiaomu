@@ -9,17 +9,17 @@ P4A Inline Atom / Extension Seam  ← 当前施工
 P4B Atomic Block / Media          ← P4A 后继续
 ```
 
-截至 2026-09-03：
+截至 2026-09-05：
 
 ```text
 P4.1 Inline Coordinate Contract   CLOSED
 P4.2 Canonical Inline Atom        CLOSED
-P4.3 Runtime Atom Editing         CLOSED pending PR #63 merge
-P4.4 GPUI Renderer / Capability   CURRENT
-P4.5 P4A Integration Gate         NEXT
+P4.3 Runtime Atom Editing         CLOSED
+P4.4 GPUI Renderer / Capability   CLOSED
+P4.5 P4A Integration Gate         CURRENT
 ```
 
-P4.3 在 PR #58 / #59 / #60 建立主体能力后，经审计修复 PR #62 与 hierarchical structured-paste 收尾 PR #63 补齐边界矩阵。PR #63 current-head CI #354 已通过 Ubuntu、macOS、Windows、policy 与汇总 `CI Success`。
+P4.3 在 PR #58 / #59 / #60 建立主体能力后，经审计修复 PR #62 与 hierarchical structured-paste 收尾 PR #63 补齐边界矩阵。P4.4 由 #64（display projection）/#65（layout / caret）/#66（runtime selection seam）/#67（hit-test / chip paint / 收尾）/#68（键盘视觉导航）与本切片（host capability + harness demo + 多 editor 隔离）闭合；P4.5 通过即 **P4A CLOSED**。
 
 ## P4A — Inline Atom / Extension Seam
 
@@ -107,7 +107,7 @@ PR 轨迹：
 #63 hierarchical structured paste + atom-aware staged split
 ```
 
-### P4.4 GPUI Renderer / Host Capability — CURRENT
+### P4.4 GPUI Renderer / Host Capability — CLOSED
 
 已交付：
 
@@ -187,14 +187,14 @@ P4.4b 实施顺序：
 #### P4.4c Host capability / demo
 
 - [x] `visual_focus_location / horizontal_target` 全链路保留 `InlinePoint`——键盘视觉导航按块坐标空间换算：纯文本块保持 canonical byte 路径；含 atom 块经 `InlineAtomDisplayProjection` 在 display 空间步进，chip 内部作为一个 caret unit 跳过（永不成为 caret 停点），跨块行走保持 canonical 并在目标块尾保留 end-anchored seam ordinal；`desired_x` 连续性锚点升级为 `InlinePoint`
-- [ ] host capability action 只传 stable kind / action key / attrs / NodeId
-- [ ] 宿主业务类型不得进入 Core / Runtime
-- [ ] editor harness 接入至少一种 demo atom
-- [ ] renderer / capability 多 editor 隔离
+- [x] host capability action 只传 stable kind / action key / attrs / NodeId——`InlineAtomHostCapability::atom_action(AtomAction)`（`crates/xiaomu-gpui/src/atom_capability.rs`；`ATOM_ACTION_CLICK` 稳定键），plain click 落在 chip 内部时经 `DocumentView` 发出；`EditorHooks.atom_capability` 由 `editor.rs` 注入
+- [x] 宿主业务类型不得进入 Core / Runtime——capability 只见 `NodeId + AtomKind + action key + attrs 快照`，宿主侧自行解释（harness 用 attrs 解码 `@handle`）；`build_view` 后 `DocumentView::set_atom_capability` 可替换
+- [x] editor harness 接入至少一种 demo atom——harness `MentionChipRenderer` 显示 `@{handle}`；store fixture v3：`atom\t<kind>\t<fallback>` 行 + 行内 `{a#N}` 放置 token（`{` 转义 `\{`；v2 读兼容；未定义 atom 引用 fail closed）
+- [x] renderer / capability 多 editor 隔离——registry 与 capability 都是 per-editor 值（同 canonical 文档经不同 registry 投影不同、点击 A 不触发 B 的 recorder），e2e 点击测试 `atom_clicks_activate_only_the_clicked_editor`（`tests/multi_editor_host.rs`）
 
-P4.4 Gate：未知 renderer fail soft；相邻 atom 的 caret、selection、layout 与 hit-test 一致；宿主动作不把 business type 带进 Core / Runtime。
+P4.4 Gate：未知 renderer fail soft；相邻 atom 的 caret、selection、layout 与 hit-test 一致；宿主动作不把 business type 带进 Core / Runtime。**P4.4 CLOSED（#67 / #68 / 本切片）。**
 
-### P4.5 Inline Atom Integration Gate
+### P4.5 Inline Atom Integration Gate — CURRENT
 
 - [ ] realistic extension fixture
 - [ ] multi-editor extension isolation

@@ -20,8 +20,10 @@ use std::rc::Rc;
 
 mod store;
 
-use xiaomu_core::document::{NodeContent, NodeId, XiaomuDocument};
+use xiaomu_core::document::{AttrValue, NodeContent, NodeId, XiaomuDocument};
+use xiaomu_gpui::atom_capability::{AtomAction, InlineAtomHostCapability};
 use xiaomu_gpui::editor::{EditorHooks, run_document_editor_with_hooks};
+use xiaomu_gpui::inline_atom::{InlineAtomRenderer, InlineAtomRendererRegistry, InlineAtomView};
 use xiaomu_runtime::persistence::DocumentPersistence;
 use xiaomu_runtime::session::{DocumentChangeListener, DocumentSelection};
 
@@ -52,10 +54,18 @@ fn main() {
     let selection = caret_at_first_block(&document);
     let counter = Rc::new(RefCell::new(ChangeCounter::default()));
 
+    // Demo atom legs: mention chips render `@handle` from canonical attrs,
+    // and clicks on any chip log an action through the capability seam.
+    let mut renderers = InlineAtomRendererRegistry::new();
+    renderers.register(
+        &xiaomu_core::document::AtomKind::new("mention").unwrap(),
+        Rc::new(MentionChipRenderer),
+    );
     let hooks = EditorHooks {
         persistence: Some(store.clone()),
         listener: Some(Box::new(CounterListener(counter.clone()))),
-        atom_renderers: None,
+        atom_renderers: Some(Rc::new(renderers)),
+        atom_capability: Some(Rc::new(LoggingCapability)),
     };
 
     // The counter survives the run because GPUI quits when the window
@@ -80,6 +90,36 @@ struct CounterListener(Rc<RefCell<ChangeCounter>>);
 impl DocumentChangeListener for CounterListener {
     fn document_changed(&mut self, _document: &XiaomuDocument, _selection: DocumentSelection) {
         self.0.borrow_mut().document_changes += 1;
+    }
+}
+
+/// Demo renderer for mention chips: displays `@handle` from the atom's
+/// canonical attrs, falling back to the canonical fallback text.
+struct MentionChipRenderer;
+
+impl InlineAtomRenderer for MentionChipRenderer {
+    fn display_text(&self, atom: &InlineAtomView) -> String {
+        match atom.attrs().get("handle") {
+            Some(AttrValue::String(handle)) => format!("@{handle}"),
+            _ => atom.fallback_text().to_owned(),
+        }
+    }
+}
+
+/// Demo host capability: logs atom activations. Only stable keys and the
+/// canonical attrs snapshot cross the seam; no business types travel into
+/// Core or Runtime.
+struct LoggingCapability;
+
+impl InlineAtomHostCapability for LoggingCapability {
+    fn atom_action(&self, action: AtomAction) {
+        eprintln!(
+            "xiaomu: atom action \"{}\" on kind \"{}\" (node {:?}, {} attr(s))",
+            action.action,
+            action.kind.as_str(),
+            action.node,
+            action.attrs.len()
+        );
     }
 }
 

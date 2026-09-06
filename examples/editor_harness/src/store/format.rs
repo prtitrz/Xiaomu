@@ -4,11 +4,15 @@
 //! host-contract harness only.
 
 use std::collections::BTreeMap;
+use std::iter::Peekable;
+use std::str::Lines;
 
 use xiaomu_core::document::{
-    AttrValue, HeadingLevel, InlineContent, LinkMark, Mark, MarkSet, NodeAttrs, NodeContent,
-    NodeId, NodeKind, NodeStoreBuilder, TextRun, XiaomuDocument,
+    AtomKind, AttrValue, HeadingLevel, InlineAtomContent, InlineAtomPlacement, InlineContent,
+    LinkMark, Mark, MarkSet, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStoreBuilder, TextRun,
+    XiaomuDocument,
 };
+use xiaomu_core::text::TextBuffer;
 use xiaomu_runtime::persistence::PersistenceError;
 
 pub(crate) fn write_node(
@@ -28,19 +32,13 @@ pub(crate) fn write_node(
     }
     match (node.kind(), node.content()) {
         (NodeKind::Paragraph, NodeContent::Inline(inline)) => {
-            out.push_str("p\t");
-            out.push_str(&encode_inline(inline)?);
-            out.push('\n');
+            write_inline_leaf(document, "p", inline, out)?;
         }
         (NodeKind::Heading(level), NodeContent::Inline(inline)) => {
-            out.push_str(&format!("h{}\t", level.as_u8()));
-            out.push_str(&encode_inline(inline)?);
-            out.push('\n');
+            write_inline_leaf(document, &format!("h{}", level.as_u8()), inline, out)?;
         }
         (NodeKind::CodeBlock, NodeContent::Inline(inline)) => {
-            out.push_str("code\t");
-            out.push_str(&encode_inline(inline)?);
-            out.push('\n');
+            write_inline_leaf(document, "code", inline, out)?;
         }
         (_, NodeContent::Children(children)) => {
             match node.kind() {
@@ -69,15 +67,132 @@ fn unsupported_node_error(kind: &NodeKind) -> PersistenceError {
     ))
 }
 
-fn encode_inline(inline: &InlineContent) -> Result<String, PersistenceError> {
+/// Writes one inline-bearing leaf line plus the atom node lines its
+/// placements reference (v3). Atom indices in the line are positions in the
+/// order atoms are first referenced.
+fn write_inline_leaf(
+    document: &XiaomuDocument,
+    tag: &str,
+    inline: &InlineContent,
+    out: &mut String,
+) -> Result<(), PersistenceError> {
+    let mut atom_ids = Vec::new();
+    out.push_str(tag);
+    out.push('\t');
+    out.push_str(&encode_inline(inline, &mut atom_ids)?);
+    out.push('\n');
+    for atom in atom_ids {
+        write_atom(document, atom, out)?;
+    }
+    Ok(())
+}
+
+fn write_atom(
+    document: &XiaomuDocument,
+    id: NodeId,
+    out: &mut String,
+) -> Result<(), PersistenceError> {
+    let Some(node) = document.node(id) else {
+        return Err(PersistenceError(
+            "fixture document references a missing atom node".to_owned(),
+        ));
+    };
+    let NodeKind::InlineAtom(kind) = node.kind() else {
+        return Err(PersistenceError(
+            "inline atom placement references a non-atom node".to_owned(),
+        ));
+    };
+    let NodeContent::InlineAtom(content) = node.content() else {
+        return Err(PersistenceError(
+            "inline atom node has non-atom content".to_owned(),
+        ));
+    };
+    if !node.attrs().is_empty() {
+        out.push_str("@\t");
+        out.push_str(&encode_attrs(node.attrs())?);
+        out.push('\n');
+    }
+    out.push_str("atom\t");
+    out.push_str(kind.as_str());
+    out.push('\t');
+    out.push_str(&escape_text(content.fallback_text()));
+    out.push('\n');
+    Ok(())
+}
+
+fn encode_inline(
+    inline: &InlineContent,
+    atom_ids: &mut Vec<NodeId>,
+) -> Result<String, PersistenceError> {
+    enum Item {
+        Text(String, String),
+        Atom(usize),
+    }
+
+    let mut items: Vec<Item> = Vec::new();
+    let mut cursor = 0usize;
+    let mut pending = inline.atoms().iter().peekable();
+
+    for run in inline.runs() {
+        let run_start = cursor;
+        let run_end = run_start + run.len_bytes();
+        cursor = run_end;
+        let mut text_start = run_start;
+        // Anchors are byte-sorted; one anchored exactly at `run_end` is
+        // consumed here so the next run starts after it.
+        while let Some(placement) = pending.peek() {
+            let anchor = placement.text_offset().as_usize();
+            if anchor > run_end {
+                break;
+            }
+            if anchor > text_start {
+                items.push(Item::Text(
+                    escape_text(&run.text().as_str()[text_start - run_start..anchor - run_start]),
+                    encode_marks(run.marks())?,
+                ));
+            }
+            items.push(Item::Atom(atom_ids.len()));
+            atom_ids.push(placement.atom());
+            text_start = anchor;
+            pending.next();
+        }
+        if run_end > text_start {
+            items.push(Item::Text(
+                escape_text(&run.text().as_str()[text_start - run_start..run_end - run_start]),
+                encode_marks(run.marks())?,
+            ));
+        }
+    }
+    // Only reachable when the canonical text is empty and atoms anchor at 0.
+    for placement in pending {
+        if placement.text_offset().as_usize() != cursor {
+            return Err(PersistenceError(
+                "inline atom placement is not representable in the fixture format".to_owned(),
+            ));
+        }
+        items.push(Item::Atom(atom_ids.len()));
+        atom_ids.push(placement.atom());
+    }
+
     let mut out = String::new();
-    for (index, run) in inline.runs().iter().enumerate() {
-        if index > 0 {
+    let mut first = true;
+    for item in items {
+        if !first {
             out.push('\t');
         }
-        out.push_str(&escape_text(run.text().as_str()));
-        out.push('\t');
-        out.push_str(&encode_marks(run.marks())?);
+        first = false;
+        match item {
+            Item::Text(text, marks) => {
+                out.push_str(&text);
+                out.push('\t');
+                out.push_str(&marks);
+            }
+            Item::Atom(index) => {
+                out.push_str("{a#");
+                out.push_str(&index.to_string());
+                out.push('}');
+            }
+        }
     }
     Ok(out)
 }
@@ -288,6 +403,7 @@ pub fn escape_text(text: &str) -> String {
     text.replace('\\', "\\\\")
         .replace('\t', "\\t")
         .replace('\n', "\\n")
+        .replace('{', "\\{")
 }
 
 pub fn unescape_text(text: &str) -> String {
@@ -298,6 +414,7 @@ pub fn unescape_text(text: &str) -> String {
             match chars.next() {
                 Some('t') => out.push('\t'),
                 Some('n') => out.push('\n'),
+                Some('{') => out.push('{'),
                 Some('\\') => out.push('\\'),
                 Some(other) => {
                     out.push('\\');
@@ -312,30 +429,55 @@ pub fn unescape_text(text: &str) -> String {
     out
 }
 
-fn parse_inline(rest: &str) -> Result<InlineContent, String> {
+/// One parsed inline field: text segments in order plus atom placements as
+/// `(token index, raw byte offset)` pairs awaiting atom node resolution.
+struct PendingInline {
+    segments: Vec<(String, MarkSet)>,
+    placements: Vec<(usize, usize)>,
+}
+
+/// Parses an inline field. Text travels as text/marks pair items; `{a#N}`
+/// items are atom placement tokens (v3). Plain v2 fields carry no tokens and
+/// parse identically.
+fn parse_inline_pending(rest: &str) -> Result<PendingInline, String> {
+    let mut pending = PendingInline {
+        segments: Vec::new(),
+        placements: Vec::new(),
+    };
     if rest.is_empty() {
-        return InlineContent::new(Vec::new()).map_err(|error| error.to_string());
+        return Ok(pending);
     }
     let fields: Vec<&str> = rest.split('\t').collect();
-    if !fields.len().is_multiple_of(2) {
-        return Err("inline runs must be text/marks pairs".to_owned());
-    }
-    let mut runs = Vec::new();
-    for chunk in fields.chunks_exact(2) {
-        let text = unescape_text(chunk[0]);
-        let marks = parse_marks(chunk[1])?;
-        if text.is_empty() && marks.is_empty() {
+    let mut index = 0usize;
+    let mut offset = 0usize;
+    while index < fields.len() {
+        if let Some(token) = fields[index]
+            .strip_prefix("{a#")
+            .and_then(|rest| rest.strip_suffix('}'))
+        {
+            let atom_index: usize = token.parse().map_err(|_| "bad atom token".to_owned())?;
+            pending.placements.push((atom_index, offset));
+            index += 1;
             continue;
         }
-        runs.push(TextRun::new(text, marks).map_err(|error| error.to_string())?);
+        let text = unescape_text(fields[index]);
+        let marks = fields
+            .get(index + 1)
+            .ok_or("inline runs must be text/marks pairs")?;
+        let marks = parse_marks(marks)?;
+        offset += text.len();
+        if !(text.is_empty() && marks.is_empty()) {
+            pending.segments.push((text, marks));
+        }
+        index += 2;
     }
-    InlineContent::new(runs).map_err(|error| error.to_string())
+    Ok(pending)
 }
 
 pub fn parse_document(text: &str) -> Result<XiaomuDocument, String> {
     let mut lines = text.lines();
     match lines.next() {
-        Some("xiaomu-fixture-doc v2") => {}
+        Some("xiaomu-fixture-doc v2" | "xiaomu-fixture-doc v3") => {}
         _ => return Err("unknown fixture header".to_owned()),
     }
 
@@ -365,9 +507,81 @@ pub fn parse_document(text: &str) -> Result<XiaomuDocument, String> {
             }
         }
 
-        fn leaf(&mut self, kind: NodeKind, rest: &str) -> Result<(), String> {
-            let inline = parse_inline(rest)?;
+        fn leaf(
+            &mut self,
+            kind: NodeKind,
+            rest: &str,
+            lines: &mut Peekable<Lines<'_>>,
+        ) -> Result<(), String> {
+            let pending = parse_inline_pending(rest)?;
             let attrs = self.take_attrs();
+            // Atom node lines follow the leaf line they are placed in; each
+            // may carry its own attrs line. Token indices map by order.
+            let mut atom_ids: Vec<NodeId> = Vec::new();
+            while let Some(peeked) = lines.peek() {
+                let line = (*peeked).to_owned();
+                if let Some(spec) = line.strip_prefix("@\t") {
+                    lines.next();
+                    self.pending_attrs = parse_attrs(spec)?;
+                    continue;
+                }
+                if line == "@" {
+                    return Err("empty attrs line".to_owned());
+                }
+                let Some(atom_rest) = line.strip_prefix("atom\t") else {
+                    break;
+                };
+                lines.next();
+                let mut fields = atom_rest.splitn(2, '\t');
+                let kind = fields
+                    .next()
+                    .ok_or_else(|| "atom line missing kind".to_owned())
+                    .and_then(|key| AtomKind::new(key).map_err(|error| error.to_string()))?;
+                let fallback = fields
+                    .next()
+                    .ok_or("atom line missing fallback text")?
+                    .to_owned();
+                let fallback = unescape_text(&fallback);
+                let content =
+                    InlineAtomContent::new(fallback).map_err(|error| error.to_string())?;
+                let atom_attrs = self.take_attrs();
+                let id = self
+                    .store
+                    .insert(
+                        NodeKind::InlineAtom(kind),
+                        atom_attrs,
+                        NodeContent::InlineAtom(content),
+                    )
+                    .map_err(|error| error.to_string())?;
+                atom_ids.push(id);
+            }
+
+            let text: String = pending
+                .segments
+                .iter()
+                .map(|(segment, _)| segment.as_str())
+                .collect();
+            let buffer = TextBuffer::from_string(text);
+            let placements = pending
+                .placements
+                .iter()
+                .map(|(index, raw)| -> Result<InlineAtomPlacement, String> {
+                    let id = atom_ids
+                        .get(*index)
+                        .copied()
+                        .ok_or_else(|| format!("inline references undefined atom {index}"))?;
+                    let offset = buffer.offset_at(*raw).map_err(|error| error.to_string())?;
+                    Ok(InlineAtomPlacement::new(id, offset))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let runs = pending
+                .segments
+                .into_iter()
+                .map(|(text, marks)| TextRun::new(text, marks))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+            let inline =
+                InlineContent::with_atoms(runs, placements).map_err(|error| error.to_string())?;
             let id = self
                 .store
                 .insert(kind, attrs, NodeContent::Inline(inline))
@@ -402,7 +616,8 @@ pub fn parse_document(text: &str) -> Result<XiaomuDocument, String> {
         pending_attrs: NodeAttrs::empty(),
     };
 
-    for line in lines {
+    let mut lines = lines.peekable();
+    while let Some(line) = lines.next() {
         if let Some(spec) = line.strip_prefix("@\t") {
             builder.pending_attrs = parse_attrs(spec)?;
             continue;
@@ -415,15 +630,15 @@ pub fn parse_document(text: &str) -> Result<XiaomuDocument, String> {
             None => (line, ""),
         };
         match tag {
-            "p" => builder.leaf(NodeKind::Paragraph, rest)?,
-            "code" => builder.leaf(NodeKind::CodeBlock, rest)?,
+            "p" => builder.leaf(NodeKind::Paragraph, rest, &mut lines)?,
+            "code" => builder.leaf(NodeKind::CodeBlock, rest, &mut lines)?,
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 let level = tag[1..]
                     .parse::<u8>()
                     .map_err(|_| format!("bad heading level: {tag}"))?;
                 let kind =
                     NodeKind::Heading(HeadingLevel::new(level).map_err(|error| error.to_string())?);
-                builder.leaf(kind, rest)?;
+                builder.leaf(kind, rest, &mut lines)?;
             }
             "quote" => {
                 let attrs = builder.take_attrs();

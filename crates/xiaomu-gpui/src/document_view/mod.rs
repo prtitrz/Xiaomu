@@ -35,6 +35,7 @@ use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 use xiaomu_runtime::persistence::DocumentPersistence;
 
 use crate::accessibility::{AccessibilityProjection, project_accessibility};
+use crate::atom_capability::SharedAtomCapability;
 use crate::block_view::{BlockBoundsRegistry, ParagraphView, SharedSession};
 use crate::inline_atom::InlineAtomRendererRegistry;
 use visual_navigation::NavStep;
@@ -63,6 +64,7 @@ pub struct DocumentView {
     /// Host-registered inline-atom renderers; kinds without an entry keep
     /// the deterministic fallback display.
     atom_renderers: Rc<InlineAtomRendererRegistry>,
+    atom_capability: Option<SharedAtomCapability>,
 }
 
 impl DocumentView {
@@ -79,6 +81,7 @@ impl DocumentView {
             desired_x: None,
             persistence: None,
             atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
+            atom_capability: None,
         }
     }
 
@@ -100,6 +103,11 @@ impl DocumentView {
     #[must_use]
     pub fn atom_renderers(&self) -> &InlineAtomRendererRegistry {
         &self.atom_renderers
+    }
+
+    /// Installs the host adapter that receives atom activations.
+    pub fn set_atom_capability(&mut self, capability: SharedAtomCapability) {
+        self.atom_capability = Some(capability);
     }
 
     /// Returns the shared session this view renders.
