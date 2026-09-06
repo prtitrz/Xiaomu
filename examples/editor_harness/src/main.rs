@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn save_rejects_atomic_nodes_instead_of_dropping_them() {
+    fn save_encodes_atomic_media_without_dropping_semantics() {
         use xiaomu_core::document::{NodeAttrs, NodeContent, NodeKind, NodeStoreBuilder};
 
         let mut builder = NodeStoreBuilder::new();
@@ -209,27 +209,62 @@ mod tests {
                 NodeContent::Atomic,
             )
             .unwrap();
+        let mut image_values = std::collections::BTreeMap::new();
+        image_values.insert(
+            "src".to_owned(),
+            xiaomu_core::document::AttrValue::String("https://example.com/a.png".to_owned()),
+        );
+        image_values.insert(
+            "alt".to_owned(),
+            xiaomu_core::document::AttrValue::String("封面".to_owned()),
+        );
+        image_values.insert(
+            "data-x-extension-tag".to_owned(),
+            xiaomu_core::document::AttrValue::String("v1".to_owned()),
+        );
+        let image = builder
+            .insert(
+                NodeKind::Image,
+                NodeAttrs::new(image_values).unwrap(),
+                NodeContent::Atomic,
+            )
+            .unwrap();
         let root = builder
             .insert(
                 NodeKind::Document,
                 NodeAttrs::empty(),
-                NodeContent::children([rule]),
+                NodeContent::children([rule, image]),
             )
             .unwrap();
         let document = XiaomuDocument::new(root, builder.finish()).unwrap();
         let path = std::env::temp_dir().join(format!(
-            "xiaomu-harness-unsupported-atomic-{}.txt",
+            "xiaomu-harness-atomic-media-{}.txt",
             std::process::id()
         ));
         let mut adapter = FixtureStore::new(path.clone());
-
-        let error = adapter
-            .save(&document)
-            .expect_err("unsupported atomic node must fail closed");
+        adapter.save(&document).expect("media blocks save");
+        let reloaded = adapter.load().unwrap().expect("saved document");
         let _ = std::fs::remove_file(&path);
 
-        assert!(error.0.contains("HorizontalRule"));
-        assert!(error.0.contains("refusing to save a lossy snapshot"));
+        let reloaded_image = reloaded
+            .node(reloaded.root())
+            .unwrap()
+            .content()
+            .as_children()
+            .unwrap()
+            .iter()
+            .copied()
+            .find(|id| matches!(reloaded.node(*id).unwrap().kind(), NodeKind::Image))
+            .expect("image survives save/load");
+        assert!(
+            reloaded
+                .node(reloaded_image)
+                .unwrap()
+                .attrs()
+                .get("data-x-extension-tag")
+                .is_some(),
+            "unknown extension attrs are preserved"
+        );
     }
 
     #[test]
