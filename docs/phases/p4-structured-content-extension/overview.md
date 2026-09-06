@@ -1,10 +1,11 @@
 # P4 Structured Content / Extension 总览
 
-> 状态：**IN PROGRESS**
+> 状态：**CLOSED（2026-09-05）**
 >
 > P3：**CLOSED（2026-09-01）**
 >
-> 当前施工线：**P4A Inline Atom / Extension Seam**
+> P4A Inline Atom / Extension Seam：**CLOSED**
+> P4B Atomic Block / Media：**CLOSED**
 
 P4 的统一目标是让晓木从“只处理文本 block”跨到**结构化非文本内容**，同时保持 Core / Runtime 宿主中立、`TextOffset` 语义稳定、transaction / mapping / history 可组合。
 

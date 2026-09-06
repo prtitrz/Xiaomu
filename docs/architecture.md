@@ -629,6 +629,26 @@ P4A 收口 gate（`crates/xiaomu-runtime/tests/p4a_integration_gate.rs` + `crate
 
 宿主激活 seam（`crates/xiaomu-gpui/src/atom_capability.rs`）：`InlineAtomHostCapability::atom_action(AtomAction)`，`AtomAction` 只携带 `NodeId + AtomKind + action key + attrs 快照`，不含任何宿主业务类型，Core / Runtime 保持 atom-neutral。plain pointer click 落在 chip 内部时，`DocumentView` 先放置 caret 再经 `atom_action` 发出 `ATOM_ACTION_CLICK`；composition 期间的点击不产生激活。capability 与 renderer registry 同为 per-editor 值：`EditorHooks.atom_capability` → `EditorInstance` → `build_view` 注入，`DocumentView::set_atom_capability` 可在 build 后替换；多 editor 测试验证点击 A 的 chip 只激活 A 的 recorder、且 caret 落在 A 的块内。宿主侧自行解释 attrs（harness demo 从 `handle` attr 渲染 `@xiaomu`）。
 
+## P4.6-P4.8 Atomic Block / Image 事实
+
+Atomic block 进入了统一的 document position 模型：`DocumentPosition::Atomic(NodeId)` 只接受 atomic content 节点，`Slots` 以节点自身 slot 排序（gap-before < atomic < gap-after），mapping 经 `ChangeMap::map_node_selection`，公开 seam 为 `DocumentSession::set_atomic_selection`。Backspace/Delete 在 collapsed atomic selection 上删除整块并把 caret 收敛到该块占据的 gap（`SelectionUpdate::CaretAtGap`），undo 恢复块并重新安装 node selection。GPUI 侧 `navigation::nav_units` 把文档顺序推广为 text + atomic 序列，横向步进以 one-caret-unit 语义跨越 `text ↔ atomic ↔ text`；atomic selection 上 Up/Down/LineStart/LineEnd 为有意 no-op（atomic 块没有可视行）。跨块纯文本选区的 flat leaf 投影不携带中间 atomic 节点：这是 one-caret-unit 模型的有意语义——文本范围删除不吞并 atomic 块，atomic 删除必须经显式 node selection。
+
+Image 走 typed canonical 语义（`crates/xiaomu-core/src/document/image.rs`）：`ImageAttrs` 经 attrs 键 `src`/`asset`/`alt`/`title`/`width`/`height` 读写，`ImageSource::AssetRef`（宿主 opaque 引用）与 `ExternalUrl`（codec/host 显式导入）二选一。`EditIntent::InsertImage` 把 Image 原子块作为聚焦块兄弟插入。`AssetService::resolve(AssetRef, Rc<dyn AssetSink>)`（`crates/xiaomu-runtime/src/assets.rs`）是 host capability seam：宿主拥有存储/网络/缓存/权限，`ResolvedAsset` 携带 `revision` 供 stale 判定，回调无前端上下文、不直接改 canonical document。GPUI 侧（`image_block.rs`）以 node identity + source key 缓存 `Arc<gpui::Image>`，Resolved 状态经 `gpui::ImageSource::Image` 绘制真实纹理（`w_full` + `max_h(320px)` + `ObjectFit::Contain`），Loading/Failed/无 service 状态渲染占位；accessibility 把 Image 投影为 alt 文本、HorizontalRule 投影为 Separator。
+
+Clipboard wire v4 携带 atomic 载荷（`ClipboardNodeContent::Atomic`、`WireContent::Atomic`、`WireKind::HorizontalRule/Image`）；collapsed atomic selection 投影为单 atomic root 的 ClipboardSlice，粘贴为聚焦块后的兄弟块；mixed inline/atomic 层级粘贴 fail closed（`SessionError::ClipboardAtomicUnsupported`）。plain-text fallback 语义化：image copy 在 plain text 中携带 ExternalUrl。
+
+## P4.9 Markdown Baseline Codec 事实
+
+`xiaomu-codec-markdown` 在 P4.9 建立真实 baseline codec（此前为 bootstrap 桩），只依赖 canonical Core model。覆盖：ATX heading、paragraph、quote、tight bullet/ordered list（含嵌套）、bold/italic/inline code/strikethrough/link、fenced code block（`language` attr）、hard break（backslash 形态导出，backslash 与两空格形态导入）、horizontal rule、ExternalUrl image。
+
+契约是 refuse-instead-of-drop：canonical 文档携带 baseline 无法表示的内容时导出显式报错（`MarkdownCodecError`）——宿主 `AssetRef` 图片（URL 映射归宿主 adapter policy）、unknown attrs（含 image width/height）、inline atom、Custom node kind、empty paragraph、无法 round-trip 的空白。导入同样 fail closed：setext heading、indented code、lazy quote、inline image、reference link 不做静默重解释；unclosed emphasis 按字面读取（与 CommonMark fallback 一致）。canonical 导出形态固定：块间单空行、`- ` 列表、有序列表从 1 重新编号（canonical 无 list-start 属性）。round-trip 以"导出 → 导入 → 再导出"为固定点验证，Unicode（CJK/BiDi/emoji）文本与 alt 独立覆盖。
+
+harness fixture 格式升级 **v4**：`hr\n` / `img\n` 原子行 + 既有 attrs 编码承载 image 语义（含 unknown extension tag）；v2/v3 读兼容；Custom node kind 仍 fail closed。demo fixture 加入 HR 与带 extension tag 的 Image。`xiaomu-runtime/tests/p4_final_gate.rs` 是最终矩阵：CJK+emoji 文本 + inline atom 缝输入、atomic 删除/undo 整节点选择、clipboard wire 往返、InsertImage canonical attrs、gap 经 atomic 删除的 mapping、多 editor 隔离。
+
+## P4 Closeout
+
+P4.9 通过后，P4A 与 P4B 的全部 Gate（见 `docs/phases/p4-structured-content-extension/progress.md`）在 2026-09-05 闭合，本切片 PR 的三平台 CI（Ubuntu / macOS / Windows、fmt、Clippy、workspace all-targets、source-size、dependency-boundary、policy、汇总 `CI Success`）全绿，Windows job 即最终实机 Gate。**P4 = CLOSED**，下一阶段为 P5 Table。
+
 ## 仓库级约束
 
 架构通过以下机制持续执行：

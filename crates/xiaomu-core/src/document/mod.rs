@@ -19,7 +19,10 @@ mod version;
 pub use atom::{AtomKind, InlineAtomContent, InlineAtomPlacement};
 pub use attrs::{AttrValue, NodeAttrs};
 pub use content::{InlineContent, NodeContent};
-pub use image::{ImageAttrs, ImageSource};
+pub use image::{
+    IMAGE_ATTR_ALT, IMAGE_ATTR_ASSET, IMAGE_ATTR_HEIGHT, IMAGE_ATTR_SRC, IMAGE_ATTR_TITLE,
+    IMAGE_ATTR_WIDTH, ImageAttrs, ImageSource,
+};
 pub use kind::{HeadingLevel, NodeKind};
 mod image;
 pub use marks::{LinkMark, Mark, MarkKind, MarkSet};

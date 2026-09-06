@@ -18,6 +18,7 @@ use xiaomu_core::text::TextBuffer;
 use xiaomu_runtime::persistence::{DocumentPersistence, PersistenceError};
 
 mod format;
+mod marks_text;
 
 pub use format::parse_document;
 use format::write_node;
@@ -40,7 +41,7 @@ impl FixtureStore {
 
 impl DocumentPersistence for FixtureStore {
     fn save(&mut self, document: &XiaomuDocument) -> Result<(), PersistenceError> {
-        let mut out = String::from("xiaomu-fixture-doc v3\n");
+        let mut out = String::from("xiaomu-fixture-doc v4\n");
         write_node(document, document.root(), &mut out)?;
         std::fs::write(&self.path, out)
             .map_err(|error| PersistenceError(format!("{}: {error}", self.path.display())))
@@ -132,6 +133,35 @@ pub fn demo_fixture() -> XiaomuDocument {
             NodeContent::children([quoted]),
         )
         .unwrap();
+    // Media demo (P4): an HR atomic block and an image block whose canonical
+    // attrs keep an unknown extension tag, both encoded by fixture v4.
+    let rule = builder
+        .insert(
+            NodeKind::HorizontalRule,
+            NodeAttrs::empty(),
+            NodeContent::Atomic,
+        )
+        .unwrap();
+    let mut image_values = std::collections::BTreeMap::new();
+    image_values.insert(
+        "src".to_owned(),
+        xiaomu_core::document::AttrValue::String("https://example.com/xiaomu-cover.png".to_owned()),
+    );
+    image_values.insert(
+        "alt".to_owned(),
+        xiaomu_core::document::AttrValue::String("晓木封面".to_owned()),
+    );
+    image_values.insert(
+        "data-x-extension-tag".to_owned(),
+        xiaomu_core::document::AttrValue::String("v1".to_owned()),
+    );
+    let image = builder
+        .insert(
+            NodeKind::Image,
+            NodeAttrs::new(image_values).unwrap(),
+            NodeContent::Atomic,
+        )
+        .unwrap();
     let item_a = leaf(
         NodeKind::Paragraph,
         "第一个待办（Tab 缩进 / Shift-Tab 取消）",
@@ -183,7 +213,9 @@ pub fn demo_fixture() -> XiaomuDocument {
         .insert(
             NodeKind::Document,
             NodeAttrs::empty(),
-            NodeContent::children([heading, intro, mention, quote, todo, steps, outro]),
+            NodeContent::children([
+                heading, intro, mention, quote, rule, image, todo, steps, outro,
+            ]),
         )
         .unwrap();
     XiaomuDocument::new(root, builder.finish()).expect("fixture document")
@@ -312,18 +344,47 @@ mod tests {
     }
 
     #[test]
-    fn fixture_v3_round_trips_inline_atom_chips() {
+    fn fixture_v4_round_trips_inline_atom_chips_and_media() {
         let document = demo_fixture();
-        let mut encoded = String::from("xiaomu-fixture-doc v3\n");
+        let mut encoded = String::from("xiaomu-fixture-doc v4\n");
         write_node(&document, document.root(), &mut encoded).unwrap();
 
-        // The mention chip serializes as an atom token plus its atom line.
+        // The mention chip serializes as an atom token plus its atom line,
+        // and the media blocks encode as atomic lines with preserved attrs
+        // (including the unknown extension tag).
         assert!(encoded.contains("{a#0}"));
         assert!(encoded.contains("atom\tmention\t@xiaomu"));
         assert!(encoded.contains("handle=s:xiaomu"));
+        assert!(encoded.contains("hr\n"));
+        assert!(encoded.contains("img\n"));
+        assert!(encoded.contains("alt=s:晓木封面"));
+        assert!(encoded.contains("data-x-extension-tag=s:v1"));
 
         let decoded = parse_document(&encoded).unwrap();
         assert!(canonical_semantics_equal(&document, &decoded));
+    }
+
+    #[test]
+    fn fixture_still_refuses_custom_node_kinds() {
+        let mut builder = NodeStoreBuilder::new();
+        let custom = builder
+            .insert(
+                NodeKind::Custom("x-spoiler".to_owned()),
+                NodeAttrs::empty(),
+                NodeContent::children([]),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([custom]),
+            )
+            .unwrap();
+        let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+        let error = write_node(&document, document.root(), &mut String::new()).unwrap_err();
+        assert!(error.0.contains("x-spoiler"), "{error}");
     }
 
     #[test]
