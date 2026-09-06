@@ -83,7 +83,9 @@ fn text_of(session: &DocumentSession, node: NodeId) -> String {
 fn focus_point(session: &DocumentSession) -> TextPoint {
     match session.selection().focus() {
         DocumentPosition::Inline(point) => point.to_text_point().unwrap(),
-        DocumentPosition::Gap(_) => panic!("expected a text focus"),
+        DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => {
+            panic!("expected a text focus")
+        }
     }
 }
 
@@ -443,6 +445,8 @@ fn cross_block_map_through_preserves_anchor_focus_direction() {
             assert_eq!(point.node_id(), first);
             assert_eq!(point.text_offset().as_usize(), 0);
         }
-        DocumentPosition::Gap(_) => panic!("focus must remain a text point"),
+        DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => {
+            panic!("focus must remain a text point")
+        }
     }
 }

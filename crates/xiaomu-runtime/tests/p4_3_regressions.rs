@@ -97,7 +97,9 @@ fn insert_atom(
 fn caret(session: &DocumentSession) -> InlinePoint {
     match session.selection().focus() {
         DocumentPosition::Inline(point) => point,
-        DocumentPosition::Gap(_) => panic!("expected inline caret"),
+        DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => {
+            panic!("expected inline caret")
+        }
     }
 }
 

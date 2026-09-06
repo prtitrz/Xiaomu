@@ -96,6 +96,11 @@ pub(super) fn resolve_selection(
         // outdent); staged list commands resolve the same policy in
         // `commit_staged`.
         SelectionUpdate::PreserveFocus => preserved_focus(before, document),
+        SelectionUpdate::CaretAtGap { gap } => {
+            gap.validate(document)
+                .map_err(|_| SessionError::SelectionInvalid)?;
+            Ok(DocumentSelection::collapsed(*gap))
+        }
     }
 }
 
@@ -103,7 +108,7 @@ pub(super) fn resolve_selection(
 pub(super) fn affinity_of(selection: DocumentSelection) -> CursorAffinity {
     match selection.focus() {
         DocumentPosition::Inline(point) => point.affinity(),
-        DocumentPosition::Gap(_) => CursorAffinity::Before,
+        DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => CursorAffinity::Before,
     }
 }
 
@@ -136,7 +141,10 @@ pub(super) fn preserved_focus(
 ) -> Result<DocumentSelection, SessionError> {
     let point = match before.focus() {
         DocumentPosition::Inline(point) => point,
-        DocumentPosition::Gap(_) => return Err(SessionError::SelectionInvalid),
+        // Structural endpoints have no inline coordinate to preserve.
+        DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => {
+            return Err(SessionError::SelectionInvalid);
+        }
     };
     let selection = DocumentSelection::collapsed(point);
     selection

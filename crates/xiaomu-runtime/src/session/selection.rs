@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use xiaomu_core::document::{NodeId, XiaomuDocument};
 use xiaomu_core::mapping::{ChangeMap, MapBias, MappedPosition};
-use xiaomu_core::selection::{InlinePoint, NodeGap, TextPoint, TextSelection};
+use xiaomu_core::selection::{InlinePoint, NodeGap, NodeSelection, TextPoint, TextSelection};
 
 use super::SessionError;
 
@@ -28,6 +28,10 @@ pub enum DocumentPosition {
     Inline(InlinePoint),
     /// A structural boundary between two children of one container.
     Gap(NodeGap),
+    /// A node selection of one atomic-content block (`HorizontalRule`,
+    /// `Image`, ...). Atomic blocks carry no editable interior, so the
+    /// position addresses the node as a whole.
+    Atomic(NodeId),
 }
 
 impl From<TextPoint> for DocumentPosition {
@@ -39,6 +43,12 @@ impl From<TextPoint> for DocumentPosition {
 impl From<NodeGap> for DocumentPosition {
     fn from(gap: NodeGap) -> Self {
         Self::Gap(gap)
+    }
+}
+
+impl From<NodeId> for DocumentPosition {
+    fn from(node: NodeId) -> Self {
+        Self::Atomic(node)
     }
 }
 
@@ -136,11 +146,27 @@ impl DocumentSelection {
         }
     }
 
+    /// Returns the selected node when the selection is a collapsed atomic
+    /// node selection.
+    #[must_use]
+    pub fn as_atomic_node(&self) -> Option<NodeId> {
+        if self.anchor == self.focus
+            && let DocumentPosition::Atomic(node) = self.anchor
+        {
+            return Some(node);
+        }
+        None
+    }
+
     /// Validates both endpoints against `document`.
     pub fn validate(&self, document: &XiaomuDocument) -> Result<(), SessionError> {
         let check = |position: DocumentPosition| match position {
             DocumentPosition::Inline(point) => point.validate(document),
             DocumentPosition::Gap(gap) => gap.validate(document),
+            DocumentPosition::Atomic(node) => match document.node(node) {
+                Some(node) if node.content().is_atomic() => Ok(()),
+                _ => Err(xiaomu_core::Error::UnknownNode),
+            },
         };
         check(self.anchor).map_err(|_| SessionError::SelectionInvalid)?;
         check(self.focus).map_err(|_| SessionError::SelectionInvalid)?;
@@ -184,6 +210,12 @@ impl DocumentSelection {
                     MappedPosition::Mapped(mapped) => Ok(Self::collapsed(mapped)),
                     MappedPosition::Deleted => Err(SessionError::SelectionDeleted),
                 },
+                DocumentPosition::Atomic(node) => {
+                    match changes.map_node_selection(NodeSelection::new(node)) {
+                        MappedPosition::Mapped(mapped) => Ok(Self::collapsed(mapped.node_id())),
+                        MappedPosition::Deleted => Err(SessionError::SelectionDeleted),
+                    }
+                }
             }
         };
 
@@ -288,6 +320,14 @@ impl Slots {
                 .gap_keys
                 .get(&(gap.parent(), gap.index()))
                 .copied()
+                .ok_or(SessionError::SelectionInvalid),
+            // An atomic block addresses the node as a whole, so it sorts at
+            // the node's own slot: after the gap that opens its parent slot
+            // and before the following sibling's boundary.
+            DocumentPosition::Atomic(node) => self
+                .node_base
+                .get(&node)
+                .map(|base| (*base, 0, 0))
                 .ok_or(SessionError::SelectionInvalid),
         }
     }

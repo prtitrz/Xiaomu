@@ -349,7 +349,7 @@ impl ParagraphView {
             DocumentPosition::Inline(point) => {
                 Some((point.node_id(), point.text_offset().as_usize()))
             }
-            DocumentPosition::Gap(_) => None,
+            DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => None,
         };
 
         let Ok((head, tail)) = selection.ordered(document) else {

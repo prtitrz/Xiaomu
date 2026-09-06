@@ -217,12 +217,12 @@ P4.5 gate 审计发现并修复两个不一致（随本切片交付）：
 
 ### P4.6 Atomic Block Contract — NEXT
 
-- [ ] editable text + atomic traversal model
-- [ ] `NodeSelection / atomic position` contract
-- [ ] HorizontalRule keyboard traversal
-- [ ] atomic click / select / delete / copy
-- [ ] mapping / selection fallback
-- [ ] undo / redo invariant tests
+- [ ] editable text + atomic traversal model（runtime 契约已就位，traversal 在 GPUI 切片）
+- [x] `NodeSelection / atomic position` contract——`DocumentPosition::Atomic(NodeId)`：validate 限定 atomic content（文本/容器节点不可 node-select）；`Slots` 以节点自身 slot 排序（gap-before < atomic < gap-after）；`map_through` 经 `ChangeMap::map_node_selection`；collapsed accessor `as_atomic_node`；公开 seam `DocumentSession::set_atomic_selection`
+- [ ] HorizontalRule keyboard traversal（GPUI 切片）
+- [ ] atomic click / select / delete / copy——runtime 侧 select + delete 已交付：Backspace/Delete 于 collapsed atomic selection 触发 `plan_atomic_removal`（`RemoveNode` 单 history entry，`SelectionUpdate::CaretAtGap` 收敛到原占据 gap）；click / copy 在 GPUI 切片
+- [x] mapping / selection fallback——`SelectionUpdate::CaretAtGap`（resolve 时对 post-snapshot 验证）；无关文本编辑不干扰 atomic endpoint 的 identity mapping
+- [x] undo / redo invariant tests——`tests/atomic_block_selection.rs`：undo 恢复块并重新安装 Atomic selection，redo 再次删除；stale atomic endpoint fail closed
 
 ### P4.7 Image Canonical Model / AssetService
 

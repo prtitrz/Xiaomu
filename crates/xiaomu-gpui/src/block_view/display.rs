@@ -151,7 +151,7 @@ impl ParagraphView {
         let document = session.document();
         let endpoint = |position: DocumentPosition| match position {
             DocumentPosition::Inline(point) => Some(point),
-            DocumentPosition::Gap(_) => None,
+            DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => None,
         };
         let Ok((head, tail)) = selection.ordered(document) else {
             return SelectionProjection::None;

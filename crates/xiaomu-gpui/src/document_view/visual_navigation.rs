@@ -44,7 +44,7 @@ impl DocumentView {
         let blocks = navigation::text_blocks(session.document());
         let focus = match session.selection().focus() {
             DocumentPosition::Inline(point) => point,
-            DocumentPosition::Gap(_) => return None,
+            DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => return None,
         };
         let index = navigation::block_index(&blocks, focus.node_id())?;
         Some((blocks, index, focus))

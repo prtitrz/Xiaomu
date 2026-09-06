@@ -5,7 +5,7 @@
 //! only the session knows which after-selection a command promises.
 
 use xiaomu_core::document::{InlineContent, Mark, MarkKind, MarkSet, NodeId, NodeKind};
-use xiaomu_core::selection::{InlinePoint, TextPoint, TextSelection};
+use xiaomu_core::selection::{InlinePoint, NodeGap, TextPoint, TextSelection};
 use xiaomu_core::text::{TextBuffer, TextOffset, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
@@ -221,6 +221,14 @@ pub enum SelectionUpdate {
     /// (list wrap / lift / indent / outdent). The resolved selection is
     /// validated against the post-command snapshot.
     PreserveFocus,
+    /// Collapse onto an exact structural gap in the post-command snapshot.
+    ///
+    /// Atomic node removal leaves no inline caret behind; the selection
+    /// converges to the boundary the removed block occupied.
+    CaretAtGap {
+        /// The exact post-edit structural gap.
+        gap: NodeGap,
+    },
 }
 
 /// The coordinates of the primary text edit of a plan.
