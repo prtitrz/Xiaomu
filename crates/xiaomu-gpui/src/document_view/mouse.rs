@@ -6,8 +6,24 @@
 use gpui::{App, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Window};
 
 use super::{DocumentView, navigation};
-use xiaomu_core::document::NodeId;
+use crate::atom_capability::{ATOM_ACTION_CLICK, AtomAction};
+use xiaomu_core::document::{AtomKind, NodeAttrs, NodeId, NodeKind};
 use xiaomu_core::selection::{CursorAffinity, InlinePoint, TextPoint};
+
+/// The atom chip a pointer click landed inside, with the canonical snapshot
+/// the host capability receives.
+pub(crate) struct ChipHit {
+    pub node: NodeId,
+    pub kind: AtomKind,
+    pub attrs: NodeAttrs,
+}
+
+/// One resolved pointer hit: the caret gap plus the chip, if any, that
+/// absorbed the click.
+pub(crate) struct MouseHit {
+    pub point: InlinePoint,
+    pub chip: Option<ChipHit>,
+}
 
 impl DocumentView {
     // ---- mouse ----
@@ -19,11 +35,12 @@ impl DocumentView {
         cx: &mut Context<Self>,
     ) {
         self.is_dragging = true;
-        if let Some(point) = self.hit_test(event.position, cx) {
+        if let Some(hit) = self.hit_test(event.position, cx) {
             #[cfg(debug_assertions)]
             {
                 // Click-placement diagnostic: shows which block the click landed
                 // on, so mis-hits are visible during real-machine testing.
+                let point = hit.point;
                 let clicked = {
                     let session = self.session.borrow();
                     session.document().node(point.node_id()).map(|node| {
@@ -54,10 +71,27 @@ impl DocumentView {
                 }
             }
             if event.modifiers.shift {
-                self.move_focus_to(point, true, window, cx);
+                self.move_focus_to(hit.point, true, window, cx);
             } else {
-                self.place(point, window, cx);
+                self.place(hit.point, window, cx);
+                // Activation is a plain click on a chip; shift-extend only
+                // grows the selection.
+                if let Some(chip) = hit.chip {
+                    self.emit_atom_action(chip, ATOM_ACTION_CLICK);
+                }
             }
+        }
+    }
+
+    /// Forwards one atom activation to the host capability when installed.
+    fn emit_atom_action(&self, chip: ChipHit, action: &'static str) {
+        if let Some(capability) = self.atom_capability.clone() {
+            capability.atom_action(AtomAction {
+                node: chip.node,
+                kind: chip.kind,
+                action: action.into(),
+                attrs: chip.attrs,
+            });
         }
     }
 
@@ -70,8 +104,8 @@ impl DocumentView {
         if !self.is_dragging {
             return;
         }
-        if let Some(point) = self.hit_test(event.position, cx) {
-            self.move_focus_to(point, true, window, cx);
+        if let Some(hit) = self.hit_test(event.position, cx) {
+            self.move_focus_to(hit.point, true, window, cx);
         }
     }
 
@@ -87,8 +121,9 @@ impl DocumentView {
     /// bytes, so the raw hit is back-projected through the atom display
     /// projection: chip interiors resolve to the atom's before/after gap by
     /// click side, everything else maps through exact display boundaries.
-    /// Plain blocks keep the canonical byte path.
-    fn hit_test(&self, position: Point<Pixels>, cx: &App) -> Option<InlinePoint> {
+    /// Plain blocks keep the canonical byte path. A click that landed strictly
+    /// inside a renderer span also reports the chip for host activation.
+    fn hit_test(&self, position: Point<Pixels>, cx: &App) -> Option<MouseHit> {
         let registry = self.registry.borrow();
         let mut nearest: Option<(NodeId, Pixels)> = None;
         for (node, bounds) in registry.iter() {
@@ -118,7 +153,14 @@ impl DocumentView {
             && let Some(projection) = child.read(cx).atom_display_projection()
             && !projection.atoms().is_empty()
         {
-            return projection.inline_point_for_display_hit(raw, affinity);
+            let point = projection.inline_point_for_display_hit(raw, affinity)?;
+            // Only strict span interiors count as chip activation; boundary
+            // hits click beside the chip.
+            let chip = projection
+                .atom_at_display_offset(raw)
+                .map(|span| span.atom())
+                .and_then(|atom| self.chip_for(atom));
+            return Some(MouseHit { point, chip });
         }
 
         let session = self.session.borrow();
@@ -133,6 +175,23 @@ impl DocumentView {
         } else {
             CursorAffinity::Before
         };
-        Some(InlinePoint::from(TextPoint::new(node, offset, affinity)))
+        Some(MouseHit {
+            point: InlinePoint::from(TextPoint::new(node, offset, affinity)),
+            chip: None,
+        })
+    }
+
+    /// Builds the host-facing canonical snapshot for one atom node.
+    fn chip_for(&self, atom: NodeId) -> Option<ChipHit> {
+        let session = self.session.borrow();
+        let node = session.document().node(atom)?;
+        let NodeKind::InlineAtom(kind) = node.kind() else {
+            return None;
+        };
+        Some(ChipHit {
+            node: atom,
+            kind: kind.clone(),
+            attrs: node.attrs().clone(),
+        })
     }
 }

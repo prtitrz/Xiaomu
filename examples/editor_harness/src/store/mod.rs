@@ -1,17 +1,19 @@
 //! Harness-internal fixture persistence: canonical snapshot <-> text format.
 //!
 //! Format is a harness convention for the P2 host-contract gate, not a
-//! codec commitment. v2 preserves current-stage canonical semantics: node
+//! codec commitment. v3 preserves current-stage canonical semantics: node
 //! kind / tree shape, inline run boundaries, [`MarkSet`] (including Link
-//! attributes), and [`NodeAttrs`] actually present on a node.
+//! attributes), [`NodeAttrs`] actually present on a node, and inline atom
+//! placements with their atom nodes (kind / fallback / attrs).
 
 use std::path::PathBuf;
 
 use xiaomu_core::document::{
-    InlineContent, MarkSet, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStoreBuilder, TextRun,
-    XiaomuDocument,
+    AtomKind, InlineAtomContent, InlineAtomPlacement, InlineContent, MarkSet, NodeAttrs,
+    NodeContent, NodeId, NodeKind, NodeStoreBuilder, TextRun, XiaomuDocument,
 };
 use xiaomu_core::selection::{CursorAffinity, TextPoint, TextSelection};
+use xiaomu_core::text::TextBuffer;
 
 use xiaomu_runtime::persistence::{DocumentPersistence, PersistenceError};
 
@@ -38,7 +40,7 @@ impl FixtureStore {
 
 impl DocumentPersistence for FixtureStore {
     fn save(&mut self, document: &XiaomuDocument) -> Result<(), PersistenceError> {
-        let mut out = String::from("xiaomu-fixture-doc v2\n");
+        let mut out = String::from("xiaomu-fixture-doc v3\n");
         write_node(document, document.root(), &mut out)?;
         std::fs::write(&self.path, out)
             .map_err(|error| PersistenceError(format!("{}: {error}", self.path.display())))
@@ -81,6 +83,43 @@ pub fn demo_fixture() -> XiaomuDocument {
         "多块文档：↑↓ 或鼠标在块间移动；Enter 拆块；普通段落 Tab 变列表；列表项 Tab / Shift-Tab 缩进与退出（有上一兄弟才能缩进）。",
         &mut builder,
     );
+    // Inline-atom demo: one mention chip anchored at the paragraph start.
+    // The chip round-trips through the v3 fixture format and renders via the
+    // harness demo renderer.
+    let mention_atom = builder
+        .insert(
+            NodeKind::InlineAtom(AtomKind::new("mention").unwrap()),
+            NodeAttrs::new(
+                [(
+                    "handle".to_owned(),
+                    xiaomu_core::document::AttrValue::String("xiaomu".to_owned()),
+                )]
+                .into_iter()
+                .collect(),
+            )
+            .unwrap(),
+            NodeContent::InlineAtom(InlineAtomContent::new("@xiaomu").unwrap()),
+        )
+        .unwrap();
+    let mention_text = " 是一个 inline atom chip：点击它会通过 capability seam 通知宿主。";
+    let mention = builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            NodeContent::Inline(
+                InlineContent::with_atoms(
+                    [TextRun::new(mention_text, MarkSet::empty()).unwrap()],
+                    [InlineAtomPlacement::new(
+                        mention_atom,
+                        TextBuffer::from_string(mention_text.to_owned())
+                            .offset_at(0)
+                            .unwrap(),
+                    )],
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
     let quoted = leaf(
         NodeKind::Paragraph,
         "引用块里的文字，视觉上有缩进和竖线。",
@@ -144,7 +183,7 @@ pub fn demo_fixture() -> XiaomuDocument {
         .insert(
             NodeKind::Document,
             NodeAttrs::empty(),
-            NodeContent::children([heading, intro, quote, todo, steps, outro]),
+            NodeContent::children([heading, intro, mention, quote, todo, steps, outro]),
         )
         .unwrap();
     XiaomuDocument::new(root, builder.finish()).expect("fixture document")
@@ -187,7 +226,17 @@ pub fn canonical_semantics_equal(a: &XiaomuDocument, b: &XiaomuDocument) -> bool
             return false;
         }
         match (an.content(), bn.content()) {
-            (NodeContent::Inline(x), NodeContent::Inline(y)) => x.runs() == y.runs(),
+            (NodeContent::Inline(x), NodeContent::Inline(y)) => {
+                if x.runs() != y.runs() || x.atoms().len() != y.atoms().len() {
+                    return false;
+                }
+                x.atoms().iter().zip(y.atoms().iter()).all(|(xa, ya)| {
+                    xa.text_offset() == ya.text_offset() && walk(a, b, xa.atom(), ya.atom())
+                })
+            }
+            (NodeContent::InlineAtom(x), NodeContent::InlineAtom(y)) => {
+                x.fallback_text() == y.fallback_text()
+            }
             (NodeContent::Children(x), NodeContent::Children(y)) => {
                 x.len() == y.len() && x.iter().zip(y.iter()).all(|(x, y)| walk(a, b, *x, *y))
             }
@@ -251,7 +300,7 @@ mod tests {
         write_node(&document, document.root(), &mut encoded).unwrap();
 
         assert!(encoded.contains("alpha\\nbeta"));
-        assert!(encoded.contains("fn main() {\\n    println!"));
+        assert!(encoded.contains("fn main() \\{\\n    println!"));
         let decoded = parse_document(&encoded).unwrap();
         assert!(canonical_semantics_equal(&document, &decoded));
     }
@@ -260,5 +309,26 @@ mod tests {
     fn fixture_text_escape_preserves_lf_round_trip() {
         let source = "a\nb\n";
         assert_eq!(unescape_text(&escape_text(source)), source);
+    }
+
+    #[test]
+    fn fixture_v3_round_trips_inline_atom_chips() {
+        let document = demo_fixture();
+        let mut encoded = String::from("xiaomu-fixture-doc v3\n");
+        write_node(&document, document.root(), &mut encoded).unwrap();
+
+        // The mention chip serializes as an atom token plus its atom line.
+        assert!(encoded.contains("{a#0}"));
+        assert!(encoded.contains("atom\tmention\t@xiaomu"));
+        assert!(encoded.contains("handle=s:xiaomu"));
+
+        let decoded = parse_document(&encoded).unwrap();
+        assert!(canonical_semantics_equal(&document, &decoded));
+    }
+
+    #[test]
+    fn fixture_v3_rejects_references_to_undefined_atoms() {
+        let encoded = "xiaomu-fixture-doc v3\np\t{a#0}\t\n";
+        assert!(parse_document(encoded).is_err());
     }
 }

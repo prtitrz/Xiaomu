@@ -22,6 +22,7 @@
 //! - [`inline_atom_display`]: canonical mixed-inline ↔ display-byte projection.
 
 pub mod accessibility;
+pub mod atom_capability;
 pub mod block_view;
 pub mod document_view;
 pub mod editor;
