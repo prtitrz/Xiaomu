@@ -28,15 +28,17 @@ use gpui::{
     Window, div, prelude::*, px,
 };
 
-use xiaomu_core::document::{NodeContent, NodeId, NodeKind};
+use xiaomu_core::document::{ImageAttrs, ImageSource, NodeContent, NodeId, NodeKind};
 use xiaomu_core::selection::{InlinePoint, TextPoint};
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
+use xiaomu_runtime::assets::AssetService;
 use xiaomu_runtime::persistence::DocumentPersistence;
 
 use crate::accessibility::{AccessibilityProjection, project_accessibility};
 use crate::atom_capability::SharedAtomCapability;
 use crate::block_view::{BlockBoundsRegistry, ParagraphView, SharedSession};
+use crate::image_block::{ImageLoadCache, ImageLoadState, SharedImageLoadCache, sync_image_loads};
 use crate::inline_atom::InlineAtomRendererRegistry;
 use visual_navigation::NavStep;
 
@@ -65,6 +67,11 @@ pub struct DocumentView {
     /// the deterministic fallback display.
     atom_renderers: Rc<InlineAtomRendererRegistry>,
     atom_capability: Option<SharedAtomCapability>,
+    /// Host-owned asset resolver for image blocks; absent means image
+    /// placeholders stay neutral until a host attaches.
+    asset_service: Option<Rc<dyn AssetService>>,
+    /// Per-node image load states shared with resolve callbacks.
+    image_loads: SharedImageLoadCache,
 }
 
 impl DocumentView {
@@ -82,7 +89,27 @@ impl DocumentView {
             persistence: None,
             atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
             atom_capability: None,
+            asset_service: None,
+            image_loads: Rc::new(ImageLoadCache::default()),
         }
+    }
+
+    /// Attaches the host asset resolver for image blocks.
+    pub fn set_asset_service(&mut self, service: Rc<dyn AssetService>) {
+        self.asset_service = Some(service);
+    }
+
+    /// Returns the load state of one image block, when a request exists.
+    #[must_use]
+    pub fn image_load_state(&self, node: NodeId) -> Option<ImageLoadState> {
+        let document = self.session.borrow().document().clone();
+        let node_data = document.node(node)?;
+        let attrs = ImageAttrs::from_attrs(node_data.attrs()).ok()?;
+        let source_key = match attrs.source() {
+            ImageSource::AssetRef(value) => value.clone(),
+            ImageSource::ExternalUrl(url) => url.clone(),
+        };
+        self.image_loads.fresh_state(node, &source_key)
     }
 
     /// Attaches the host persistence adapter (Ctrl/Cmd-S saves).
@@ -282,6 +309,30 @@ impl DocumentView {
         self.set_inline_selection(point, point, window, cx);
     }
 
+    /// Builds the label and background for one image placeholder.
+    ///
+    /// The state comes from the resolve cache; hosts without an asset
+    /// service keep the neutral placeholder with the alt text.
+    fn image_placeholder_presentation(&self, node: NodeId) -> (String, gpui::Rgba) {
+        let document = self.session.borrow().document().clone();
+        let Some(node_data) = document.node(node) else {
+            return (String::new(), gpui::rgba(0xeeeeeeff));
+        };
+        let Ok(attrs) = ImageAttrs::from_attrs(node_data.attrs()) else {
+            return ("invalid image attrs".to_owned(), gpui::rgba(0xf6d5d5ff));
+        };
+        let alt = attrs.alt().to_owned();
+        let state = self.image_load_state(node);
+        match state {
+            Some(ImageLoadState::Loading) => (format!("加载中：{alt}"), gpui::rgba(0xe8eef7ff)),
+            Some(ImageLoadState::Resolved { .. }) => {
+                (format!("已解析：{alt}"), gpui::rgba(0xe2f2e4ff))
+            }
+            Some(ImageLoadState::Failed(_)) => (format!("加载失败：{alt}"), gpui::rgba(0xf6d5d5ff)),
+            None => (alt, gpui::rgba(0xeeeeeeff)),
+        }
+    }
+
     /// Selects an atomic block as a whole node (plain click on its rule).
     fn select_atomic_block(&mut self, node: NodeId, _window: &mut Window, cx: &mut Context<Self>) {
         let outcome = self.session.borrow_mut().set_atomic_selection(node);
@@ -438,6 +489,39 @@ impl DocumentView {
                 }
                 column.into_any_element()
             }
+            NodeContent::Atomic if matches!(kind, NodeKind::Image) => {
+                let (label, state_color) = self.image_placeholder_presentation(id);
+                let selected = self.session.borrow().selection().as_atomic_node() == Some(id);
+                let border = if selected {
+                    gpui::rgba(0x2b6cb8ff)
+                } else {
+                    gpui::rgba(0x00000000)
+                };
+                div()
+                    .id(("atomic-block", index))
+                    .h(px(96.0))
+                    .w_full()
+                    .my_3()
+                    .border_2()
+                    .border_color(border)
+                    .bg(state_color)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            this.select_atomic_block(id, window, cx);
+                        }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .child(label)
+                            .text_size(px(14.0))
+                            .text_color(gpui::rgba(0x555555ff)),
+                    )
+                    .into_any_element()
+            }
             NodeContent::Atomic => {
                 // Atomic blocks are whole-node selectable: the rule renders
                 // thicker while its node selection is active, and a plain
@@ -471,6 +555,11 @@ impl DocumentView {
 impl Render for DocumentView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_children(cx);
+
+        {
+            let document = self.session.borrow().document().clone();
+            sync_image_loads(&document, &self.image_loads, self.asset_service.as_ref());
+        }
 
         let root = self.session.borrow().document().root();
 

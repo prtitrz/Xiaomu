@@ -66,6 +66,7 @@ fn main() {
         listener: Some(Box::new(CounterListener(counter.clone()))),
         atom_renderers: Some(Rc::new(renderers)),
         atom_capability: Some(Rc::new(LoggingCapability)),
+        asset_service: None,
     };
 
     // The counter survives the run because GPUI quits when the window

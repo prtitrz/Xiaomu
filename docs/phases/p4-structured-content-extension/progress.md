@@ -235,15 +235,13 @@ P4.5 gate 审计发现并修复两个不一致（随本切片交付）：
 - [x] host-neutral resolve failure model——`AssetError::{InvalidRef, NotFound, PermissionDenied, Unavailable}`；bytes 为 opaque 载荷，解码归前端
 - [x] no local absolute-path canonical identity——typed 层不提供路径 source 形态；宿主路径只能作为 `AssetRef` opaque 值进入 attrs（架构 3.1 条款）
 
-### P4.8 GPUI Image / Atomic Interaction
+### P4.8 GPUI Image / Atomic Interaction — CURRENT
 
-- [ ] async asset resolve
-- [ ] loading / error placeholder
-- [ ] image layout / paint / hit-test
-- [ ] aspect ratio / intrinsic size
-- [ ] mouse + keyboard selection
-- [ ] text ↔ image traversal
-- [ ] Backspace / Delete / undo / redo
+- [x] async asset resolve——`crates/xiaomu-gpui/src/image_block.rs`：paint pass 对 stale 的 Image AssetRef 发起 `AssetService::resolve`；sink 仅落地 cache（`ImageLoadCache`，键 node identity + source key），stale result 按 source 变更丢弃；resolve 回调无前端上下文，re-render 调度归宿主集成（cache 幂等，paint 时重读）
+- [x] loading / error placeholder——Image 块渲染状态化占位：无 service / ExternalUrl → 中性占位 + alt；Loading / Resolved / Failed(AssetError) 各自颜色与标签；invalid attrs fail soft 显示错误占位。**真实 texture 解码绘制留待下一切片**（需引入解码依赖）
+- [ ] image layout / paint / hit-test（texture 绘制切片）
+- [ ] aspect ratio / intrinsic size（占位固定高度；texture 切片按 attrs 宽高比缩放）
+- [x] mouse + keyboard selection——Image 块即 P4.6 atomic 单元：plain click 节点选择、Left/Right 横向 traversal、Backspace/Delete/undo/redo 全部复用 P4.6 seam；e2e `tests/image_block_gpui.rs`
 - [ ] accessibility fallback
 
 ### P4.9 Clipboard / Markdown / P4 Final Closeout
