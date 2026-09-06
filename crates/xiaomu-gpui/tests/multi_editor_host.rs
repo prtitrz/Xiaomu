@@ -101,6 +101,7 @@ fn instance(
             listener: Some(Box::new(CountListener(changes))),
             atom_renderers: None,
             atom_capability: None,
+            asset_service: None,
         },
     )
     .unwrap()
@@ -278,6 +279,7 @@ fn chip_instance(document: XiaomuDocument, recorder: Rc<CapabilityRecorder>) -> 
             listener: None,
             atom_renderers: None,
             atom_capability: Some(recorder),
+            asset_service: None,
         },
     )
     .unwrap()

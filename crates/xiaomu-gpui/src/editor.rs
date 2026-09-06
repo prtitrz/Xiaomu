@@ -26,6 +26,7 @@ use crate::block_view::{
     ToggleItalic, ToggleStrike, ToggleUnderline, Undo, Up,
 };
 use crate::document_view::{DocumentView, actions::HardBreak};
+use crate::image_block::SharedImageAssetService;
 use crate::inline_atom::InlineAtomRendererRegistry;
 
 /// Optional host integrations handed to an [`EditorInstance`].
@@ -45,6 +46,9 @@ pub struct EditorHooks {
     /// Host adapter receiving atom activations (stable kind / action keys
     /// and canonical data only); absent means the host ignores activations.
     pub atom_capability: Option<SharedAtomCapability>,
+    /// Host asset resolver for image blocks; absent keeps neutral
+    /// placeholders until a service attaches.
+    pub asset_service: Option<SharedImageAssetService>,
 }
 
 /// One independent Xiaomu editor instance owned by a host.
@@ -57,6 +61,7 @@ pub struct EditorInstance {
     persistence: Option<Rc<RefCell<dyn DocumentPersistence>>>,
     atom_renderers: Option<Rc<InlineAtomRendererRegistry>>,
     atom_capability: Option<SharedAtomCapability>,
+    asset_service: Option<SharedImageAssetService>,
 }
 
 impl EditorInstance {
@@ -80,6 +85,7 @@ impl EditorInstance {
             persistence: hooks.persistence,
             atom_renderers: hooks.atom_renderers,
             atom_capability: hooks.atom_capability,
+            asset_service: hooks.asset_service,
         })
     }
 
@@ -104,6 +110,9 @@ impl EditorInstance {
         }
         if let Some(capability) = &self.atom_capability {
             view.set_atom_capability(capability.clone());
+        }
+        if let Some(service) = &self.asset_service {
+            view.set_asset_service(service.clone());
         }
         view
     }
@@ -341,6 +350,7 @@ mod tests {
                 listener: Some(Box::new(CountListener(a_changes.clone()))),
                 atom_renderers: None,
                 atom_capability: None,
+                asset_service: None,
             },
         )
         .unwrap();
@@ -352,6 +362,7 @@ mod tests {
                 listener: Some(Box::new(CountListener(b_changes.clone()))),
                 atom_renderers: None,
                 atom_capability: None,
+                asset_service: None,
             },
         )
         .unwrap();

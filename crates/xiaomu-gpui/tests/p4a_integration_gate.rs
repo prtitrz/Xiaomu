@@ -283,6 +283,7 @@ fn atom_edits_stay_isolated_across_two_editors(cx: &mut TestAppContext) {
             listener: None,
             atom_renderers: None,
             atom_capability: Some(recorder.clone()),
+            asset_service: None,
         },
     )
     .unwrap();
