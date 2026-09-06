@@ -209,22 +209,24 @@ impl DocumentView {
         }
 
         // Step one scalar in display space; renderer interiors are skipped as
-        // a single caret unit so a chip never becomes a caret stop.
+        // a single caret unit so a chip never becomes a caret stop. A stepped
+        // byte exactly at a chip edge is that chip's seam, not its interior,
+        // and stays a first-class caret stop.
         let text = projection.display_text();
         let stepped = if forward {
             (raw + 1..=display_len)
                 .find(|&index| text.is_char_boundary(index))
                 .map(|next| match projection.atom_at_display_offset(next) {
-                    Some(atom) => atom.display_range().end,
-                    None => next,
+                    Some(atom) if atom.display_range().start < next => atom.display_range().end,
+                    _ => next,
                 })?
         } else {
             (0..raw)
                 .rev()
                 .find(|&index| text.is_char_boundary(index))
                 .map(|prev| match projection.atom_at_display_offset(prev) {
-                    Some(atom) => atom.display_range().start,
-                    None => prev,
+                    Some(atom) if atom.display_range().start < prev => atom.display_range().start,
+                    _ => prev,
                 })?
         };
         let target_affinity = if !forward

@@ -5,8 +5,8 @@
 P0 / P1 / P2 / P3 已关闭。P4 统一为两条连续子线：
 
 ```text
-P4A Inline Atom / Extension Seam  ← 当前施工
-P4B Atomic Block / Media          ← P4A 后继续
+P4A Inline Atom / Extension Seam  ← CLOSED
+P4B Atomic Block / Media          ← 当前施工
 ```
 
 截至 2026-09-05：
@@ -16,7 +16,8 @@ P4.1 Inline Coordinate Contract   CLOSED
 P4.2 Canonical Inline Atom        CLOSED
 P4.3 Runtime Atom Editing         CLOSED
 P4.4 GPUI Renderer / Capability   CLOSED
-P4.5 P4A Integration Gate         CURRENT
+P4.5 P4A Integration Gate         CLOSED — P4A CLOSED
+P4.6 Atomic Block Contract        NEXT (P4B)
 ```
 
 P4.3 在 PR #58 / #59 / #60 建立主体能力后，经审计修复 PR #62 与 hierarchical structured-paste 收尾 PR #63 补齐边界矩阵。P4.4 由 #64（display projection）/#65（layout / caret）/#66（runtime selection seam）/#67（hit-test / chip paint / 收尾）/#68（键盘视觉导航）与本切片（host capability + harness demo + 多 editor 隔离）闭合；P4.5 通过即 **P4A CLOSED**。
@@ -194,22 +195,27 @@ P4.4b 实施顺序：
 
 P4.4 Gate：未知 renderer fail soft；相邻 atom 的 caret、selection、layout 与 hit-test 一致；宿主动作不把 business type 带进 Core / Runtime。**P4.4 CLOSED（#67 / #68 / 本切片）。**
 
-### P4.5 Inline Atom Integration Gate — CURRENT
+### P4.5 Inline Atom Integration Gate — CLOSED
 
-- [ ] realistic extension fixture
-- [ ] multi-editor extension isolation
-- [ ] Unicode + adjacent atom matrix
-- [ ] composition + boundary atom matrix
-- [ ] inline-atom Windows real-machine Gate
-- [ ] P4A root docs sync
-- [ ] source-size / dependency / fmt / Clippy / tests
-- [ ] three-platform `CI Success`
+- [x] realistic extension fixture——`xiaomu-runtime/tests/p4a_integration_gate.rs`：多块文档（CJK 标题 + "A中B" 报告段 + BiDi "مرحبا" 段），mention / reference / cursor 三种 atom kind，相邻同缝 atom（byte 1 双 atom）+ CJK 邻接
+- [x] multi-editor extension isolation——#69 的 `atom_clicks_activate_only_the_clicked_editor`（点击 / registry / capability 隔离）+ gate `atom_edits_stay_isolated_across_two_editors`（A 输入 CJK、B 文档与 selection 逐字节不变、typing 不触发 activation）
+- [x] Unicode + adjacent atom matrix——gate 覆盖：CJK/BiDi 标量与相邻 atom 缝的全程双向 caret walk（one caret unit per step）、三个 seam gap 输入的 re-anchor 顺序、Backspace/Delete 精确删一个 caret unit、跨 CJK+atom 选区一次性替换、undo/redo 精确恢复（含 fallback payload 与 anchor）
+- [x] composition + boundary atom matrix——`CommitComposition`：range 起点=atom 缝（ordinal=count）→ 缝上 atom 存活、纯替换其余文本；range 严格覆盖 atom anchor → fail closed 且文档原子不变；Unicode preedit（你好😀）字节 delta 正确平移；IME commit 独立 history entry
+- [x] P4A root docs sync——architecture.md 新增 P4.5 gate 事实、视觉导航 chip 缝 stepping 修正、运行时 `atoms_inside_span` 修正
+- [x] source-size / dependency / fmt / Clippy / tests——本地全绿
+- [x] inline-atom Windows real-machine Gate——本 PR CI run 34011360127 的 windows-latest job 真机执行含 gate 矩阵的完整测试套件通过
+- [x] three-platform `CI Success`——同 run Ubuntu / macOS / Windows / policy / 汇总 `CI Success` 全部通过
 
-P4.5 通过只代表 **P4A CLOSED**，随后继续 P4B，不关闭整个 P4。
+P4.5 gate 审计发现并修复两个不一致（随本切片交付）：
+
+1. `DocumentSession` 的 `atoms_inside_span` 在 start/end 共享同一 byte 的分支只比较 ordinal、不比较 atom 自身 anchor——空文本区间的选区（如"只选中两个相邻 atom"）会把**其他 boundary 上 ordinal 恰好落入窗口的无关 atom 一并删除**。修正为该分支要求 `offset == start_raw`（`crates/xiaomu-runtime/src/session/atom_edit.rs`）。
+2. GPUI 视觉导航 display 空间步进把"恰好落在 chip 起始 byte"的步进目标当内部处理，导致**标量后紧邻 chip 时一次按键连跨两个视觉停点**（chip 左缝不可达）。修正为 chip 起始 byte 是缝停点、仅严格内部才整体跳过（`visual_navigation.rs::atom_horizontal_target`）；#68 的 Right 链随之多一个 (2,0) 停点——与 runtime canonical walk（ADR 0005 one-caret-unit）逐位一致。
+
+**P4A CLOSED**（P4.5 随 PR #70 通过闭合），随后继续 P4B，不关闭整个 P4。
 
 ## P4B — Atomic Block / Media
 
-### P4.6 Atomic Block Contract
+### P4.6 Atomic Block Contract — NEXT
 
 - [ ] editable text + atomic traversal model
 - [ ] `NodeSelection / atomic position` contract
