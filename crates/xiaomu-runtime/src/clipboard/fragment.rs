@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 
 use xiaomu_core::Result;
 use xiaomu_core::document::{
-    AtomKind, InlineAtomContent, InlineContent, NodeAttrs, NodeContent, NodeId, NodeKind,
-    NodeStoreBuilder, TextRun, XiaomuDocument,
+    AtomKind, AttrValue, InlineAtomContent, InlineContent, NodeAttrs, NodeContent, NodeId,
+    NodeKind, NodeStoreBuilder, TextRun, XiaomuDocument,
 };
 use xiaomu_core::text::TextOffset;
 
@@ -327,11 +327,20 @@ impl ClipboardSlice {
     pub(crate) fn from_roots(roots: Vec<ClipboardNode>) -> Self {
         let mut blocks = Vec::new();
         flatten_blocks(&roots, &mut blocks);
-        let plain_text = blocks
+        let mut plain_text = blocks
             .iter()
             .map(|block| block.inline().plain_text())
             .collect::<Vec<_>>()
             .join("\n");
+        // The plain-text fallback speaks to foreign applications: an image
+        // contributes its external URL when it carries one (host asset
+        // references are opaque and stay out of the plain-text body).
+        for url in collect_image_urls(&roots) {
+            if !plain_text.is_empty() {
+                plain_text.push('\n');
+            }
+            plain_text.push_str(&url);
+        }
         Self {
             plain_text,
             roots,
@@ -468,4 +477,23 @@ fn flatten_blocks(nodes: &[ClipboardNode], out: &mut Vec<ClipboardBlock>) {
             flatten_blocks(children, out);
         }
     }
+}
+
+/// Collects the external URLs of image atomic nodes in fragment order.
+fn collect_image_urls(nodes: &[ClipboardNode]) -> Vec<String> {
+    let mut urls = Vec::new();
+    for node in nodes {
+        match node.content() {
+            ClipboardNodeContent::Atomic if matches!(node.kind(), NodeKind::Image) => {
+                if let Some(AttrValue::String(url)) = node.attrs().get("src") {
+                    urls.push(url.clone());
+                }
+            }
+            ClipboardNodeContent::Children(children) => {
+                urls.extend(collect_image_urls(children));
+            }
+            _ => {}
+        }
+    }
+    urls
 }

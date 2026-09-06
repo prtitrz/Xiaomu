@@ -168,7 +168,18 @@ fn project_node(document: &XiaomuDocument, id: NodeId) -> Option<AccessibilityNo
         NodeContent::InlineAtom(content) => {
             (Some(content.fallback_text().to_owned()), false, Vec::new())
         }
-        NodeContent::Atomic => (None, false, Vec::new()),
+        NodeContent::Atomic => {
+            // Atomic blocks have no editable interior; the accessibility
+            // fallback exposes whatever stable text the semantics carry
+            // (image alt text; a separator stays textless).
+            let text = match node.kind() {
+                NodeKind::Image => xiaomu_core::document::ImageAttrs::from_attrs(node.attrs())
+                    .map(|image| image.alt().to_owned())
+                    .ok(),
+                _ => None,
+            };
+            (text, false, Vec::new())
+        }
         _ => (None, false, Vec::new()),
     };
     Some(AccessibilityNode {
@@ -377,5 +388,65 @@ mod tests {
         assert_eq!(atom.text(), Some("@Ann"));
         assert!(!atom.editable());
         let _ = InlineAtomPlacement::new;
+    }
+
+    #[test]
+    fn atomic_blocks_fall_back_to_semantic_text() {
+        use xiaomu_core::document::{AttrValue, ImageAttrs, ImageSource};
+
+        let mut builder = NodeStoreBuilder::new();
+        let paragraph = leaf(&mut builder, NodeKind::Paragraph, "p");
+        let image_attrs = ImageAttrs::new(
+            ImageSource::ExternalUrl("https://example.invalid/x.png".to_owned()),
+            "封面图".to_owned(),
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .to_attrs()
+        .unwrap();
+        let image = builder
+            .insert(NodeKind::Image, image_attrs, NodeContent::Atomic)
+            .unwrap();
+        let rule = builder
+            .insert(
+                NodeKind::HorizontalRule,
+                NodeAttrs::empty(),
+                NodeContent::Atomic,
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([paragraph, image, rule]),
+            )
+            .unwrap();
+        let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+        let caret = DocumentSelection::collapsed(TextPoint::new(
+            paragraph,
+            document
+                .node(paragraph)
+                .unwrap()
+                .content()
+                .as_inline()
+                .unwrap()
+                .offset_at(0)
+                .unwrap(),
+            CursorAffinity::Before,
+        ));
+        let projection = project_accessibility(&document, caret, None).unwrap();
+        let children = projection.root().children();
+
+        // The image exposes its alt text through the Image role.
+        assert_eq!(children[1].role(), &AccessibilityRole::Image);
+        assert_eq!(children[1].text(), Some("封面图"));
+
+        // The horizontal rule is a textless separator.
+        assert_eq!(children[2].role(), &AccessibilityRole::Separator);
+        assert_eq!(children[2].text(), None);
+        let _ = AttrValue::Bool(true);
     }
 }
