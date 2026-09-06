@@ -12,7 +12,9 @@ use xiaomu_core::selection::InlinePoint;
 use xiaomu_core::text::{TextBuffer, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionStep};
 
-use crate::clipboard::{ClipboardBlock, ClipboardInline, ClipboardNodeContent, ClipboardSlice};
+use crate::clipboard::{
+    ClipboardBlock, ClipboardInline, ClipboardNode, ClipboardNodeContent, ClipboardSlice,
+};
 
 use super::atom_edit::atoms_inside_span;
 use super::cross_block_atom as cross_block;
@@ -40,8 +42,22 @@ pub(crate) fn plan_paste_slice(
     selection
         .validate(document)
         .map_err(|_| SessionError::SelectionInvalid)?;
-    if slice.blocks().is_empty() {
+    let contains_atomic = slice.roots().iter().any(fragment_contains_atomic);
+    if slice.blocks().is_empty() && !contains_atomic {
         return Ok(PlannedAction::NoChange);
+    }
+
+    if contains_atomic {
+        if slice
+            .roots()
+            .iter()
+            .all(|root| matches!(root.content(), ClipboardNodeContent::Atomic))
+        {
+            return plan_atomic_root_insertion(document, selection, slice);
+        }
+        // Mixed inline/atomic fragments have no addressed layout yet: the
+        // hierarchical planner cannot stage atomic interiors.
+        return Err(SessionError::ClipboardAtomicUnsupported);
     }
 
     if slice
@@ -377,4 +393,52 @@ fn slice_inline(
         runs.push(TextRun::new(text, run.marks().clone()).map_err(SessionError::Core)?);
     }
     InlineContent::new(runs).map_err(SessionError::Core)
+}
+
+/// Plans a whole-atomic fragment paste: each atomic root inserts as a
+/// sibling block right after the focused block, preserving the focused
+/// block's own content and the caret position inside it.
+fn plan_atomic_root_insertion(
+    document: &XiaomuDocument,
+    selection: DocumentSelection,
+    slice: &ClipboardSlice,
+) -> Result<PlannedAction, SessionError> {
+    let (head, _) = selection.ordered(document)?;
+    let DocumentPosition::Inline(head) = head else {
+        // Pasting onto an atomic node selection replaces nothing here;
+        // fail closed until a replace-selection contract exists.
+        return Err(SessionError::ClipboardAtomicUnsupported);
+    };
+    let parent = document
+        .parent_of(head.node_id())
+        .ok_or(SessionError::SelectionInvalid)?;
+    let position = children_of(document, parent)
+        .iter()
+        .position(|child| *child == head.node_id())
+        .ok_or(SessionError::SelectionInvalid)?;
+
+    let mut transaction = user_transaction();
+    for (offset, root) in slice.roots().iter().enumerate() {
+        transaction.push_step(TransactionStep::InsertNode {
+            parent,
+            index: position + 1 + offset,
+            kind: root.kind().clone(),
+            attrs: root.attrs().clone(),
+            content: NodeContent::Atomic,
+        });
+    }
+    Ok(PlannedAction::Commit(EditPlan::new(
+        transaction,
+        SelectionUpdate::MapExisting,
+        None,
+    )))
+}
+
+/// Whether any fragment node in the tree carries atomic content.
+fn fragment_contains_atomic(node: &ClipboardNode) -> bool {
+    match node.content() {
+        ClipboardNodeContent::Atomic => true,
+        ClipboardNodeContent::Children(children) => children.iter().any(fragment_contains_atomic),
+        ClipboardNodeContent::Inline(_) => false,
+    }
 }

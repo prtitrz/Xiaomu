@@ -24,8 +24,9 @@ const FORMAT: &str = "xiaomu.clipboard";
 // v1 carried only a flat leaf list. v2 carries the detached fragment tree so
 // list/quote/container semantics survive Xiaomu-to-Xiaomu copy/paste. v3 adds
 // detached inline-atom payloads (kind, attrs, fallback_text) anchored inside
-// the fragment text.
-const VERSION: u32 = 3;
+// the fragment text. v4 adds whole atomic blocks (HorizontalRule, Image, ...)
+// captured as kind + attrs with no editable interior.
+const VERSION: u32 = 4;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -143,6 +144,7 @@ impl WireNode {
                     .map(Self::from_node)
                     .collect::<Result<_, _>>()?,
             },
+            ClipboardNodeContent::Atomic => WireContent::Atomic,
         };
         Ok(Self {
             kind: WireKind::from_kind(node.kind())?,
@@ -185,6 +187,7 @@ impl WireNode {
                     .map(Self::into_node)
                     .collect::<Result<Vec<_>, _>>()?,
             ),
+            WireContent::Atomic => ClipboardNodeContent::Atomic,
         };
         Ok(ClipboardNode::new(
             self.kind.into_kind()?,
@@ -205,6 +208,7 @@ enum WireContent {
     Children {
         children: Vec<WireNode>,
     },
+    Atomic,
 }
 
 /// One detached inline-atom payload on the wire: anchor boundary plus the
@@ -260,6 +264,8 @@ enum WireKind {
     OrderedList,
     ListItem,
     CodeBlock,
+    HorizontalRule,
+    Image,
     Custom(String),
 }
 
@@ -273,10 +279,10 @@ impl WireKind {
             NodeKind::OrderedList => Ok(Self::OrderedList),
             NodeKind::ListItem => Ok(Self::ListItem),
             NodeKind::CodeBlock => Ok(Self::CodeBlock),
+            NodeKind::HorizontalRule => Ok(Self::HorizontalRule),
+            NodeKind::Image => Ok(Self::Image),
             NodeKind::Custom(key) => Ok(Self::Custom(key.clone())),
-            NodeKind::Document | NodeKind::HorizontalRule | NodeKind::Image => {
-                Err(ClipboardMetadataError::unsupported())
-            }
+            NodeKind::Document => Err(ClipboardMetadataError::unsupported()),
             _ => Err(ClipboardMetadataError::unsupported()),
         }
     }
@@ -292,6 +298,8 @@ impl WireKind {
             Self::OrderedList => Ok(NodeKind::OrderedList),
             Self::ListItem => Ok(NodeKind::ListItem),
             Self::CodeBlock => Ok(NodeKind::CodeBlock),
+            Self::HorizontalRule => Ok(NodeKind::HorizontalRule),
+            Self::Image => Ok(NodeKind::Image),
             Self::Custom(key) => {
                 NodeKind::custom(key).map_err(|_| ClipboardMetadataError::invalid())
             }

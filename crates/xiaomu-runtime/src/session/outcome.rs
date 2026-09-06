@@ -39,6 +39,13 @@ pub enum SessionError {
     /// into more than one block fails closed instead of silently
     /// downgrading the fragment to its plain-text fallback.
     ClipboardAtomsUnsupported,
+    /// A structured paste would have to place an atomic block into a
+    /// context the planner cannot address yet.
+    ///
+    /// Atomic blocks pasted as a whole-root fragment insert as siblings of
+    /// the focused block; hierarchical containers mixing atomic and inline
+    /// children fail closed instead of guessing a layout.
+    ClipboardAtomicUnsupported,
 }
 
 impl fmt::Display for SessionError {
@@ -50,6 +57,9 @@ impl fmt::Display for SessionError {
             }
             Self::SelectionInvalid => {
                 f.write_str("selection is invalid for the resulting snapshot")
+            }
+            Self::ClipboardAtomicUnsupported => {
+                f.write_str("clipboard fragment places an atomic block in an unsupported context")
             }
             Self::ClipboardAtomsUnsupported => {
                 f.write_str("pasting inline atoms is only supported into one inline block")

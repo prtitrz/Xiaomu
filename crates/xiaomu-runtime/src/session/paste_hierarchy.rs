@@ -291,10 +291,15 @@ fn append_node_stages(
     let inline = match node.content() {
         ClipboardNodeContent::Inline(inline) => Some(inline.clone()),
         ClipboardNodeContent::Children(_) => None,
+        // The hierarchical planner cannot stage an atomic interior yet;
+        // whole-atomic fragments take the flat sibling-insertion path.
+        ClipboardNodeContent::Atomic => {
+            return Err(SessionError::ClipboardAtomicUnsupported);
+        }
     };
     let children = match node.content() {
         ClipboardNodeContent::Children(children) => Some(children.clone()),
-        ClipboardNodeContent::Inline(_) => None,
+        ClipboardNodeContent::Inline(_) | ClipboardNodeContent::Atomic => None,
     };
     let content = match &inline {
         Some(inline) => NodeContent::Inline(
