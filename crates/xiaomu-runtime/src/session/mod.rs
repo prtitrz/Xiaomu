@@ -17,6 +17,7 @@ mod caret;
 mod cross_block;
 mod cross_block_atom;
 mod history;
+mod image;
 mod intent;
 mod listener;
 mod outcome;
@@ -204,6 +205,10 @@ impl DocumentSession {
             }
         };
         let action = match intent {
+            EditIntent::InsertImage { image } => {
+                self.history.break_group();
+                self.plan_insert_image(image)?
+            }
             EditIntent::InsertText { text } => atom_edit::plan_text_input(
                 &inline,
                 anchor,
