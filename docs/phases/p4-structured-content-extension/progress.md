@@ -218,6 +218,19 @@ P4.5 gate 审计发现并修复两个不一致（随本切片交付）：
 
 ## P4B — Atomic Block / Media
 
+PR 轨迹：
+
+```text
+#71 atomic position contract + runtime removal/undo
+#72 GPUI traversal / rendering / atomic clipboard wire v4
+#73 mixed-fragment fail closed + clipboard audit
+#74 typed ImageAttrs / InsertImage / AssetService seam
+#75 GPUI image placeholders over the asset seam
+#76 resolved texture paint with aspect-ratio fit
+#77 accessibility alt fallback + plain-text URL fallback
+本切片 P4.9 closeout：markdown baseline codec + fixture v4 + final matrix
+```
+
 ### P4.6 Atomic Block Contract — CLOSED
 
 - [x] editable text + atomic traversal model——GPUI 侧 `navigation::nav_units` 把文档顺序推广为 text + atomic 序列（`NavUnit::Text / Atomic`），横向步进 `step_horizontal` 返回 `HorizontalTarget::InText / OnAtomic`；atomic selection 上 Up/Down/LineStart/LineEnd 在本切片为 no-op（atomic 块无可走可视行，P4.9 closeout 复核）
