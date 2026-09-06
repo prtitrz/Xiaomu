@@ -259,8 +259,12 @@ fn asset_service_seam_resolves_opaque_references() {
 
     // The host delivers bytes for the current source revision.
     service.pending.borrow_mut().take();
-    sink.clone()
-        .resolved(Ok(ResolvedAsset::new(reference.clone(), 7, vec![1, 2, 3])));
+    sink.clone().resolved(Ok(ResolvedAsset::new(
+        reference.clone(),
+        7,
+        xiaomu_runtime::assets::AssetFormat::Png,
+        vec![1, 2, 3],
+    )));
     let delivered = sink.result.borrow().as_ref().unwrap().clone().unwrap();
     assert_eq!(delivered.asset_ref(), &reference);
     assert_eq!(delivered.revision(), 7);
