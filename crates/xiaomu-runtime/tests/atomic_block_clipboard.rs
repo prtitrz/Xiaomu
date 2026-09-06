@@ -5,9 +5,11 @@
 //! wire, pastes as a sibling block after the focused block, and mixed
 //! inline/atomic contexts still fail closed.
 
+use std::collections::BTreeMap;
+
 use xiaomu_core::document::{
-    InlineContent, MarkSet, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStoreBuilder, TextRun,
-    XiaomuDocument,
+    AttrValue, InlineContent, MarkSet, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStoreBuilder,
+    TextRun, XiaomuDocument,
 };
 use xiaomu_core::selection::{CursorAffinity, InlinePoint};
 use xiaomu_core::text::TextBuffer;
@@ -176,4 +178,86 @@ fn pasting_onto_an_atomic_selection_fails_closed() {
     );
     // The document is unchanged.
     assert!(target.document().node(rule).is_some());
+}
+
+#[test]
+fn image_clipboard_round_trip_preserves_url_fallback_and_unknown_attrs() {
+    let mut builder = NodeStoreBuilder::new();
+    let paragraph = builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            NodeContent::Inline(
+                InlineContent::new([TextRun::new("段", MarkSet::empty()).unwrap()]).unwrap(),
+            ),
+        )
+        .unwrap();
+    // The image carries an external URL plus an unknown extension attr that
+    // must survive every hop.
+    let mut values = BTreeMap::new();
+    values.insert(
+        "src".to_owned(),
+        AttrValue::String("https://example.invalid/cover.png".to_owned()),
+    );
+    values.insert("alt".to_owned(), AttrValue::String("封面".to_owned()));
+    values.insert(
+        "data-x-extension-tag".to_owned(),
+        AttrValue::String("keep-me".to_owned()),
+    );
+    let attrs = NodeAttrs::new(values).unwrap();
+    let image = builder
+        .insert(NodeKind::Image, attrs, NodeContent::Atomic)
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([paragraph, image]),
+        )
+        .unwrap();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+    let mut source = session_at(&document, paragraph, 0);
+    source.set_atomic_selection(image).unwrap();
+    let slice = source.clipboard_slice().unwrap().unwrap();
+
+    // The URL is the plain-text fallback for foreign applications.
+    assert_eq!(slice.plain_text(), "https://example.invalid/cover.png");
+
+    // The wire round trip keeps kind, URL, alt, and the unknown attr.
+    let metadata = encode_metadata(&slice).unwrap();
+    let decoded = decode_metadata(slice.plain_text(), &metadata).expect("v4 metadata decodes");
+    assert!(matches!(decoded.roots()[0].kind(), NodeKind::Image));
+    assert_eq!(
+        decoded.roots()[0].attrs().get("data-x-extension-tag"),
+        Some(&AttrValue::String("keep-me".to_owned()))
+    );
+
+    // Pasting inserts the image block with the same attrs.
+    let mut target = session_at(&document, paragraph, 3);
+    target
+        .apply_intent(&EditIntent::PasteSlice { slice: decoded })
+        .unwrap();
+    let children = target
+        .document()
+        .node(target.document().root())
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap();
+    assert_eq!(children.len(), 3);
+    let pasted = children[2];
+    assert!(matches!(
+        target.document().node(pasted).unwrap().kind(),
+        NodeKind::Image
+    ));
+    assert_eq!(
+        target
+            .document()
+            .node(pasted)
+            .unwrap()
+            .attrs()
+            .get("data-x-extension-tag"),
+        Some(&AttrValue::String("keep-me".to_owned()))
+    );
 }
