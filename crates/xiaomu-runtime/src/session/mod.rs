@@ -28,6 +28,7 @@ mod selection;
 mod split;
 mod stored_marks;
 mod structure;
+mod table;
 
 pub use history::HistoryStack;
 pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
@@ -208,6 +209,10 @@ impl DocumentSession {
             EditIntent::InsertImage { image } => {
                 self.history.break_group();
                 self.plan_insert_image(image)?
+            }
+            EditIntent::InsertTable { rows, columns } => {
+                self.history.break_group();
+                self.plan_insert_table(*rows, *columns)?
             }
             EditIntent::InsertText { text } => atom_edit::plan_text_input(
                 &inline,

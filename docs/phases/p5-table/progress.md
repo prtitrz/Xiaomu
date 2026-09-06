@@ -19,7 +19,8 @@ P5.6 Integration Gate / Closeout  PENDING
 - [ ] `allows_child`：Table/TableRow/TableCell 容器规则，TableCell 可入 Document/Quote/ListItem/TableCell
 - [ ] `validate_tree` 不变量：行数 ≥1、cell 数 ≥1、同表列数一致、cell 非空
 - [ ] builder 构造矩阵 + 非法形状 fail closed 测试
-- [ ] staged `InsertNode / RemoveNode` 可构造/删除表格（无新 Core step）
+- [x] 表格构造 = Core 语义步骤 `InsertTable`（实施修订：stage 事务独立验证使纯 `InsertNode` staging 无法表达嵌套构造；见 design.md §1）
+- [x] staged/事务可构造性：runtime `plan_insert_table` 单步 seam + 删除子树 + inverse 验证
 - [ ] P0-P4 regression 保持全绿
 
 ## P5.2 Runtime Cell Editing — PENDING
