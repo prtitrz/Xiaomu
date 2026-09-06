@@ -1,0 +1,147 @@
+# P5 Table Design
+
+## 1. Canonical 模型
+
+```text
+NodeKind::Table        NodeContent::Children([TableRow…])
+NodeKind::TableRow     NodeContent::Children([TableCell…])
+NodeKind::TableCell    NodeContent::Children([block…])
+```
+
+决策与理由：
+
+```text
+Table/TableRow/TableCell 都是普通树节点（NodeId、attrs、Children content）
+  → parent / validate_tree / ChangeMap / clipboard projection 全部免费复用
+cell 内放 block（至少一个 Paragraph），不放裸 inline
+  → cell 内复用既有 caret / gap / SplitBlock / marks / atom 全套语义
+表格不变量属于 canonical validation：
+  → 每个 TableRow 的 cell 数一致（列数由行推导，不另设 attrs 冗余）
+  → 每个 TableCell 至少一个 child block（caret 必须有落点）
+  → allows_child：Table↔TableRow、TableRow↔TableCell；
+    Document/Quote/ListItem/TableCell 可包含 Table（嵌套表允许，结构 op 只作用于最内层所属表）
+baseline 不设 header row / column alignment / 列宽 attrs
+  → 列宽是前端 layout 关切；header/alignment 若后续纳入，走 attrs 扩展，不改 content 形状
+```
+
+`validate_tree`（`crates/xiaomu-core/src/document/snapshot.rs`）新增：
+
+```text
+Table 的 children 全是 TableRow 且 ≥1 行
+TableRow 的 children 全是 TableCell 且 ≥1 cell
+同一 Table 下所有行 cell 数一致
+TableCell 的 children ≥1 且不含 Table 之外的容器约束沿用 allows_child
+```
+
+不加新 Core transaction step：插入行/列 = staged `InsertNode`（row → 各 cell，cell 内联 Paragraph）组合；删除 = `RemoveNode`（子树随删）。P4 的 staged transaction 模式（中间 snapshot 不可见、整命令一个 history entry、inverse 自动推导）直接覆盖。
+
+## 2. 位置与选区
+
+cell 是普通容器，因此 P0-P4 的全部位置语义原样成立：
+
+```text
+cell 内 caret      DocumentPosition::Inline(InlinePoint)  —— node_id 是 cell 内的段落
+cell 内选区        既有 text selection（可跨 cell 内多段落）
+cell 内 gap        NodeGap(parent=cell 段落或 cell 容器)
+cell 内 atomic     DocumentPosition::Atomic(image/HR/inline-atom 语义不变)
+```
+
+P5.5 新增唯一的新选区形态：
+
+```text
+DocumentSelection 新变体（命名随实现定）：
+  cell-range：同一 Table 内 anchor cell 与 focus cell 构成的矩形
+validate：同表、行列索引有序化后有效
+map_through：结构变化（行/列插入删除）把矩形映射/收缩；矩形退化为空 → 收敛到最近合法 gap
+```
+
+矩形选区不与 text selection 混存：构造 cell-range 时清除 text anchor，反之亦然（与 P4 atomic selection 同一收敛原则）。
+
+## 3. 编辑语义
+
+### Tab / Shift+Tab（P5.2）
+
+```text
+caret 在 cell 内 → MoveToNextCell：caret 移到下一 cell 首段的 (0, ordinal 0)
+最后一个 cell → 追加一行（列数与表一致，空 Paragraph），caret 落新行首 cell
+Shift+Tab 反向；第一个 cell 上 no-op
+GPUI keybinding 上下文优先级：table cell > list item（Tab 缩进）> paragraph（Tab 变列表）
+```
+
+### Enter / Backspace / Delete（P5.2）
+
+```text
+Enter 在 cell 内段落 → 既有 SplitBlock（新段落留在同 cell）
+Backspace 在 cell 首段 (0,0) → baseline no-op（不 join 前 cell；cell join 的
+  atom/嵌套迁移语义明确后另立切片，本切片记录为已知边界）
+Delete 在 cell 末尾 → 同理 no-op
+cell 内文本/选区/IME/undo 全部走既有 intent，无表格特例
+```
+
+### 行列操作（P5.3）
+
+```text
+InsertTableRow { table, index }      每列一个空 cell（空 Paragraph），staged
+InsertTableColumn { table, index }   每行 index 处插一个空 cell，staged
+DeleteTableRow { table, index }      RemoveNode(row)；表只剩一行时 fail closed
+DeleteTableColumn { table, index }   每行 RemoveNode(cell)；表只剩一列时 fail closed
+SelectionUpdate：
+  被删区域内的 caret/selection → CaretAtGap（cell 缝）或 MapExisting（仍存在的行/列）
+  新插入区域不自动聚焦（caret 原地保留），由 Tab/点击进入
+undo / redo：整命令一个 history entry，inverse 由 staged 步自动推导
+```
+
+结构 op 与 P4 内容共存：
+
+```text
+删行/删列时 cell 内可有 atom / image / inline atom → RemoveNode 子树删除即完整载荷删除，undo 精确恢复
+插入列不复制既有 cell 内容（空 cell），避免隐式数据复制
+```
+
+## 4. Clipboard（P5.5）
+
+```text
+wire v5：
+  ClipboardNodeContent::Table { rows: Vec<Vec<ClipboardTableNode>> } 或等价形状
+  cell 载荷沿用 ClipboardNodeContent::Children / Inline / Atomic
+旧版本 fail-soft：v4 及以下 reader 遇 table 载荷退化为 plain text（不静默重组结构）
+plain-text fallback：TSV——cell 内文本以 \t 分列、\n 分行；cell 内已有换行按 block 边界扁平化
+paste：
+  单 cell 载荷 → 替换 cell-range 选区或插入到 caret 所在 cell
+  表载荷 → caret 在 cell 内时结构对齐粘贴；caret 在普通文本上时插入 Table 兄弟块
+  mixed / 不对齐 fail closed（沿用 ClipboardAtomicUnsupported 风格的新错误变体）
+markdown：GFM table 不入 P4.9 baseline codec；Table 节点导出走既有 UnsupportedNodeKind
+```
+
+## 5. GPUI（P5.4）
+
+```text
+TableBlockPresentation：
+  grid 布局（gpui div + 固定列计数），cell 边框 / hover / focus affordance
+  cell 内块渲染递归复用既有 block element（不做表格专用第二套段落渲染）
+  caret / selection / IME / hit-test：cell 内就是普通块，投影零改动
+  表格级 hit-test：点击 cell 空白 → caret 到该 cell 首段；点击既有块 → 既有路径
+keyboard：Tab / Shift+Tab action 在 cell 上下文注册；上下文判定依据 focus 所在块的祖先链
+accessibility：Table/TableRow/TableCell 投影为对应 role，cell 内容递归投影
+```
+
+## 6. Fixture / codec
+
+```text
+harness fixture v5：table 块行编码
+  table\t<rows>\t<cols> 行 + end 包裹 row/cell 容器（复用 quote/ul 的 end 栈模型）
+  cell 作为容器帧（新 Frame::Cell），cell 内沿用 p/code/atom/img 行
+  v4 及以下读兼容；Table 在 v4 写路径仍 fail closed
+markdown codec：不变（Table 导出 fail closed，见 §4）
+```
+
+## 7. 测试矩阵
+
+```text
+P5.1  builder/validate/invariant 矩阵（行列一致、空 cell、嵌套表、非法嵌套）
+P5.2  中英文 cell 连续编辑 + undo/redo；Tab 链全表行走；last-cell 追加行
+P5.3  行列插入删除 × caret 位置 × undo/redo；最后一行/列 fail closed；atom 载荷共存
+P5.4  GPUI e2e：text ↔ table ↔ text 键盘鼠标、cell 内编辑、Tab 行走
+P5.5  矩形选区 copy/paste/undo、TSV fallback、wire 往返、mixed fail closed
+P5.6  realistic fixture + Unicode 矩阵 + 多 editor 隔离 + Windows/CI
+```
