@@ -207,6 +207,9 @@ pub enum ClipboardNodeContent {
     Inline(ClipboardInline),
     /// Selected child fragment nodes in canonical document order.
     Children(Vec<ClipboardNode>),
+    /// An atomic block captured whole: kind and attrs carry the semantics,
+    /// there is no editable interior payload.
+    Atomic,
 }
 
 impl ClipboardNodeContent {
@@ -452,6 +455,7 @@ fn insert_fragment(builder: &mut NodeStoreBuilder, node: &ClipboardNode) -> Resu
                 .map(|child| insert_fragment(builder, child))
                 .collect::<Result<Vec<_>>>()?,
         ),
+        ClipboardNodeContent::Atomic => NodeContent::Atomic,
     };
     builder.insert(node.kind().clone(), node.attrs().clone(), content)
 }

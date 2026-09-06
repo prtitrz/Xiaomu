@@ -17,7 +17,8 @@ P4.2 Canonical Inline Atom        CLOSED
 P4.3 Runtime Atom Editing         CLOSED
 P4.4 GPUI Renderer / Capability   CLOSED
 P4.5 P4A Integration Gate         CLOSED — P4A CLOSED
-P4.6 Atomic Block Contract        NEXT (P4B)
+P4.6 Atomic Block Contract        CLOSED
+P4.7 Image Canonical Model        CURRENT (P4B)
 ```
 
 P4.3 在 PR #58 / #59 / #60 建立主体能力后，经审计修复 PR #62 与 hierarchical structured-paste 收尾 PR #63 补齐边界矩阵。P4.4 由 #64（display projection）/#65（layout / caret）/#66（runtime selection seam）/#67（hit-test / chip paint / 收尾）/#68（键盘视觉导航）与本切片（host capability + harness demo + 多 editor 隔离）闭合；P4.5 通过即 **P4A CLOSED**。
@@ -215,16 +216,17 @@ P4.5 gate 审计发现并修复两个不一致（随本切片交付）：
 
 ## P4B — Atomic Block / Media
 
-### P4.6 Atomic Block Contract — CURRENT
+### P4.6 Atomic Block Contract — CLOSED
 
 - [x] editable text + atomic traversal model——GPUI 侧 `navigation::nav_units` 把文档顺序推广为 text + atomic 序列（`NavUnit::Text / Atomic`），横向步进 `step_horizontal` 返回 `HorizontalTarget::InText / OnAtomic`；atomic selection 上 Up/Down/LineStart/LineEnd 在本切片为 no-op（atomic 块无可走可视行，P4.9 closeout 复核）
 - [x] `NodeSelection / atomic position` contract——`DocumentPosition::Atomic(NodeId)`：validate 限定 atomic content（文本/容器节点不可 node-select）；`Slots` 以节点自身 slot 排序（gap-before < atomic < gap-after）；`map_through` 经 `ChangeMap::map_node_selection`；collapsed accessor `as_atomic_node`；公开 seam `DocumentSession::set_atomic_selection`
 - [x] HorizontalRule keyboard traversal——`text ↔ HorizontalRule ↔ text` 纯键盘往返：Text 块边界横向步进落在相邻 atomic 单元（节点选择），Atomic 焦点再 Right/Left 跨到相邻文本块的 start/end（end-anchored seam ordinal 保留）；e2e `tests/atomic_block_gpui.rs`
-- [x] atomic click / select / delete——atomic 规则条渲染为整块可选元素：节点选择激活时加粗 accent 高亮；plain click 经 `set_atomic_selection` 选中（listener `stop_propagation` 阻止 caret 放置）；Backspace/Delete 删除 + undo/redo（runtime seam）；**copy / paste 的 node-selection 投影留待下一切片**（`slice_selection` 目前要求双 Inline endpoint，需 ClipboardNode 级 atomic 块投影）
+- [x] atomic click / select / delete——atomic 规则条渲染为整块可选元素：节点选择激活时加粗 accent 高亮；plain click 经 `set_atomic_selection` 选中（listener `stop_propagation` 阻止 caret 放置）；Backspace/Delete 删除 + undo/redo（runtime seam）
+- [x] atomic copy / paste——`ClipboardNodeContent::Atomic` 变体（kind + attrs 即全部载荷）；collapsed atomic selection 经 `slice_selection` 投影为单 atomic root 的 ClipboardSlice；clipboard metadata wire 升级 **v4**（`WireContent::Atomic` + `WireKind::HorizontalRule / Image`；v3 及以下含 atomic 的载荷仍 fail soft 到 plain text）；paste 全 atomic root 在聚焦块后插入兄弟块（`InsertNode` + `SelectionUpdate::MapExisting`，caret 原地保留）；mixed inline/atomic fragment 层级粘贴 fail closed（新 `SessionError::ClipboardAtomicUnsupported`）。已知边界：跨块文本选区跨越 atomic 块时，flat leaf 投影仍不携带中间 atomic 节点（P4.9 clipboard closeout 复核）
 - [x] mapping / selection fallback——`SelectionUpdate::CaretAtGap`（resolve 时对 post-snapshot 验证）；无关文本编辑不干扰 atomic endpoint 的 identity mapping
 - [x] undo / redo invariant tests——`tests/atomic_block_selection.rs`：undo 恢复块并重新安装 Atomic selection，redo 再次删除；stale atomic endpoint fail closed
 
-### P4.7 Image Canonical Model / AssetService
+### P4.7 Image Canonical Model / AssetService — NEXT
 
 - [ ] typed Image attrs
 - [ ] frontend-neutral `AssetRef / ImageSource`

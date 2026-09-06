@@ -25,6 +25,18 @@ pub(crate) fn slice_selection(
     selection.validate(document)?;
 
     let (head, tail) = selection.ordered(document)?;
+
+    // A collapsed atomic node selection copies the block whole: kind and
+    // attrs are the payload, there is no editable interior.
+    if let DocumentPosition::Atomic(node) = head {
+        let source = document.node(node).ok_or(SessionError::SelectionInvalid)?;
+        return Ok(Some(ClipboardSlice::from_roots(vec![ClipboardNode::new(
+            source.kind().clone(),
+            source.attrs().clone(),
+            ClipboardNodeContent::Atomic,
+        )])));
+    }
+
     let (DocumentPosition::Inline(head), DocumentPosition::Inline(tail)) = (head, tail) else {
         return Err(SessionError::SelectionInvalid);
     };
