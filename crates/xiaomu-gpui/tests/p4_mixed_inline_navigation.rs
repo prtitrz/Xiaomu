@@ -159,12 +159,17 @@ fn mixed_inline_navigation_crosses_chips_and_keeps_seam_ordinals(cx: &mut TestAp
         )
     };
 
-    // Right crosses each chip as one caret unit, ordinals advancing.
+    // Right crosses each chip as one caret unit, ordinals advancing. A
+    // scalar followed by an adjacent chip stops at the chip's left seam
+    // first (one display scalar per keystroke, matching the runtime walk),
+    // then the chip itself crosses as one unit.
     place(&window, cx, &session, seam(1, 0));
     step(&window, cx, "right");
     expect_focus(&session, mixed, 1, 1, "right from before both chips");
     step(&window, cx, "right");
     expect_focus(&session, mixed, 1, 2, "right past the second chip");
+    step(&window, cx, "right");
+    expect_focus(&session, mixed, 2, 0, "right after B, before the end chip");
     step(&window, cx, "right");
     expect_focus(&session, mixed, 2, 1, "right past the end-anchored chip");
 

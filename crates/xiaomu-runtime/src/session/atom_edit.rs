@@ -301,7 +301,10 @@ pub(crate) fn atoms_inside_span(
         let offset = placement.text_offset().as_usize();
         let ordinal = same_boundary_ordinal(inline, placement.text_offset(), placement.atom());
         let contained = if start_raw == end_raw {
-            ordinal >= start.atom_index() && ordinal < end.atom_index()
+            // The half-open ordinal range only applies to atoms anchored at
+            // the shared boundary; atoms elsewhere are outside the span no
+            // matter which ordinal they hold at their own boundary.
+            offset == start_raw && ordinal >= start.atom_index() && ordinal < end.atom_index()
         } else {
             offset == start_raw && ordinal >= start.atom_index()
                 || (offset > start_raw && offset < end_raw)
