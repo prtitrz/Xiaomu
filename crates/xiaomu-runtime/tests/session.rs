@@ -730,7 +730,8 @@ fn split_block_then_set_selection_reaches_the_new_block() {
 
     let focus_node = match session.selection().focus() {
         xiaomu_runtime::session::DocumentPosition::Inline(point) => point.node_id(),
-        xiaomu_runtime::session::DocumentPosition::Gap(_) => {
+        xiaomu_runtime::session::DocumentPosition::Gap(_)
+        | xiaomu_runtime::session::DocumentPosition::Atomic(_) => {
             panic!("expected a text position after split")
         }
     };

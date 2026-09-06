@@ -221,7 +221,9 @@ impl DocumentView {
                                     .unwrap_or_else(|| "<none>".into());
                                 format!("caret in {kind} (parent {parent})")
                             }
-                            DocumentPosition::Gap(_) => "caret at a gap".to_owned(),
+                            DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => {
+                                "caret at a structural boundary".to_owned()
+                            }
                         }
                     };
                     eprintln!(
@@ -294,7 +296,9 @@ impl DocumentView {
                 // Mixed-inline anchors keep their atom ordinal; keyboard and
                 // pointer callers both route through here.
                 DocumentPosition::Inline(point) => Some(point),
-                DocumentPosition::Gap(_) => None,
+                // Node-selection anchors do not extend into text ranges in
+                // this slice.
+                DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => None,
             }
         } else {
             None
@@ -309,7 +313,7 @@ impl DocumentView {
     fn request_focus_scroll(&self, cx: &App) {
         let node = match self.session.borrow().selection().focus() {
             DocumentPosition::Inline(point) => point.node_id(),
-            DocumentPosition::Gap(_) => return,
+            DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => return,
         };
         if let Some((_, view)) = self.children.iter().find(|(id, _)| *id == node) {
             view.read(cx).request_caret_scroll();

@@ -32,7 +32,7 @@ impl DocumentPosition {
     pub fn as_inline_point(self) -> Option<InlinePoint> {
         match self {
             Self::Inline(point) => Some(point),
-            Self::Gap(_) => None,
+            Self::Gap(_) | Self::Atomic(_) => None,
         }
     }
 }

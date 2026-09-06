@@ -245,7 +245,9 @@ impl DocumentView {
                         _ => None,
                     }
                 }
-                DocumentPosition::Gap(_) => None,
+                // Tab on an atomic node selection is a no-op: the block has
+                // no text to indent.
+                DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => None,
             }
         };
         match plan {
@@ -293,7 +295,7 @@ impl DocumentView {
                     markers::list_context(session.document(), point.node_id()),
                     Some(context) if !context.nested
                 ),
-                DocumentPosition::Gap(_) => false,
+                DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => false,
             }
         };
         if lifts_out {
@@ -507,7 +509,7 @@ impl DocumentView {
     pub(crate) fn route_focus(&self, window: &mut Window, cx: &App) {
         let node = match self.session.borrow().selection().focus() {
             DocumentPosition::Inline(point) => point.node_id(),
-            DocumentPosition::Gap(_) => return,
+            DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => return,
         };
         if let Some((_, view)) = self.children.iter().find(|(id, _)| *id == node) {
             let handle = view.read(cx).focus_handle(cx);

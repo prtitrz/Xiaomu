@@ -65,7 +65,9 @@ fn focus(session: &SharedSession) -> (NodeId, usize, usize) {
             point.text_offset().as_usize(),
             point.atom_index(),
         ),
-        DocumentPosition::Gap(_) => panic!("mixed-inline navigation must keep an inline focus"),
+        DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => {
+            panic!("mixed-inline navigation must keep an inline focus")
+        }
     }
 }
 

@@ -381,7 +381,8 @@ fn session_of(editor: &EditorInstance) -> xiaomu_gpui::block_view::SharedSession
 fn session_focus_node(session: &xiaomu_gpui::block_view::SharedSession) -> Option<NodeId> {
     match session.borrow().selection().focus() {
         xiaomu_runtime::session::DocumentPosition::Inline(point) => Some(point.node_id()),
-        xiaomu_runtime::session::DocumentPosition::Gap(_) => None,
+        xiaomu_runtime::session::DocumentPosition::Gap(_)
+        | xiaomu_runtime::session::DocumentPosition::Atomic(_) => None,
     }
 }
 

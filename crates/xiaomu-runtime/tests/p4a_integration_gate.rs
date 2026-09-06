@@ -182,7 +182,9 @@ fn run_session(
 fn caret(session: &DocumentSession) -> InlinePoint {
     match session.selection().focus() {
         DocumentPosition::Inline(point) => point,
-        DocumentPosition::Gap(_) => panic!("caret must stay on inline text"),
+        DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => {
+            panic!("caret must stay on inline text")
+        }
     }
 }
 

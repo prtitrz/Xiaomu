@@ -12,6 +12,7 @@
 //! public read.
 
 mod atom_edit;
+mod atomic_block;
 mod caret;
 mod cross_block;
 mod cross_block_atom;
@@ -153,6 +154,19 @@ impl DocumentSession {
             self.clear_stored_marks();
             let action = paste::plan_paste_slice(&self.document, self.selection, slice)?;
             return match action {
+                PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
+                PlannedAction::Commit(plan) => self.commit(plan),
+                PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
+            };
+        }
+
+        // Backspace/Delete on a collapsed atomic node selection removes the
+        // whole block as one logical history change.
+        if matches!(intent, EditIntent::Backspace | EditIntent::Delete)
+            && self.selection.as_atomic_node().is_some()
+        {
+            self.history.break_group();
+            return match self.plan_atomic_removal()? {
                 PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
                 PlannedAction::Commit(plan) => self.commit(plan),
                 PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
@@ -555,11 +569,13 @@ impl DocumentSession {
     }
 
     /// Returns the focused mixed-inline position; content-editing intents
-    /// cannot act on a gap.
+    /// cannot act on a gap or an atomic node selection.
     fn inline_focus(&self) -> Result<InlinePoint, SessionError> {
         match self.selection.focus() {
             DocumentPosition::Inline(point) => Ok(point),
-            DocumentPosition::Gap(_) => Err(SessionError::SelectionInvalid),
+            DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => {
+                Err(SessionError::SelectionInvalid)
+            }
         }
     }
 

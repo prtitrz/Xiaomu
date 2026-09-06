@@ -30,7 +30,9 @@ fn focus(session: &xiaomu_gpui::block_view::SharedSession) -> TextPoint {
         DocumentPosition::Inline(point) => point
             .to_text_point()
             .expect("visual navigation must keep a text focus"),
-        DocumentPosition::Gap(_) => panic!("visual navigation must keep a text focus"),
+        DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => {
+            panic!("visual navigation must keep a text focus")
+        }
     }
 }
 

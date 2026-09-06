@@ -158,7 +158,7 @@ impl DocumentSession {
         self.set_inline_selection(InlinePoint::from(anchor), InlinePoint::from(focus))
     }
 
-    fn install_selection(
+    pub(super) fn install_selection(
         &mut self,
         next: DocumentSelection,
     ) -> Result<SessionOutcome, SessionError> {

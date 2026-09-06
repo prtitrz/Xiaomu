@@ -67,7 +67,9 @@ fn focus(session: &SharedSession) -> (NodeId, usize, usize) {
             point.text_offset().as_usize(),
             point.atom_index(),
         ),
-        DocumentPosition::Gap(_) => panic!("mixed-inline caret must stay inline"),
+        DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => {
+            panic!("mixed-inline caret must stay inline")
+        }
     }
 }
 
@@ -317,6 +319,8 @@ fn atom_edits_stay_isolated_across_two_editors(cx: &mut TestAppContext) {
             assert_eq!(point.node_id(), plain);
             assert_eq!(point.text_offset().as_usize(), 5);
         }
-        DocumentPosition::Gap(_) => panic!("B keeps its inline caret"),
+        DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => {
+            panic!("B keeps its inline caret")
+        }
     }
 }
