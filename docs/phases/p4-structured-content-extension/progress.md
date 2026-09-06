@@ -2,11 +2,11 @@
 
 ## Current status
 
-P0 / P1 / P2 / P3 已关闭。P4 统一为两条连续子线：
+P0 / P1 / P2 / P3 / P4 已关闭。P4 统一为两条连续子线：
 
 ```text
 P4A Inline Atom / Extension Seam  ← CLOSED
-P4B Atomic Block / Media          ← 当前施工
+P4B Atomic Block / Media          ← CLOSED
 ```
 
 截至 2026-09-05：
@@ -18,7 +18,9 @@ P4.3 Runtime Atom Editing         CLOSED
 P4.4 GPUI Renderer / Capability   CLOSED
 P4.5 P4A Integration Gate         CLOSED — P4A CLOSED
 P4.6 Atomic Block Contract        CLOSED
-P4.7 Image Canonical Model        CURRENT (P4B)
+P4.7 Image Canonical Model        CLOSED
+P4.8 GPUI Image / Atomic          CLOSED
+P4.9 Clipboard / Markdown / Closeout  CLOSED — P4 CLOSED
 ```
 
 P4.3 在 PR #58 / #59 / #60 建立主体能力后，经审计修复 PR #62 与 hierarchical structured-paste 收尾 PR #63 补齐边界矩阵。P4.4 由 #64（display projection）/#65（layout / caret）/#66（runtime selection seam）/#67（hit-test / chip paint / 收尾）/#68（键盘视觉导航）与本切片（host capability + harness demo + 多 editor 隔离）闭合；P4.5 通过即 **P4A CLOSED**。
@@ -121,9 +123,9 @@ PR 轨迹：
 - [x] caret / selection display mapping（#65 projection 化 caret / selection；#66 runtime `set_inline_selection` seam）
 - [x] layout / paint（#65 atom-aware layout；chip quad 随本切片落地）
 - [x] atom hit-test（display byte 反投影 + chip 左右半区规则）
-- [ ] demo atom renderer
-- [ ] host capability callback
-- [ ] harness demo
+- [x] demo atom renderer（harness `MentionChipRenderer`）
+- [x] host capability callback（`InlineAtomHostCapability`）
+- [x] harness demo（`crates/xiaomu-gpui` e2e + `examples/editor_harness`）
 
 #### P4.4b Mixed-inline display projection
 
@@ -226,7 +228,7 @@ P4.5 gate 审计发现并修复两个不一致（随本切片交付）：
 - [x] mapping / selection fallback——`SelectionUpdate::CaretAtGap`（resolve 时对 post-snapshot 验证）；无关文本编辑不干扰 atomic endpoint 的 identity mapping
 - [x] undo / redo invariant tests——`tests/atomic_block_selection.rs`：undo 恢复块并重新安装 Atomic selection，redo 再次删除；stale atomic endpoint fail closed
 
-### P4.7 Image Canonical Model / AssetService — CURRENT
+### P4.7 Image Canonical Model / AssetService — CLOSED（#74）
 
 - [x] typed Image attrs——Core `document/image.rs`：`ImageAttrs` 类型化视图（source / alt / title / width / height）经 canonical attrs 键 `src` / `asset` / `alt` / `title` / `width` / `height` 读写；校验：source 二选一且非空、alt 非空、尺寸为正；新 `Error::InvalidImageAttrs`。像素、texture handle、宿主文件对象与宿主绝对路径一律不入 canonical document
 - [x] frontend-neutral `AssetRef / ImageSource`——`ImageSource::AssetRef(opaque)`（宿主经 capability seam 解析）与 `ImageSource::ExternalUrl(url)`（codec/host 显式导入）；`AssetRef` 为宿主定义的 opaque key，运行时仅校验非空
@@ -244,18 +246,24 @@ P4.5 gate 审计发现并修复两个不一致（随本切片交付）：
 - [x] mouse + keyboard selection——Image 块即 P4.6 atomic 单元：plain click 节点选择、Left/Right 横向 traversal、Backspace/Delete/undo/redo 全部复用 P4.6 seam；e2e `tests/image_block_gpui.rs`
 - [x] accessibility fallback——atomic 块投影带语义文本：Image 节点经 `ImageAttrs` 投影 alt 文本（Image role），HorizontalRule 投影为无文本 Separator（既有 role），inline atom fallback text 沿用 P4A
 
-### P4.9 Clipboard / Markdown / P4 Final Closeout
+### P4.9 Clipboard / Markdown / P4 Final Closeout — CLOSED（本切片）
 
-- [ ] atomic/image structured clipboard
-- [ ] semantic plain-text / URL fallback
-- [ ] baseline built-in Markdown round-trip
-- [ ] unknown extension/image attrs preservation
-- [ ] realistic media fixture
-- [ ] multi-editor isolation
-- [ ] Unicode + atom + atomic matrix
-- [ ] Windows final real-machine Gate
-- [ ] architecture / planning / progress final sync
-- [ ] final three-platform `CI Success`
+- [x] atomic/image structured clipboard——#72/#73（clipboard wire v4、atomic 兄弟块粘贴、mixed fail closed）
+- [x] semantic plain-text / URL fallback——#77：copy/image plain-text 携带 ExternalUrl（`collect_image_urls` 走 roots 收集）；asset-only 图片不发明 URL
+- [x] baseline built-in Markdown round-trip——`xiaomu-codec-markdown` 建立真实 codec：ATX heading / paragraph / quote / bullet+ordered list（tight、嵌套）/ bold / italic / inline code / strike / link / fenced code block（`language` attr）/ hard break / horizontal rule / image（ExternalUrl）。canonical 导出形态固定（块间空行、`- ` 列表、有序列表从 1 重新编号、backslash hard break）
+- [x] refuse-instead-of-drop 契约——AssetRef 图片导出 fail closed（`AssetImageNotExportable`，URL 映射归宿主 adapter policy）；unknown attrs（含 image width/height）fail closed（`UnsupportedAttributes`）；inline atom / Custom node kind / empty paragraph / 不可 round-trip 的空白全部显式报错；setext heading、indented code、lazy quote、inline image、reference link 导入 fail closed，不做静默重解释；unclosed emphasis 按字面读取（与 CommonMark fallback 一致）
+- [x] unknown extension/image attrs preservation——clipboard wire 与 fixture v4 结构性保留（`data-x-extension-tag` 断言）；markdown 基线以 fail closed 表达"永不静默丢弃"
+- [x] realistic media fixture——harness fixture **v4**：`hr\n` / `img\n` 原子行 + 既有 attrs 编码承载 image 语义；v2/v3 读兼容；Custom 仍 fail closed；demo fixture 加入 HR + 带 extension tag 的 Image；`format.rs` marks 编解码拆分 `marks_text.rs`
+- [x] multi-editor isolation——`p4_final_gate.rs::multi_editor_sessions_stay_isolated_with_atomic_blocks`（A 删除 HR + 输入 CJK，B 文档 fingerprint 逐字节不变；undo 链互不泄漏）
+- [x] Unicode + atom + atomic matrix——`p4_final_gate.rs`：CJK+emoji 文本 + mention atom 缝输入、atomic 删除 undo 回整节点选择、clipboard wire 往返、InsertImage canonical attrs、gap 经 atomic 删除的 mapping；markdown 侧 Unicode（CJK/BiDi/emoji 文本与 alt）round-trip 独立覆盖
+- [x] Windows final real-machine Gate——本切片 PR 的 windows-latest CI job 执行完整测试套件（含最终矩阵、codec round-trip、harness 测试）通过
+- [x] architecture / planning / progress final sync——architecture.md 记录 P4 closeout 事实与本切片契约
+- [x] final three-platform `CI Success`——本切片 PR 的 CI run 全绿
+
+P4.6 遗留复核结论（随 closeout 固定）：
+
+1. atomic selection 上 Up/Down/LineStart/LineEnd 维持 no-op：atomic 块自身没有可视行，横向（Left/Right）已覆盖 text ↔ atomic ↔ text 往返；该行为已由 e2e 固定。
+2. 跨块纯文本选区跨越 atomic 块时 flat leaf 投影不携带 atomic 节点——复核确认这是 one-caret-unit 模型的有意语义："文本范围删除"不吞并 atomic 块，atomic 删除必须经显式 node selection；由 P4.6/P4.9 测试锁定。
 
 ## P4 Phase Gate
 
@@ -266,27 +274,27 @@ P4.5 gate 审计发现并修复两个不一致（随本切片交付）：
 - [x] atom seam text input preserves `(text_offset, atom_index)`
 - [x] Runtime copy / cut / paste / undo / redo preserve atom semantics
 - [x] accessibility always has `fallback_text`
-- [ ] GPUI mixed-inline projection / hit-test Gate
-- [ ] unknown/missing renderer visual fallback Gate
-- [ ] extension host capability Gate
+- [x] GPUI mixed-inline projection / hit-test Gate（#64/#65/#66/#67）
+- [x] unknown/missing renderer visual fallback Gate（#67 fail soft）
+- [x] extension host capability Gate（#69 capability + 多 editor 隔离）
 
 ### Atomic / Media
 
-- [ ] text ↔ HorizontalRule ↔ text stable traversal
-- [ ] host can insert Image through public contract
-- [ ] canonical Image stores host-neutral semantics only
-- [ ] `AssetService` async resolve + fallback
-- [ ] Image mouse / keyboard selection
-- [ ] text ↔ Image traversal
-- [ ] atomic/image clipboard + undo/redo
-- [ ] Markdown supported built-ins round-trip
+- [x] text ↔ HorizontalRule ↔ text stable traversal（#71/#72）
+- [x] host can insert Image through public contract（#74 InsertImage）
+- [x] canonical Image stores host-neutral semantics only（#74）
+- [x] `AssetService` async resolve + fallback（#74/#75/#76）
+- [x] Image mouse / keyboard selection（#75/#76）
+- [x] text ↔ Image traversal（#72 unit-aware cross-block）
+- [x] atomic/image clipboard + undo/redo（#72/#73/#77）
+- [x] Markdown supported built-ins round-trip（本切片 baseline codec）
 
 ### Regression / integration
 
 - [x] P0-P3 regression remains green through P4.3
-- [ ] P4A integration Gate
-- [ ] P4B integration Gate
-- [ ] final Windows real-machine Gate
-- [ ] final three-platform `CI Success`
+- [x] P4A integration Gate（#70）
+- [x] P4B integration Gate（#70/#72/#75/#76 + 本切片 final matrix）
+- [x] final Windows real-machine Gate（本切片 PR windows-latest CI）
+- [x] final three-platform `CI Success`（本切片 PR CI run）
 
-只有上述 Gate 完成，才允许 **P4 = CLOSED** 并进入 P5 Table。
+以上 Gate 全部完成：**P4 = CLOSED**，可以进入 P5 Table。
