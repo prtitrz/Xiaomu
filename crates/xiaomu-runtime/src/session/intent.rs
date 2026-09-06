@@ -4,7 +4,7 @@
 //! transaction contract: the same Core steps can serve many commands, and
 //! only the session knows which after-selection a command promises.
 
-use xiaomu_core::document::{InlineContent, Mark, MarkKind, MarkSet, NodeId, NodeKind};
+use xiaomu_core::document::{ImageAttrs, InlineContent, Mark, MarkKind, MarkSet, NodeId, NodeKind};
 use xiaomu_core::selection::{InlinePoint, NodeGap, TextPoint, TextSelection};
 use xiaomu_core::text::{TextBuffer, TextOffset, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
@@ -51,6 +51,14 @@ pub enum EditIntent {
     InsertText {
         /// Replacement text; may be empty (deletes the selection).
         text: String,
+    },
+    /// Inserts one image atomic block after the focused block (P4.7).
+    ///
+    /// The payload is the typed canonical image semantics; pixels and host
+    /// file objects never travel through the document.
+    InsertImage {
+        /// Typed canonical image attrs (source, alt, optional metadata).
+        image: ImageAttrs,
     },
     /// Commit one native IME composition over an explicit canonical range.
     ///

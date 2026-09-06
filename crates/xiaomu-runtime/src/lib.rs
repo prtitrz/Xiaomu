@@ -13,6 +13,7 @@ mod line_break;
 mod runtime_inline_position;
 mod session_clipboard;
 
+pub mod assets;
 pub mod clipboard;
 pub mod persistence;
 pub mod session;

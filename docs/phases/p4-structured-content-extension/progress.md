@@ -226,14 +226,14 @@ P4.5 gate 审计发现并修复两个不一致（随本切片交付）：
 - [x] mapping / selection fallback——`SelectionUpdate::CaretAtGap`（resolve 时对 post-snapshot 验证）；无关文本编辑不干扰 atomic endpoint 的 identity mapping
 - [x] undo / redo invariant tests——`tests/atomic_block_selection.rs`：undo 恢复块并重新安装 Atomic selection，redo 再次删除；stale atomic endpoint fail closed
 
-### P4.7 Image Canonical Model / AssetService — NEXT
+### P4.7 Image Canonical Model / AssetService — CURRENT
 
-- [ ] typed Image attrs
-- [ ] frontend-neutral `AssetRef / ImageSource`
-- [ ] image insertion command
-- [ ] `AssetService` capability seam
-- [ ] host-neutral resolve failure model
-- [ ] no local absolute-path canonical identity
+- [x] typed Image attrs——Core `document/image.rs`：`ImageAttrs` 类型化视图（source / alt / title / width / height）经 canonical attrs 键 `src` / `asset` / `alt` / `title` / `width` / `height` 读写；校验：source 二选一且非空、alt 非空、尺寸为正；新 `Error::InvalidImageAttrs`。像素、texture handle、宿主文件对象与宿主绝对路径一律不入 canonical document
+- [x] frontend-neutral `AssetRef / ImageSource`——`ImageSource::AssetRef(opaque)`（宿主经 capability seam 解析）与 `ImageSource::ExternalUrl(url)`（codec/host 显式导入）；`AssetRef` 为宿主定义的 opaque key，运行时仅校验非空
+- [x] image insertion command——`EditIntent::InsertImage { image: ImageAttrs }`：Image 原子块作为聚焦块的下一个兄弟插入（`InsertNode` + `SelectionUpdate::MapExisting`，caret 原地保留，Isolated history entry），undo 可逆
+- [x] `AssetService` capability seam——Runtime `assets.rs`：`AssetService::resolve(AssetRef, Rc<dyn AssetSink>)`，宿主拥有存储/网络/缓存/权限；无 async runtime、无文件 API、无 GPUI 类型穿过 seam；`ResolvedAsset` 携带 `revision` 供消费方做 stale-cache 判定，回调不直接改 canonical document
+- [x] host-neutral resolve failure model——`AssetError::{InvalidRef, NotFound, PermissionDenied, Unavailable}`；bytes 为 opaque 载荷，解码归前端
+- [x] no local absolute-path canonical identity——typed 层不提供路径 source 形态；宿主路径只能作为 `AssetRef` opaque 值进入 attrs（架构 3.1 条款）
 
 ### P4.8 GPUI Image / Atomic Interaction
 
