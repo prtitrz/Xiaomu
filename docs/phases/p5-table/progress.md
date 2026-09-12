@@ -8,8 +8,8 @@ P0-P4 已关闭。P5 于 2026-09-05 启动。
 P5.1 Table Canonical Model        CLOSED
 P5.2 Runtime Cell Editing         CLOSED
 P5.3 Row / Column Operations      CLOSED
-P5.4 GPUI Table Rendering         CURRENT
-P5.5 Cell Selection / Clipboard   PENDING
+P5.4 GPUI Table Rendering         CLOSED
+P5.5 Cell Selection / Clipboard   CURRENT
 P5.6 Integration Gate / Closeout  PENDING
 ```
 
@@ -40,13 +40,13 @@ P5.6 Integration Gate / Closeout  PENDING
 - [x] 最后一行/列删除 fail closed（planner 前置校验 + Core 最终快照验证双保险）
 - [x] 结构 op 与 inline atom 载荷共存（undo 恢复同一批 node id）+ typing history 共存（`p5_row_column_ops.rs` 12 tests）
 
-## P5.4 GPUI Table Rendering — PENDING
+## P5.4 GPUI Table Rendering — CLOSED（PR #83）
 
-- [ ] table grid layout / borders / focus affordance
-- [ ] cell 内块渲染递归复用
-- [ ] caret / selection / IME / hit-test 复用验证
-- [ ] Tab / Shift+Tab keybinding 上下文（cell > list > paragraph）
-- [ ] e2e：text ↔ table ↔ text 键盘鼠标
+- [x] table grid layout / borders / focus affordance（`document_view/table_block.rs`：每行 flex row、cell 边框、表级聚焦蓝框、选中 cell 底色、空 cell 最小高度）
+- [x] cell 内块渲染递归复用（走既有 `render_block_tree`，cell 内 heading/list/quote 展示与 atom 渲染不变）
+- [x] caret / selection / IME / hit-test 复用验证（`text_blocks` 本就收集 cell 段落，鼠标经共享 paint registry 命中，无表格专用指针路径）
+- [x] Tab / Shift+Tab keybinding 上下文（cell > list > paragraph：修复 cell 段落 offset 0 上 Tab 误转列表）
+- [x] e2e：`table_gpui.rs` 3 个 `gpui::test`——真实击键 Tab 行走 + last-cell 追加行 + 输入/undo、Up/Down text↔table↔text（文档序）、Enter cell 内分段、点击进入 cell 首段
 
 ## P5.5 Cell Selection / Clipboard — PENDING
 
