@@ -82,17 +82,22 @@ Delete 在 cell 末尾 → 同理 no-op
 cell 内文本/选区/IME/undo 全部走既有 intent，无表格特例
 ```
 
-### 行列操作（P5.3）
+### 行列操作（P5.3，实施修订）
 
 ```text
-InsertTableRow { table, index }      每列一个空 cell（空 Paragraph），staged
-InsertTableColumn { table, index }   每行 index 处插一个空 cell，staged
-DeleteTableRow { table, index }      RemoveNode(row)；表只剩一行时 fail closed
-DeleteTableColumn { table, index }   每行 RemoveNode(cell)；表只剩一列时 fail closed
+InsertTableRow { table, index }      Core 语义步骤（修订：单一新行使表在命令中途
+                                     非法，validated staging 无法表达，与 P5.1 同理）
+InsertTableColumn { table, index }   Core 语义步骤：每行 index 处插一个空 cell（空
+                                     Paragraph），step map 报告首行新 cell 作 caret 目标
+DeleteTableRow { table, index }      单步 RemoveNode(row)；表只剩一行时 planner fail
+                                     closed（Core 侧最终快照验证同样拦截）
+DeleteTableColumn { table, index }   单事务内每行一个 RemoveNode(cell)；中间态 ragged
+                                     无妨（事务只有最终快照验证），最后一列 fail closed
 SelectionUpdate：
-  被删区域内的 caret/selection → CaretAtGap（cell 缝）或 MapExisting（仍存在的行/列）
-  新插入区域不自动聚焦（caret 原地保留），由 Tab/点击进入
-undo / redo：整命令一个 history entry，inverse 由 staged 步自动推导
+  被删区域内的 caret/selection（含 Gap/Atomic 焦点）→ CaretAtGap（行缝/cell 缝）
+  其余 selection → MapExisting（结构映射调整缝隙索引）
+  插入不自动聚焦（caret 原地保留，MapExisting），由 Tab/点击进入
+undo / redo：整命令一个 isolated history entry；删除的 inverse 恢复同一批 node id
 ```
 
 结构 op 与 P4 内容共存：
