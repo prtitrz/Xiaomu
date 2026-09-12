@@ -7,8 +7,8 @@ P0-P4 已关闭。P5 于 2026-09-05 启动。
 ```text
 P5.1 Table Canonical Model        CLOSED
 P5.2 Runtime Cell Editing         CLOSED
-P5.3 Row / Column Operations      CURRENT
-P5.4 GPUI Table Rendering         PENDING
+P5.3 Row / Column Operations      CLOSED
+P5.4 GPUI Table Rendering         CURRENT
 P5.5 Cell Selection / Clipboard   PENDING
 P5.6 Integration Gate / Closeout  PENDING
 ```
@@ -32,13 +32,13 @@ P5.6 Integration Gate / Closeout  PENDING
 - [x] undo / redo 精确矩阵（`crates/xiaomu-runtime/tests/p5_cell_editing.rs` 9 tests + `table_model.rs` row-append 矩阵）
 - [x] gates：fmt / clippy -D warnings / workspace all-targets / source-size（apply.rs 拆出 apply/table.rs）/ dependency-boundary
 
-## P5.3 Row / Column Operations — PENDING
+## P5.3 Row / Column Operations — CLOSED（PR #82）
 
-- [ ] `InsertTableRow / DeleteTableRow / InsertTableColumn / DeleteTableColumn`
-- [ ] staged transaction + 单 history entry + inverse
-- [ ] SelectionUpdate（CaretAtGap / MapExisting）映射矩阵
-- [ ] 最后一行/列删除 fail closed
-- [ ] 结构 op 与 atom/image 载荷共存 + undo/redo
+- [x] `InsertTableRow / DeleteTableRow / InsertTableColumn / DeleteTableColumn`（intent 携带 `{ table, index }`）
+- [x] 实施修订：插入走 Core 语义步骤（`InsertTableRow` 推广为带索引；新增 `InsertTableColumn`），删除走单事务 `RemoveNode` 组合（staging 无法表达表格中间态，见 design.md §3）；单 isolated history entry + 精确 inverse
+- [x] SelectionUpdate 映射矩阵：被删子树内（inline/atomic/gap 焦点）→ `CaretAtGap`；其余 → `MapExisting`；插入不抢 caret
+- [x] 最后一行/列删除 fail closed（planner 前置校验 + Core 最终快照验证双保险）
+- [x] 结构 op 与 inline atom 载荷共存（undo 恢复同一批 node id）+ typing history 共存（`p5_row_column_ops.rs` 12 tests）
 
 ## P5.4 GPUI Table Rendering — PENDING
 
