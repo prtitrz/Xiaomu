@@ -5,8 +5,9 @@
 //! Visual Up/Down and Home/End live in `visual_navigation`, where the current
 //! wrapped GPUI layout is available.
 
-use xiaomu_core::document::{InlineContent, NodeContent, NodeId, XiaomuDocument};
+use xiaomu_core::document::{InlineContent, NodeContent, NodeId, NodeKind, XiaomuDocument};
 use xiaomu_core::text::TextOffset;
+use xiaomu_runtime::session::DocumentPosition;
 
 /// One inline-bearing block in document order.
 #[derive(Clone, Debug)]
@@ -61,6 +62,44 @@ fn collect_inline(document: &XiaomuDocument, id: NodeId, blocks: &mut Vec<TextBl
 #[must_use]
 pub(crate) fn block_index(blocks: &[TextBlock], node: NodeId) -> Option<usize> {
     blocks.iter().position(|block| block.node == node)
+}
+
+/// The innermost table cell containing `node`, if any.
+#[must_use]
+pub(crate) fn table_cell_ancestor(document: &XiaomuDocument, node: NodeId) -> Option<NodeId> {
+    let mut current = Some(node);
+    while let Some(id) = current {
+        if matches!(document.node(id)?.kind(), NodeKind::TableCell) {
+            return Some(id);
+        }
+        current = document.parent_of(id);
+    }
+    None
+}
+
+/// Whether the focused position lives inside `target`'s subtree.
+///
+/// Gap focuses are addressed by their parent container, so the container
+/// chain decides containment for them too.
+#[must_use]
+pub(crate) fn selection_is_within(
+    document: &XiaomuDocument,
+    focus: DocumentPosition,
+    target: NodeId,
+) -> bool {
+    let start = match focus {
+        DocumentPosition::Inline(point) => point.node_id(),
+        DocumentPosition::Atomic(node) => node,
+        DocumentPosition::Gap(gap) => gap.parent(),
+    };
+    let mut current = Some(start);
+    while let Some(id) = current {
+        if id == target {
+            return true;
+        }
+        current = document.parent_of(id);
+    }
+    false
 }
 
 /// One navigation unit in document order: an editable text block or an
@@ -201,6 +240,7 @@ mod tests {
     use super::*;
     use xiaomu_core::document::{MarkSet, TextRun};
     use xiaomu_core::document::{NodeAttrs, NodeStoreBuilder};
+    use xiaomu_core::selection::InlinePoint;
 
     /// Document > [p("one"), p("二👍三"), quote > p("deep")].
     fn sample_document() -> XiaomuDocument {
@@ -259,6 +299,68 @@ mod tests {
         };
         assert_eq!(nested.len(), 3);
         assert!(block_index(&blocks, nested[2]).is_some());
+    }
+
+    #[test]
+    fn table_cell_ancestor_walks_to_the_innermost_cell() {
+        fn paragraph(text: &str, builder: &mut NodeStoreBuilder) -> NodeId {
+            builder
+                .insert(
+                    xiaomu_core::document::NodeKind::Paragraph,
+                    NodeAttrs::empty(),
+                    NodeContent::Inline(
+                        InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()])
+                            .unwrap(),
+                    ),
+                )
+                .unwrap()
+        }
+
+        let mut builder = NodeStoreBuilder::new();
+        let plain = paragraph("plain", &mut builder);
+        let in_cell = paragraph("cell", &mut builder);
+        let cell = builder
+            .insert(
+                xiaomu_core::document::NodeKind::TableCell,
+                NodeAttrs::empty(),
+                NodeContent::children([in_cell]),
+            )
+            .unwrap();
+        let row = builder
+            .insert(
+                xiaomu_core::document::NodeKind::TableRow,
+                NodeAttrs::empty(),
+                NodeContent::children([cell]),
+            )
+            .unwrap();
+        let table = builder
+            .insert(
+                xiaomu_core::document::NodeKind::Table,
+                NodeAttrs::empty(),
+                NodeContent::children([row]),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                xiaomu_core::document::NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([plain, table]),
+            )
+            .unwrap();
+        let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+        assert_eq!(table_cell_ancestor(&document, in_cell), Some(cell));
+        assert_eq!(table_cell_ancestor(&document, cell), Some(cell));
+        assert_eq!(table_cell_ancestor(&document, table), None);
+        assert_eq!(table_cell_ancestor(&document, plain), None);
+
+        // The caret inside the cell paragraph reports containment for the
+        // table; the caret outside does not.
+        let focus = DocumentPosition::Inline(InlinePoint::at_start_of(in_cell));
+        assert!(selection_is_within(&document, focus, table));
+        assert!(selection_is_within(&document, focus, cell));
+        let outside = DocumentPosition::Inline(InlinePoint::at_start_of(plain));
+        assert!(!selection_is_within(&document, outside, table));
     }
 
     fn collect_inline_ids(document: &XiaomuDocument, id: NodeId, out: &mut Vec<NodeId>) {
