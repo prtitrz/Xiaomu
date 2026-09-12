@@ -112,6 +112,18 @@ pub enum EditIntent {
         /// Keep the anchor and move only the focus (Shift).
         extend_selection: bool,
     },
+    /// Move the caret to the next table cell in reading order (P5.2).
+    ///
+    /// Tab semantics: the next sibling cell, the first cell of the next
+    /// row, or — from the table's last cell — one appended trailing row
+    /// entered at its first cell. Outside a table this is a no-op.
+    MoveToNextCell,
+    /// Move the caret to the previous table cell in reading order (P5.2).
+    ///
+    /// Shift+Tab semantics: the previous sibling cell or the last cell of
+    /// the previous row. From the table's first cell, and outside a table,
+    /// this is a no-op.
+    MoveToPreviousCell,
     /// Place the caret focus at an absolute offset without producing a
     /// transaction (hit-testing, programmatic moves).
     ///

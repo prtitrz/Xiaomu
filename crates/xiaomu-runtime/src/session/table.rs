@@ -1,18 +1,22 @@
-//! Table construction (P5.1).
+//! Table construction and cell navigation (P5.1 / P5.2).
 //!
 //! Table shapes cannot pass through validated `InsertNode` staging — rows
 //! without cells and cells without paragraphs are invalid snapshots — so
 //! Core owns whole-table construction as the semantic `InsertTable` step
 //! (the way `InsertInlineAtom` is). Runtime plans it as one single-step
 //! command inserted right after the focused block; the inverse removes the
-//! whole subtree.
+//! whole subtree. Cell navigation walks the same shape: Tab/Shift+Tab move
+//! a collapsed caret between cells in reading order, and Tab from the
+//! table's last cell appends one trailing row through Core's
+//! `InsertTableRow` step.
 
-use xiaomu_core::document::NodeId;
+use xiaomu_core::document::{NodeContent, NodeId, NodeKind};
+use xiaomu_core::selection::InlinePoint;
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
 use super::intent::{EditPlan, HistoryPolicy, PlannedAction, SelectionUpdate};
-use super::selection::DocumentPosition;
-use super::{DocumentSession, SessionError};
+use super::selection::{DocumentPosition, DocumentSelection};
+use super::{DocumentSession, SessionError, SessionOutcome};
 
 /// Plans a `rows × columns` table inserted right after the focused block.
 ///
@@ -55,6 +59,156 @@ impl DocumentSession {
             EditPlan::new(transaction, SelectionUpdate::MapExisting, None)
                 .with_history_policy(HistoryPolicy::Isolated),
         ))
+    }
+}
+
+/// Cell navigation (P5.2).
+///
+/// Tab and Shift+Tab move a collapsed caret between cells in reading order.
+/// Moving never edits the document; the one exception is Tab from the
+/// table's last cell, which appends one trailing row as an isolated history
+/// entry and lands the caret in the new row's first cell. Every other
+/// boundary (Shift+Tab from the first cell, focus outside a table) is a
+/// legitimate no-op.
+impl DocumentSession {
+    pub(crate) fn move_to_next_cell(&mut self) -> Result<SessionOutcome, SessionError> {
+        let Some(cell) = self.focused_table_cell() else {
+            return Ok(SessionOutcome::NoChange);
+        };
+        match self.next_cell(cell) {
+            Some(next) => self.install_caret_in_cell(next),
+            None => {
+                let row = self
+                    .document
+                    .parent_of(cell)
+                    .ok_or(SessionError::SelectionInvalid)?;
+                let table = self
+                    .document
+                    .parent_of(row)
+                    .ok_or(SessionError::SelectionInvalid)?;
+                self.append_row_and_enter(table)
+            }
+        }
+    }
+
+    pub(crate) fn move_to_previous_cell(&mut self) -> Result<SessionOutcome, SessionError> {
+        let Some(cell) = self.focused_table_cell() else {
+            return Ok(SessionOutcome::NoChange);
+        };
+        match self.previous_cell(cell) {
+            Some(previous) => self.install_caret_in_cell(previous),
+            None => Ok(SessionOutcome::NoChange),
+        }
+    }
+
+    /// Resolves the innermost table cell containing the focused position.
+    ///
+    /// Inline and atomic-node focuses walk up through their ancestors; gap
+    /// focuses do not navigate. Outside a table this is `None`.
+    fn focused_table_cell(&self) -> Option<NodeId> {
+        let mut current = match self.selection.focus() {
+            DocumentPosition::Inline(point) => point.node_id(),
+            DocumentPosition::Atomic(node) => node,
+            DocumentPosition::Gap(_) => return None,
+        };
+        loop {
+            if matches!(self.document.node(current)?.kind(), NodeKind::TableCell) {
+                return Some(current);
+            }
+            current = self.document.parent_of(current)?;
+        }
+    }
+
+    /// The cell after `cell` in reading order, if any.
+    fn next_cell(&self, cell: NodeId) -> Option<NodeId> {
+        let row = self.document.parent_of(cell)?;
+        let cells = self.children_of(row)?;
+        let index = cells.iter().position(|candidate| *candidate == cell)?;
+        if let Some(next) = cells.get(index + 1) {
+            return Some(*next);
+        }
+        let table = self.document.parent_of(row)?;
+        let rows = self.children_of(table)?;
+        let row_index = rows.iter().position(|candidate| *candidate == row)?;
+        let next_row = *rows.get(row_index + 1)?;
+        self.children_of(next_row)?.into_iter().next()
+    }
+
+    /// The cell before `cell` in reading order, if any.
+    fn previous_cell(&self, cell: NodeId) -> Option<NodeId> {
+        let row = self.document.parent_of(cell)?;
+        let cells = self.children_of(row)?;
+        let index = cells.iter().position(|candidate| *candidate == cell)?;
+        if index > 0 {
+            return cells.get(index - 1).copied();
+        }
+        let table = self.document.parent_of(row)?;
+        let rows = self.children_of(table)?;
+        let row_index = rows.iter().position(|candidate| *candidate == row)?;
+        let previous_row = *rows.get(row_index.checked_sub(1)?)?;
+        self.children_of(previous_row)?.into_iter().next_back()
+    }
+
+    fn children_of(&self, node: NodeId) -> Option<Vec<NodeId>> {
+        self.document
+            .node(node)?
+            .content()
+            .as_children()
+            .map(<[NodeId]>::to_vec)
+    }
+
+    /// Collapses the caret to the start of `cell`'s first inline content.
+    fn install_caret_in_cell(&mut self, cell: NodeId) -> Result<SessionOutcome, SessionError> {
+        let target = self
+            .leading_caret(cell)
+            .ok_or(SessionError::SelectionInvalid)?;
+        let selection = DocumentSelection::collapsed(target);
+        selection
+            .validate(&self.document)
+            .map_err(|_| SessionError::SelectionInvalid)?;
+        self.install_selection(selection)
+    }
+
+    /// The start position of the first inline-bearing node under `node`.
+    ///
+    /// Cells usually hold paragraphs directly, but list and quote nesting is
+    /// legal, so the walk descends through containers to the first inline
+    /// content. A cell without inline content has no caret target.
+    fn leading_caret(&self, node: NodeId) -> Option<DocumentPosition> {
+        let mut queue = vec![node];
+        while let Some(current) = queue.pop() {
+            match self.document.node(current)?.content() {
+                NodeContent::Inline(_) => {
+                    return Some(DocumentPosition::Inline(InlinePoint::at_start_of(current)));
+                }
+                NodeContent::Children(children) => {
+                    queue.extend(children.iter().rev().copied());
+                }
+                // Atoms and other payloads carry no caret-enterable inline
+                // content; `NodeContent` is non-exhaustive.
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Tab from the table's last cell: append one trailing row and enter it.
+    ///
+    /// Core's `InsertTableRow` step reports the new row's first paragraph as
+    /// its inserted node, so the caret resolves inside the new row after the
+    /// commit — including on redo.
+    fn append_row_and_enter(&mut self, table: NodeId) -> Result<SessionOutcome, SessionError> {
+        self.history.break_group();
+        self.clear_stored_marks();
+        let transaction = Transaction::new(TransactionOrigin::UserInput)
+            .with_step(TransactionStep::InsertTableRow { table });
+        let plan = EditPlan::new(
+            transaction,
+            SelectionUpdate::CaretAtLastInsertedOffset { offset: 0 },
+            None,
+        )
+        .with_history_policy(HistoryPolicy::Isolated);
+        self.commit(plan)
     }
 }
 

@@ -6,6 +6,7 @@
 //! records the inverse steps of every step; see [`super::inverse`].
 
 mod atom;
+mod table;
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -111,6 +112,7 @@ impl ApplyContext {
                 rows,
                 columns,
             } => self.apply_insert_table(*parent, *index, *rows, *columns),
+            TransactionStep::InsertTableRow { table } => self.apply_insert_table_row(*table),
             TransactionStep::RestoreSubtree {
                 parent,
                 index,
@@ -270,73 +272,6 @@ impl ApplyContext {
             inserted: id,
         };
         let inverse = vec![TransactionStep::RemoveNode { node: id }];
-        Ok((Some(step_map), inverse))
-    }
-
-    /// Applies one whole-table insertion with fresh stable identities.
-    ///
-    /// Every row shares `columns` cells and every cell carries one empty
-    /// paragraph, so the produced snapshot satisfies the table invariants
-    /// directly. The inverse removes the whole subtree.
-    fn apply_insert_table(
-        &mut self,
-        parent: NodeId,
-        index: usize,
-        rows: usize,
-        columns: usize,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
-        if rows == 0 || columns == 0 {
-            return Err(Error::InvalidTransaction);
-        }
-        let mut children = self.children(parent)?;
-        if index > children.len() {
-            return Err(Error::InvalidTransaction);
-        }
-
-        let mut table_children = Vec::with_capacity(rows);
-        for _ in 0..rows {
-            let mut row_children = Vec::with_capacity(columns);
-            for _ in 0..columns {
-                let cell = self.allocate_node(
-                    NodeKind::TableCell,
-                    NodeAttrs::empty(),
-                    NodeContent::children([]),
-                )?;
-                let paragraph = self.allocate_node(
-                    NodeKind::Paragraph,
-                    NodeAttrs::empty(),
-                    NodeContent::empty_inline(),
-                )?;
-                self.rewrite_node(cell, NodeAttrs::empty(), NodeContent::children([paragraph]))?;
-                row_children.push(cell);
-            }
-            let row = self.allocate_node(
-                NodeKind::TableRow,
-                NodeAttrs::empty(),
-                NodeContent::children([]),
-            )?;
-            self.rewrite_node(row, NodeAttrs::empty(), NodeContent::children(row_children))?;
-            table_children.push(row);
-        }
-        let table = self.allocate_node(
-            NodeKind::Table,
-            NodeAttrs::empty(),
-            NodeContent::children(table_children),
-        )?;
-
-        children.insert(index, table);
-        self.rewrite_node(
-            parent,
-            self.attrs_of(parent)?,
-            NodeContent::children(children),
-        )?;
-
-        let step_map = StepMap::NodeInserted {
-            parent,
-            index,
-            inserted: table,
-        };
-        let inverse = vec![TransactionStep::RemoveNode { node: table }];
         Ok((Some(step_map), inverse))
     }
 

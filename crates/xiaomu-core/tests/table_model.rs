@@ -351,3 +351,111 @@ fn insert_table_step_allocates_a_whole_valid_subtree() {
             .is_err()
     );
 }
+
+#[test]
+fn insert_table_row_step_appends_one_uniform_row() {
+    use xiaomu_core::mapping::StepMap;
+
+    let mut builder = NodeStoreBuilder::new();
+    let intro = paragraph(&mut builder, "前");
+    let first = cell(&mut builder, "a");
+    let second = cell(&mut builder, "b");
+    let row = builder
+        .insert(
+            NodeKind::TableRow,
+            NodeAttrs::empty(),
+            NodeContent::children([first, second]),
+        )
+        .unwrap();
+    let table = builder
+        .insert(
+            NodeKind::Table,
+            NodeAttrs::empty(),
+            NodeContent::children([row]),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([intro, table]),
+        )
+        .unwrap();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+    let applied = Transaction::new(TransactionOrigin::UserInput)
+        .with_step(TransactionStep::InsertTableRow { table })
+        .apply_with_changes(&document)
+        .unwrap();
+    let snapshot = applied.document();
+    snapshot.validate().unwrap();
+
+    let rows = snapshot
+        .node(table)
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap()
+        .to_vec();
+    assert_eq!(rows.len(), 2);
+    for appended_row in &rows {
+        let cells = snapshot
+            .node(*appended_row)
+            .unwrap()
+            .content()
+            .as_children()
+            .unwrap()
+            .to_vec();
+        assert_eq!(cells.len(), 2, "the new row mirrors the column count");
+    }
+
+    // The step map reports the new row's FIRST cell paragraph as the caret
+    // target, and it really lives inside the appended row.
+    let inserted = applied
+        .changes()
+        .steps()
+        .iter()
+        .rev()
+        .find_map(|step| match step {
+            StepMap::NodeInserted { inserted, .. } => Some(*inserted),
+            _ => None,
+        })
+        .expect("one inserted node");
+    let first_cell = snapshot.parent_of(inserted).unwrap();
+    assert_eq!(snapshot.parent_of(first_cell).unwrap(), rows[1]);
+    let first_cell_blocks = snapshot
+        .node(first_cell)
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap()
+        .to_vec();
+    assert_eq!(first_cell_blocks, vec![inserted]);
+
+    // The inverse removes exactly the appended row and validates.
+    let inverse = applied.inverse().clone();
+    let mut undo_transaction = Transaction::new(TransactionOrigin::UserInput);
+    for step in inverse.steps() {
+        undo_transaction.push_step(step.clone());
+    }
+    let undone = undo_transaction.apply_with_changes(snapshot).unwrap();
+    undone.document().validate().unwrap();
+    let rows = undone
+        .document()
+        .node(table)
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap()
+        .to_vec();
+    assert_eq!(rows, vec![row]);
+    assert!(undone.document().node(inserted).is_none());
+
+    // A non-table target fails closed.
+    assert!(
+        Transaction::new(TransactionOrigin::UserInput)
+            .with_step(TransactionStep::InsertTableRow { table: intro })
+            .apply_with_changes(&document)
+            .is_err()
+    );
+}
