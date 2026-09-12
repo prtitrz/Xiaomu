@@ -63,7 +63,11 @@ map_through：结构变化（行/列插入删除）把矩形映射/收缩；矩�
 
 ```text
 caret 在 cell 内 → MoveToNextCell：caret 移到下一 cell 首段的 (0, ordinal 0)
-最后一个 cell → 追加一行（列数与表一致，空 Paragraph），caret 落新行首 cell
+最后一个 cell → Core 语义步骤 TransactionStep::InsertTableRow { table }（与
+  InsertTable 同理：整行构造一次成型，列数取自表首行；step map 报告新行首
+  cell 的 paragraph 作为 caret 目标），单 isolated history entry，redo 恢复
+  同一批 node id
+Atomic 焦点（cell 内 HR/Image）同样导航；Gap 焦点不导航
 Shift+Tab 反向；第一个 cell 上 no-op
 GPUI keybinding 上下文优先级：table cell > list item（Tab 缩进）> paragraph（Tab 变列表）
 ```

@@ -139,6 +139,16 @@ pub enum TransactionStep {
         /// Number of columns; must be at least one and is shared by all rows.
         columns: usize,
     },
+    /// Appends one row to `table` matching its established column count.
+    ///
+    /// Core allocates the cells and their empty paragraphs with fresh
+    /// stable identities. Allocation order makes the FIRST cell's paragraph
+    /// the step's inserted node, so frontends can move the caret into the
+    /// new row's first cell after a Tab on the last cell.
+    InsertTableRow {
+        /// Existing table gaining one trailing row.
+        table: NodeId,
+    },
     /// Removes `node` together with its whole subtree from the document.
     ///
     /// The root cannot be removed.

@@ -649,6 +649,12 @@ harness fixture 格式升级 **v4**：`hr\n` / `img\n` 原子行 + 既有 attrs 
 
 P4.9 通过后，P4A 与 P4B 的全部 Gate（见 `docs/phases/p4-structured-content-extension/progress.md`）在 2026-09-05 闭合，本切片 PR 的三平台 CI（Ubuntu / macOS / Windows、fmt、Clippy、workspace all-targets、source-size、dependency-boundary、policy、汇总 `CI Success`）全绿，Windows job 即最终实机 Gate。**P4 = CLOSED**，下一阶段为 P5 Table。
 
+## P5.1-P5.2 Table 模型与 Cell 编辑事实
+
+表格是普通树节点（`NodeKind::Table / TableRow / TableCell`），canonical 不变量（行数 ≥1、列数一致、cell 非空）由 `validate_tree` 持有，违规为 `Error::InvalidTableStructure`；`allows_child` 禁止 TableRow 进入 Document/Quote/ListItem/TableCell、禁止 cell 直接携带 InlineAtom。嵌套表格构造不能经 `InsertNode` staging 表达（stage 事务逐一独立验证，行无 cell / cell 无段的中间态天然非法），因此 Core 拥有语义步骤：`InsertTable { parent, index, rows, columns }` 一次成型整表构造、`InsertTableRow { table }` 追加一行（列数取自表首行，step map 报告新行首 cell 的 paragraph 作为 caret 目标）；inverse 分别删除整子树 / 整行，degenerate 输入 fail closed。实现位于 `crates/xiaomu-core/src/transaction/apply/table.rs`。Runtime seam `EditIntent::InsertTable` 在聚焦块后插入整表（单 isolated history entry，caret 原地保留）。
+
+Cell 编辑（P5.2）复用既有 intent，无表格特例事务：Tab/Shift+Tab 走 `EditIntent::MoveToNextCell / MoveToPreviousCell`（`session/table.rs`），caret-only 导航——无事务、无 history；Atomic 焦点（cell 内 HR/Image）同样导航，Gap 焦点不导航。表内最后一个 cell 上 Tab 触发 `InsertTableRow` 并把 caret 落在新行首 cell，redo 经 `inverse(undo)` 恢复同一批 node id。cell 内 Enter/Backspace/Delete/typing/IME 全部走既有 parent-generic 路径：Backspace 在 cell 首段起点是有意 no-op（不跨 cell / 跨行 join），Enter 在 cell 内段落 split 留在原 cell，typing 在 cell 内照常 coalesce，IME commit 保持 isolated entry + stored marks 语义。测试：`crates/xiaomu-core/tests/table_model.rs`、`crates/xiaomu-runtime/tests/p5_cell_editing.rs`。
+
 ## 仓库级约束
 
 架构通过以下机制持续执行：

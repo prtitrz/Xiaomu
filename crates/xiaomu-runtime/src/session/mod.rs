@@ -161,6 +161,12 @@ impl DocumentSession {
                 PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
             };
         }
+        if let EditIntent::MoveToNextCell = intent {
+            return self.move_to_next_cell();
+        }
+        if let EditIntent::MoveToPreviousCell = intent {
+            return self.move_to_previous_cell();
+        }
 
         // Backspace/Delete on a collapsed atomic node selection removes the
         // whole block as one logical history change.
@@ -351,6 +357,8 @@ impl DocumentSession {
                 structure::plan_outdent_list_item(&self.document, focus.node_id())?
             }
             EditIntent::MoveCaret { .. }
+            | EditIntent::MoveToNextCell
+            | EditIntent::MoveToPreviousCell
             | EditIntent::PlaceCaret { .. }
             | EditIntent::PasteSlice { .. }
             | EditIntent::SetSelection { .. } => unreachable!("handled above"),

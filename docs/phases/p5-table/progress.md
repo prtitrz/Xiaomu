@@ -6,8 +6,8 @@ P0-P4 已关闭。P5 于 2026-09-05 启动。
 
 ```text
 P5.1 Table Canonical Model        CLOSED
-P5.2 Runtime Cell Editing         CURRENT
-P5.3 Row / Column Operations      PENDING
+P5.2 Runtime Cell Editing         CLOSED
+P5.3 Row / Column Operations      CURRENT
 P5.4 GPUI Table Rendering         PENDING
 P5.5 Cell Selection / Clipboard   PENDING
 P5.6 Integration Gate / Closeout  PENDING
@@ -23,13 +23,14 @@ P5.6 Integration Gate / Closeout  PENDING
 - [x] runtime seam：`EditIntent::InsertTable { rows, columns }` 在聚焦块后插入整表（单 isolated history entry，caret 原地保留）
 - [x] P0-P4 regression 保持全绿（419 tests / clippy -D warnings / fmt / size / dependency guards）
 
-## P5.2 Runtime Cell Editing — PENDING
+## P5.2 Runtime Cell Editing — CLOSED（PR #81）
 
-- [ ] `EditIntent::MoveToNextCell / MoveToPreviousCell`
-- [ ] last-cell Tab 追加新行；first-cell Shift+Tab no-op
-- [ ] cell 内 Enter / Backspace / Delete 边界行为（Backspace cell 起点 no-op 记录）
-- [ ] cell 内 typing coalescing / IME / stored marks 复用验证
-- [ ] undo / redo 精确矩阵
+- [x] `EditIntent::MoveToNextCell / MoveToPreviousCell`（caret-only 导航，无事务无 history；Atomic 焦点导航，Gap 焦点不导航）
+- [x] last-cell Tab 追加新行（Core 语义步骤 `TransactionStep::InsertTableRow`，step map 报告新行首 cell paragraph 作 caret 目标；redo 恢复同一批 node id）；first-cell Shift+Tab no-op
+- [x] cell 内 Enter / Backspace / Delete 边界行为（Backspace cell 起点 no-op 记录；Enter split 留在原 cell）
+- [x] cell 内 typing coalescing / IME（isolated entry + stored marks 复用）验证
+- [x] undo / redo 精确矩阵（`crates/xiaomu-runtime/tests/p5_cell_editing.rs` 9 tests + `table_model.rs` row-append 矩阵）
+- [x] gates：fmt / clippy -D warnings / workspace all-targets / source-size（apply.rs 拆出 apply/table.rs）/ dependency-boundary
 
 ## P5.3 Row / Column Operations — PENDING
 
