@@ -46,6 +46,14 @@ pub enum SessionError {
     /// the focused block; hierarchical containers mixing atomic and inline
     /// children fail closed instead of guessing a layout.
     ClipboardAtomicUnsupported,
+    /// A structured paste would have to place a table payload into a
+    /// context the planner cannot address yet.
+    ///
+    /// Table payloads replace a cell range with matching dimensions, enter
+    /// the focused cell when they are a single cell, or insert as a sibling
+    /// table of a focused plain block; every other placement fails closed
+    /// instead of guessing a layout (P5.5).
+    ClipboardTableUnsupported,
 }
 
 impl fmt::Display for SessionError {
@@ -63,6 +71,9 @@ impl fmt::Display for SessionError {
             }
             Self::ClipboardAtomsUnsupported => {
                 f.write_str("pasting inline atoms is only supported into one inline block")
+            }
+            Self::ClipboardTableUnsupported => {
+                f.write_str("clipboard fragment places a table payload in an unsupported context")
             }
         }
     }

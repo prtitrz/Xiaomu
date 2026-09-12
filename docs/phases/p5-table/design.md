@@ -49,13 +49,15 @@ cell 内 atomic     DocumentPosition::Atomic(image/HR/inline-atom 语义不变)
 P5.5 新增唯一的新选区形态：
 
 ```text
-DocumentSelection 新变体（命名随实现定）：
-  cell-range：同一 Table 内 anchor cell 与 focus cell 构成的矩形
-validate：同表、行列索引有序化后有效
-map_through：结构变化（行/列插入删除）把矩形映射/收缩；矩形退化为空 → 收敛到最近合法 gap
-```
-
-矩形选区不与 text selection 混存：构造 cell-range 时清除 text anchor，反之亦然（与 P4 atomic selection 同一收敛原则）。
+DocumentSelection 新增 cell_range: Option<CellRange> 字段（实施修订：保持 Copy，
+  不改枚举形态）：
+  cell-range：同一 Table 内 anchor cell 与 focus cell 构成的矩形（端点存 cell 身份）
+validate：两端为同表 TableCell
+map_through：矩形随 cell 身份走——插入不动矩形；端点子树被删才收缩为存活端点；
+  两端皆亡（或 parked caret 被删）→ 收敛到删除缝（NodeRemoved 的 parent+index gap）
+矩形选区不与 text selection 混存：range 激活时 text 端点停靠在 anchor cell 行缝；
+  内容 intent 先收敛到 anchor cell 首块起点（collapse_cell_range），表结构 op 与
+  structured paste 保留矩形（前者映射、后者替换）
 
 ## 3. 编辑语义
 
@@ -115,10 +117,11 @@ wire v5：
   cell 载荷沿用 ClipboardNodeContent::Children / Inline / Atomic
 旧版本 fail-soft：v4 及以下 reader 遇 table 载荷退化为 plain text（不静默重组结构）
 plain-text fallback：TSV——cell 内文本以 \t 分列、\n 分行；cell 内已有换行按 block 边界扁平化
-paste：
-  单 cell 载荷 → 替换 cell-range 选区或插入到 caret 所在 cell
-  表载荷 → caret 在 cell 内时结构对齐粘贴；caret 在普通文本上时插入 Table 兄弟块
-  mixed / 不对齐 fail closed（沿用 ClipboardAtomicUnsupported 风格的新错误变体）
+paste（P5.5 实施事实，`session/paste_table.rs`）：
+  表载荷 + 匹配尺寸的 cell-range → 逐 cell staged 替换（先插后删，单 history entry）
+  1×1 表载荷 + caret 在 cell 内 → payload 块插入 focused block 之后
+  表载荷 + caret 在普通文本 → InsertTable 语义步骤建空表 + 逐 cell 填充 + seed 段删除
+  mixed / 尺寸不符 / 其余落点 fail closed（新错误变体 ClipboardTableUnsupported）
 markdown：GFM table 不入 P4.9 baseline codec；Table 节点导出走既有 UnsupportedNodeKind
 ```
 

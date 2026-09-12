@@ -30,11 +30,13 @@ impl DocumentView {
                 .and_then(|node| node.content().as_children().map(<[NodeId]>::to_vec))
                 .unwrap_or_default()
         };
-        let (focused, focus_cell) = {
+        let (focused, highlight) = {
             let session = self.session.borrow();
             let document = session.document();
-            let focus = session.selection().focus();
-            let cell = match focus {
+            let selection = session.selection();
+            let focus = selection.focus();
+            let focused = navigation::selection_is_within(document, focus, table);
+            let focus_cell = match focus {
                 DocumentPosition::Inline(point) => {
                     navigation::table_cell_ancestor(document, point.node_id())
                 }
@@ -43,10 +45,15 @@ impl DocumentView {
                     navigation::table_cell_ancestor(document, gap.parent())
                 }
             };
-            (
-                navigation::selection_is_within(document, focus, table),
-                cell,
-            )
+            // An active cell range highlights its whole rectangle; otherwise
+            // only the focused cell lights up.
+            let mut highlight = focus_cell.into_iter().collect::<Vec<_>>();
+            if let Some(range) = selection.active_cell_range()
+                && let Some(rect) = navigation::cell_range_rect(document, range)
+            {
+                highlight = rect;
+            }
+            (focused, highlight)
         };
 
         let border = if focused {
@@ -80,7 +87,7 @@ impl DocumentView {
                     .min_h(px(28.0))
                     .px_2()
                     .py_1();
-                if focused && focus_cell == Some(cell) {
+                if highlight.contains(&cell) {
                     cell_element = cell_element.bg(gpui::rgba(0xeef4fbff));
                 }
                 if cell_index != last_cell {

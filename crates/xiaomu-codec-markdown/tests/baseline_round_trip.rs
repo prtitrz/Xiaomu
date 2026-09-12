@@ -571,3 +571,45 @@ fn code_block_without_language_round_trips() {
     let reparsed = from_markdown(&markdown).unwrap();
     assert_eq!(to_markdown(&reparsed).unwrap(), markdown);
 }
+
+#[test]
+fn table_nodes_export_fail_closed() {
+    // P5.5: GFM tables are outside the baseline codec's coverage. A document
+    // carrying a table exports an explicit typed error instead of dropping
+    // the node.
+    let mut builder = NodeStoreBuilder::new();
+    let block = builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            NodeContent::Inline(InlineContent::new([run("cell", MarkSet::empty())]).unwrap()),
+        )
+        .unwrap();
+    let cell = builder
+        .insert(
+            NodeKind::TableCell,
+            NodeAttrs::empty(),
+            NodeContent::children(vec![block]),
+        )
+        .unwrap();
+    let row = builder
+        .insert(
+            NodeKind::TableRow,
+            NodeAttrs::empty(),
+            NodeContent::children(vec![cell]),
+        )
+        .unwrap();
+    let table = builder
+        .insert(
+            NodeKind::Table,
+            NodeAttrs::empty(),
+            NodeContent::children(vec![row]),
+        )
+        .unwrap();
+    let doc = document(builder, vec![table]);
+
+    match to_markdown(&doc) {
+        Err(MarkdownCodecError::UnsupportedNodeKind { .. }) => {}
+        other => panic!("expected UnsupportedNodeKind, got {other:?}"),
+    }
+}

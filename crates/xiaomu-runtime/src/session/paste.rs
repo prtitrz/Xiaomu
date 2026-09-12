@@ -20,6 +20,7 @@ use super::atom_edit::atoms_inside_span;
 use super::cross_block_atom as cross_block;
 use super::intent::{EditPlan, PlannedAction, PrimaryEdit, SelectionUpdate, concatenated};
 use super::paste_hierarchy;
+use super::paste_table;
 use super::structure::{children_of, user_transaction};
 use super::{DocumentPosition, DocumentSelection, SessionError};
 
@@ -42,6 +43,16 @@ pub(crate) fn plan_paste_slice(
     selection
         .validate(document)
         .map_err(|_| SessionError::SelectionInvalid)?;
+    // Rectangular table payloads own their planner: range replacement,
+    // single-cell entry, or sibling-table insertion (P5.5).
+    if slice
+        .roots()
+        .iter()
+        .any(|root| root.content().as_table().is_some())
+    {
+        return paste_table::plan_table_paste(document, selection, slice);
+    }
+
     let contains_atomic = slice.roots().iter().any(fragment_contains_atomic);
     if slice.blocks().is_empty() && !contains_atomic {
         return Ok(PlannedAction::NoChange);
@@ -437,6 +448,9 @@ fn plan_atomic_root_insertion(
 /// Whether any fragment node in the tree carries atomic content.
 fn fragment_contains_atomic(node: &ClipboardNode) -> bool {
     match node.content() {
+        // Table payloads take the dedicated table planner before this
+        // predicate runs.
+        ClipboardNodeContent::Table { .. } => false,
         ClipboardNodeContent::Atomic => true,
         ClipboardNodeContent::Children(children) => children.iter().any(fragment_contains_atomic),
         ClipboardNodeContent::Inline(_) => false,

@@ -296,10 +296,16 @@ fn append_node_stages(
         ClipboardNodeContent::Atomic => {
             return Err(SessionError::ClipboardAtomicUnsupported);
         }
+        // Table payloads take the dedicated table planner before hierarchy
+        // staging ever sees them.
+        ClipboardNodeContent::Table { .. } => {
+            return Err(SessionError::ClipboardTableUnsupported);
+        }
     };
     let children = match node.content() {
         ClipboardNodeContent::Children(children) => Some(children.clone()),
         ClipboardNodeContent::Inline(_) | ClipboardNodeContent::Atomic => None,
+        ClipboardNodeContent::Table { .. } => None,
     };
     let content = match &inline {
         Some(inline) => NodeContent::Inline(
