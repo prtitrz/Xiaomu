@@ -655,6 +655,8 @@ P4.9 通过后，P4A 与 P4B 的全部 Gate（见 `docs/phases/p4-structured-con
 
 Cell 编辑（P5.2）复用既有 intent，无表格特例事务：Tab/Shift+Tab 走 `EditIntent::MoveToNextCell / MoveToPreviousCell`（`session/table.rs`），caret-only 导航——无事务、无 history；Atomic 焦点（cell 内 HR/Image）同样导航，Gap 焦点不导航。表内最后一个 cell 上 Tab 触发 `InsertTableRow` 并把 caret 落在新行首 cell，redo 经 `inverse(undo)` 恢复同一批 node id。cell 内 Enter/Backspace/Delete/typing/IME 全部走既有 parent-generic 路径：Backspace 在 cell 首段起点是有意 no-op（不跨 cell / 跨行 join），Enter 在 cell 内段落 split 留在原 cell，typing 在 cell 内照常 coalesce，IME commit 保持 isolated entry + stored marks 语义。测试：`crates/xiaomu-core/tests/table_model.rs`、`crates/xiaomu-runtime/tests/p5_cell_editing.rs`。
 
+行列操作（P5.3）：插入继续走 Core 语义步骤——`InsertTableRow { table, index }`（P5.2 的追加步骤推广为带索引）与 `InsertTableColumn { table, index }`（每行 index 处插入一个空 cell，step map 报告首行新 cell），因为单一新行/单行多 cell 都会让表在命令中途非法，validated staging 无法表达。删除不用新步骤：`DeleteTableRow` 是单步 `RemoveNode`，`DeleteTableColumn` 是单事务内每行一个 `RemoveNode`——事务只有最终快照验证，中间态 ragged 无妨，均匀性不变量（含最后一行/列删除 fail closed）仍由 Core validation 持有。Runtime 侧 planner 先行校验（表身份、index 范围、最后一行/列 `InvalidTableStructure`）；被删子树内的 caret/selection（含 Gap/Atomic 焦点）收敛到 `CaretAtGap`（行缝/本行 cell 缝），其余 `MapExisting` 穿透；删除的 undo 以 `RestoreSubtree` 恢复同一批 node id（含 inline atom 身份）。测试：`crates/xiaomu-runtime/tests/p5_row_column_ops.rs`。
+
 ## 仓库级约束
 
 架构通过以下机制持续执行：

@@ -384,7 +384,7 @@ fn insert_table_row_step_appends_one_uniform_row() {
     let document = XiaomuDocument::new(root, builder.finish()).unwrap();
 
     let applied = Transaction::new(TransactionOrigin::UserInput)
-        .with_step(TransactionStep::InsertTableRow { table })
+        .with_step(TransactionStep::InsertTableRow { table, index: 1 })
         .apply_with_changes(&document)
         .unwrap();
     let snapshot = applied.document();
@@ -454,7 +454,127 @@ fn insert_table_row_step_appends_one_uniform_row() {
     // A non-table target fails closed.
     assert!(
         Transaction::new(TransactionOrigin::UserInput)
-            .with_step(TransactionStep::InsertTableRow { table: intro })
+            .with_step(TransactionStep::InsertTableRow {
+                table: intro,
+                index: 0,
+            })
+            .apply_with_changes(&document)
+            .is_err()
+    );
+
+    // An out-of-range row index fails closed.
+    assert!(
+        Transaction::new(TransactionOrigin::UserInput)
+            .with_step(TransactionStep::InsertTableRow { table, index: 9 })
+            .apply_with_changes(&document)
+            .is_err()
+    );
+}
+
+#[test]
+fn insert_table_column_step_adds_one_cell_per_row() {
+    use xiaomu_core::mapping::StepMap;
+
+    let mut builder = NodeStoreBuilder::new();
+    let first = cell(&mut builder, "a");
+    let second = cell(&mut builder, "b");
+    let third = cell(&mut builder, "c");
+    let fourth = cell(&mut builder, "d");
+    let row = builder
+        .insert(
+            NodeKind::TableRow,
+            NodeAttrs::empty(),
+            NodeContent::children([first, second]),
+        )
+        .unwrap();
+    let row2 = builder
+        .insert(
+            NodeKind::TableRow,
+            NodeAttrs::empty(),
+            NodeContent::children([third, fourth]),
+        )
+        .unwrap();
+    let table = builder
+        .insert(
+            NodeKind::Table,
+            NodeAttrs::empty(),
+            NodeContent::children([row, row2]),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([table]),
+        )
+        .unwrap();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+
+    let applied = Transaction::new(TransactionOrigin::UserInput)
+        .with_step(TransactionStep::InsertTableColumn { table, index: 1 })
+        .apply_with_changes(&document)
+        .unwrap();
+    let snapshot = applied.document();
+    snapshot.validate().unwrap();
+
+    let row_cells = snapshot
+        .node(row)
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap()
+        .to_vec();
+    let row2_cells = snapshot
+        .node(row2)
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap()
+        .to_vec();
+    assert_eq!(row_cells.len(), 3, "every row gains one cell");
+    assert_eq!(row2_cells.len(), 3);
+    assert_eq!(row_cells[0], first, "cells keep their identities");
+    assert_eq!(row2_cells[0], third);
+
+    // The step map reports the first row's inserted cell as the caret
+    // target.
+    let inserted = applied
+        .changes()
+        .steps()
+        .iter()
+        .rev()
+        .find_map(|step| match step {
+            StepMap::NodeInserted { inserted, .. } => Some(*inserted),
+            _ => None,
+        })
+        .expect("one inserted node");
+    assert_eq!(snapshot.parent_of(inserted).unwrap(), row);
+
+    // The inverse removes one cell per row and validates.
+    let inverse = applied.inverse().clone();
+    let mut undo_transaction = Transaction::new(TransactionOrigin::UserInput);
+    for step in inverse.steps() {
+        undo_transaction.push_step(step.clone());
+    }
+    let undone = undo_transaction.apply_with_changes(snapshot).unwrap();
+    undone.document().validate().unwrap();
+    assert_eq!(
+        undone
+            .document()
+            .node(row)
+            .unwrap()
+            .content()
+            .as_children()
+            .unwrap()
+            .to_vec(),
+        vec![first, second]
+    );
+    assert!(undone.document().node(inserted).is_none());
+
+    // Out-of-range column indexes fail closed.
+    assert!(
+        Transaction::new(TransactionOrigin::UserInput)
+            .with_step(TransactionStep::InsertTableColumn { table, index: 3 })
             .apply_with_changes(&document)
             .is_err()
     );

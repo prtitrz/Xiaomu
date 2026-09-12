@@ -112,7 +112,12 @@ impl ApplyContext {
                 rows,
                 columns,
             } => self.apply_insert_table(*parent, *index, *rows, *columns),
-            TransactionStep::InsertTableRow { table } => self.apply_insert_table_row(*table),
+            TransactionStep::InsertTableRow { table, index } => {
+                self.apply_insert_table_row(*table, *index)
+            }
+            TransactionStep::InsertTableColumn { table, index } => {
+                self.apply_insert_table_column(*table, *index)
+            }
             TransactionStep::RestoreSubtree {
                 parent,
                 index,

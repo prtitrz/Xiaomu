@@ -11,7 +11,7 @@
 //! `InsertTableRow` step.
 
 use xiaomu_core::document::{NodeContent, NodeId, NodeKind};
-use xiaomu_core::selection::InlinePoint;
+use xiaomu_core::selection::{InlinePoint, NodeGap};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
 use super::intent::{EditPlan, HistoryPolicy, PlannedAction, SelectionUpdate};
@@ -200,8 +200,9 @@ impl DocumentSession {
     fn append_row_and_enter(&mut self, table: NodeId) -> Result<SessionOutcome, SessionError> {
         self.history.break_group();
         self.clear_stored_marks();
+        let index = self.children_of(table).map_or(0, |rows| rows.len());
         let transaction = Transaction::new(TransactionOrigin::UserInput)
-            .with_step(TransactionStep::InsertTableRow { table });
+            .with_step(TransactionStep::InsertTableRow { table, index });
         let plan = EditPlan::new(
             transaction,
             SelectionUpdate::CaretAtLastInsertedOffset { offset: 0 },
@@ -209,6 +210,172 @@ impl DocumentSession {
         )
         .with_history_policy(HistoryPolicy::Isolated);
         self.commit(plan)
+    }
+}
+
+/// Row / column operations (P5.3).
+///
+/// Row and column inserts are Core semantic steps: one row — or one row's
+/// extra cell — makes the table invalid mid-command, so staged `InsertNode`
+/// composition cannot express them. Deletes are plain `RemoveNode` steps in
+/// one transaction; the uniform-shape invariants are re-checked by canonical
+/// validation on the final snapshot, which fails the last row/column and any
+/// ragged outcome closed.
+impl DocumentSession {
+    /// Plans inserting one row into `table` at `index`.
+    ///
+    /// The new row mirrors the table's column count with one empty paragraph
+    /// per cell. `index` may be the current row count to append. One
+    /// isolated history entry; existing positions map through unchanged.
+    pub(crate) fn plan_insert_table_row(
+        &self,
+        table: NodeId,
+        index: usize,
+    ) -> Result<PlannedAction, SessionError> {
+        let rows = self.table_rows(table)?;
+        if index > rows.len() {
+            return Err(SessionError::SelectionInvalid);
+        }
+        let transaction = Transaction::new(TransactionOrigin::UserInput)
+            .with_step(TransactionStep::InsertTableRow { table, index });
+        Ok(PlannedAction::Commit(
+            EditPlan::new(transaction, SelectionUpdate::MapExisting, None)
+                .with_history_policy(HistoryPolicy::Isolated),
+        ))
+    }
+
+    /// Plans inserting one column into `table` at `index`.
+    ///
+    /// Every row gains one cell carrying one empty paragraph. One isolated
+    /// history entry; carets in existing cells map through unchanged.
+    pub(crate) fn plan_insert_table_column(
+        &self,
+        table: NodeId,
+        index: usize,
+    ) -> Result<PlannedAction, SessionError> {
+        let rows = self.table_rows(table)?;
+        let first_row = rows
+            .first()
+            .copied()
+            .ok_or(SessionError::SelectionInvalid)?;
+        let columns = self
+            .children_of(first_row)
+            .ok_or(SessionError::SelectionInvalid)?
+            .len();
+        if index > columns {
+            return Err(SessionError::SelectionInvalid);
+        }
+        let transaction = Transaction::new(TransactionOrigin::UserInput)
+            .with_step(TransactionStep::InsertTableColumn { table, index });
+        Ok(PlannedAction::Commit(
+            EditPlan::new(transaction, SelectionUpdate::MapExisting, None)
+                .with_history_policy(HistoryPolicy::Isolated),
+        ))
+    }
+
+    /// Plans deleting one row of `table` by `index`.
+    ///
+    /// Deleting the last row fails closed. A caret inside the deleted row
+    /// converges to the structural seam where the row was; other selections
+    /// map through unchanged.
+    pub(crate) fn plan_delete_table_row(
+        &self,
+        table: NodeId,
+        index: usize,
+    ) -> Result<PlannedAction, SessionError> {
+        let rows = self.table_rows(table)?;
+        let row = *rows.get(index).ok_or(SessionError::SelectionInvalid)?;
+        if rows.len() == 1 {
+            return Err(SessionError::Core(
+                xiaomu_core::Error::InvalidTableStructure,
+            ));
+        }
+        let selection_update = if self.focus_is_within(row) {
+            SelectionUpdate::CaretAtGap {
+                gap: NodeGap::new(table, index),
+            }
+        } else {
+            SelectionUpdate::MapExisting
+        };
+        let transaction = Transaction::new(TransactionOrigin::UserInput)
+            .with_step(TransactionStep::RemoveNode { node: row });
+        Ok(PlannedAction::Commit(
+            EditPlan::new(transaction, selection_update, None)
+                .with_history_policy(HistoryPolicy::Isolated),
+        ))
+    }
+
+    /// Plans deleting one column of `table` by `index`.
+    ///
+    /// Every row loses its cell at `index` in one transaction; deleting the
+    /// last column fails closed. A caret inside a deleted cell converges to
+    /// that row's seam; other selections map through unchanged.
+    pub(crate) fn plan_delete_table_column(
+        &self,
+        table: NodeId,
+        index: usize,
+    ) -> Result<PlannedAction, SessionError> {
+        let rows = self.table_rows(table)?;
+        let mut targets = Vec::with_capacity(rows.len());
+        let mut focus_seam = None;
+        for row in rows {
+            let cells = self
+                .children_of(row)
+                .ok_or(SessionError::SelectionInvalid)?;
+            if cells.len() == 1 {
+                return Err(SessionError::Core(
+                    xiaomu_core::Error::InvalidTableStructure,
+                ));
+            }
+            let cell = *cells.get(index).ok_or(SessionError::SelectionInvalid)?;
+            if focus_seam.is_none() && self.focus_is_within(cell) {
+                focus_seam = Some(NodeGap::new(row, index));
+            }
+            targets.push(cell);
+        }
+        let mut transaction = Transaction::new(TransactionOrigin::UserInput);
+        for cell in targets {
+            transaction.push_step(TransactionStep::RemoveNode { node: cell });
+        }
+        let selection_update = match focus_seam {
+            Some(gap) => SelectionUpdate::CaretAtGap { gap },
+            None => SelectionUpdate::MapExisting,
+        };
+        Ok(PlannedAction::Commit(
+            EditPlan::new(transaction, selection_update, None)
+                .with_history_policy(HistoryPolicy::Isolated),
+        ))
+    }
+
+    fn table_rows(&self, table: NodeId) -> Result<Vec<NodeId>, SessionError> {
+        if !matches!(
+            self.document.node(table),
+            Some(node) if matches!(node.kind(), NodeKind::Table)
+        ) {
+            return Err(SessionError::SelectionInvalid);
+        }
+        self.children_of(table)
+            .ok_or(SessionError::SelectionInvalid)
+    }
+
+    /// Whether the focused position lives inside `target`'s subtree.
+    ///
+    /// Gap focuses are addressed by their parent container, so the container
+    /// chain decides containment for them too.
+    fn focus_is_within(&self, target: NodeId) -> bool {
+        let start = match self.selection.focus() {
+            DocumentPosition::Inline(point) => point.node_id(),
+            DocumentPosition::Atomic(node) => node,
+            DocumentPosition::Gap(gap) => gap.parent(),
+        };
+        let mut current = Some(start);
+        while let Some(id) = current {
+            if id == target {
+                return true;
+            }
+            current = self.document.parent_of(id);
+        }
+        false
     }
 }
 

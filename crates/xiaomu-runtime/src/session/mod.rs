@@ -168,6 +168,42 @@ impl DocumentSession {
             return self.move_to_previous_cell();
         }
 
+        // Table row/column operations are addressed by table + index and do
+        // not require an inline focus; they are structural history
+        // boundaries like the other structural commands.
+        if matches!(
+            intent,
+            EditIntent::InsertTableRow { .. }
+                | EditIntent::InsertTableColumn { .. }
+                | EditIntent::DeleteTableRow { .. }
+                | EditIntent::DeleteTableColumn { .. }
+        ) {
+            self.history.break_group();
+            self.clear_stored_marks();
+        }
+        let table_action = match intent {
+            EditIntent::InsertTableRow { table, index } => {
+                Some(self.plan_insert_table_row(*table, *index))
+            }
+            EditIntent::InsertTableColumn { table, index } => {
+                Some(self.plan_insert_table_column(*table, *index))
+            }
+            EditIntent::DeleteTableRow { table, index } => {
+                Some(self.plan_delete_table_row(*table, *index))
+            }
+            EditIntent::DeleteTableColumn { table, index } => {
+                Some(self.plan_delete_table_column(*table, *index))
+            }
+            _ => None,
+        };
+        if let Some(action) = table_action {
+            return match action? {
+                PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
+                PlannedAction::Commit(plan) => self.commit(plan),
+                PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
+            };
+        }
+
         // Backspace/Delete on a collapsed atomic node selection removes the
         // whole block as one logical history change.
         if matches!(intent, EditIntent::Backspace | EditIntent::Delete)
@@ -359,6 +395,10 @@ impl DocumentSession {
             EditIntent::MoveCaret { .. }
             | EditIntent::MoveToNextCell
             | EditIntent::MoveToPreviousCell
+            | EditIntent::InsertTableRow { .. }
+            | EditIntent::InsertTableColumn { .. }
+            | EditIntent::DeleteTableRow { .. }
+            | EditIntent::DeleteTableColumn { .. }
             | EditIntent::PlaceCaret { .. }
             | EditIntent::PasteSlice { .. }
             | EditIntent::SetSelection { .. } => unreachable!("handled above"),

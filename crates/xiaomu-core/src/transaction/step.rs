@@ -139,15 +139,34 @@ pub enum TransactionStep {
         /// Number of columns; must be at least one and is shared by all rows.
         columns: usize,
     },
-    /// Appends one row to `table` matching its established column count.
+    /// Inserts one row into `table` at `index`, matching its established
+    /// column count.
     ///
     /// Core allocates the cells and their empty paragraphs with fresh
     /// stable identities. Allocation order makes the FIRST cell's paragraph
     /// the step's inserted node, so frontends can move the caret into the
-    /// new row's first cell after a Tab on the last cell.
+    /// new row's first cell after a Tab on the last cell. `index` may be
+    /// the current row count to append.
     InsertTableRow {
-        /// Existing table gaining one trailing row.
+        /// Existing table gaining one row.
         table: NodeId,
+        /// Number of existing rows before the insertion point.
+        index: usize,
+    },
+    /// Inserts one column into `table` at `index`.
+    ///
+    /// Every row gains one cell (with one empty paragraph) at `index`, so
+    /// the uniform column count holds in the produced snapshot. Like
+    /// [`TransactionStep::InsertTable`], this cannot be expressed through
+    /// validated staging — a single row gaining a cell makes the table
+    /// ragged — so it is a semantic step. The step map reports the FIRST
+    /// row's inserted cell paragraph; other rows' carets map unchanged.
+    InsertTableColumn {
+        /// Existing table gaining one column.
+        table: NodeId,
+        /// Number of existing cells (columns) before the insertion point
+        /// in every row.
+        index: usize,
     },
     /// Removes `node` together with its whole subtree from the document.
     ///

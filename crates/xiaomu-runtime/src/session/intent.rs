@@ -71,6 +71,50 @@ pub enum EditIntent {
         /// Number of columns; must be at least one.
         columns: usize,
     },
+    /// Inserts one row into a table at `index` (P5.3).
+    ///
+    /// The new row mirrors the table's column count with one empty
+    /// paragraph per cell. `index` may be the current row count to append.
+    /// One isolated history entry; the caret maps through unchanged.
+    InsertTableRow {
+        /// The target table.
+        table: NodeId,
+        /// Number of existing rows before the insertion point.
+        index: usize,
+    },
+    /// Inserts one column into a table at `index` (P5.3).
+    ///
+    /// Every row gains one cell carrying one empty paragraph. One isolated
+    /// history entry; carets in existing cells map through unchanged.
+    InsertTableColumn {
+        /// The target table.
+        table: NodeId,
+        /// Number of existing cells (columns) before the insertion point
+        /// in every row.
+        index: usize,
+    },
+    /// Deletes one row of a table by `index` (P5.3).
+    ///
+    /// Deleting the last row fails closed. A caret inside the deleted row
+    /// converges to the structural seam where the row was; other selections
+    /// map through unchanged.
+    DeleteTableRow {
+        /// The target table.
+        table: NodeId,
+        /// The row to delete.
+        index: usize,
+    },
+    /// Deletes one column of a table by `index` (P5.3).
+    ///
+    /// Every row loses its cell at `index` in one transaction. Deleting the
+    /// last column fails closed. A caret inside a deleted cell converges to
+    /// that row's structural seam; other selections map through unchanged.
+    DeleteTableColumn {
+        /// The target table.
+        table: NodeId,
+        /// The column to delete.
+        index: usize,
+    },
     /// Commit one native IME composition over an explicit canonical range.
     ///
     /// Composition updates remain frontend-transient. The final committed
