@@ -96,6 +96,23 @@ pub(crate) fn is_structural(intent: &EditIntent) -> bool {
 impl DocumentView {
     // ---- action listeners ----
 
+    /// Whether the focused position lives inside a table cell. Tab and
+    /// Shift-Tab hand over to cell navigation before any list or paragraph
+    /// gesture: a caret at a cell paragraph's offset 0 must not convert the
+    /// block to a list.
+    fn focus_is_inside_table_cell(&self) -> bool {
+        let session = self.session.borrow();
+        match session.selection().focus() {
+            DocumentPosition::Inline(point) => {
+                navigation::table_cell_ancestor(session.document(), point.node_id()).is_some()
+            }
+            DocumentPosition::Atomic(node) => {
+                navigation::table_cell_ancestor(session.document(), node).is_some()
+            }
+            DocumentPosition::Gap(_) => false,
+        }
+    }
+
     pub(crate) fn left(&mut self, _: &Left, window: &mut Window, cx: &mut Context<Self>) {
         self.navigate(NavStep::Left, false, window, cx);
     }
@@ -221,6 +238,11 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Cell navigation owns Tab inside tables (cell > list > paragraph).
+        if self.focus_is_inside_table_cell() {
+            self.apply_intent(EditIntent::MoveToNextCell, window, cx);
+            return;
+        }
         // CodeBlock owns Tab as text indentation even when nested inside a
         // list. Ordinary blocks keep the P2 list semantics: a list item
         // indents structurally, while a non-list block at offset 0 converts
@@ -282,6 +304,12 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Cell navigation owns Shift-Tab inside tables (cell > list >
+        // paragraph); from the table's first cell the intent is a no-op.
+        if self.focus_is_inside_table_cell() {
+            self.apply_intent(EditIntent::MoveToPreviousCell, window, cx);
+            return;
+        }
         // Shift-Tab walks out the other way: nested items outdent one
         // level; a top-level item lifts back to a plain paragraph. CodeBlock
         // never participates in list structure through Tab/Shift-Tab in P3.5.

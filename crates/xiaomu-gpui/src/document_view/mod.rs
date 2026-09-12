@@ -18,6 +18,7 @@ pub(crate) mod cache_key;
 pub(crate) mod markers;
 pub(crate) mod mouse;
 pub(crate) mod navigation;
+mod table_block;
 mod visual_navigation;
 
 use std::cell::{Cell, RefCell};
@@ -491,6 +492,9 @@ impl DocumentView {
                     index,
                 )
                 .into_any_element()
+            }
+            NodeContent::Children(_) if matches!(kind, NodeKind::Table) => {
+                self.render_table(id, index, cx)
             }
             NodeContent::Children(children) => {
                 let next_quote = in_quote || matches!(kind, NodeKind::Quote);
