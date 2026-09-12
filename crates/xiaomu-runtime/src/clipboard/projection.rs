@@ -10,6 +10,7 @@ use super::fragment::{
     ClipboardAtom, ClipboardInline, ClipboardNode, ClipboardNodeContent, ClipboardSlice,
     project_roots,
 };
+use crate::session::CellRange;
 use crate::session::{DocumentPosition, DocumentSelection, SessionError};
 
 /// Projects a validated document selection into a detached clipboard slice.
@@ -23,6 +24,12 @@ pub(crate) fn slice_selection(
     selection: DocumentSelection,
 ) -> Result<Option<ClipboardSlice>, SessionError> {
     selection.validate(document)?;
+
+    // A rectangular cell range projects as one table payload: rows of whole
+    // cell fragments in reading order, TSV as the plain-text fallback (P5.5).
+    if let Some(range) = selection.active_cell_range() {
+        return slice_cell_range(document, range);
+    }
 
     let (head, tail) = selection.ordered(document)?;
 
@@ -128,6 +135,98 @@ pub(crate) fn slice_selection(
         return Err(SessionError::SelectionInvalid);
     }
     Ok(Some(ClipboardSlice::from_roots(roots)))
+}
+
+/// Projects an active cell range into one rectangular table fragment.
+///
+/// The rectangle is normalized from the anchor and focus cells' (row,
+/// column) coordinates; every covered cell is captured whole, so marks and
+/// detached atoms inside cells survive the round trip.
+fn slice_cell_range(
+    document: &XiaomuDocument,
+    range: CellRange,
+) -> Result<Option<ClipboardSlice>, SessionError> {
+    let locate = |cell: NodeId| -> Result<(NodeId, usize, usize), SessionError> {
+        let row = document
+            .parent_of(cell)
+            .ok_or(SessionError::SelectionInvalid)?;
+        let table = document
+            .parent_of(row)
+            .ok_or(SessionError::SelectionInvalid)?;
+        let children = |id: NodeId| {
+            document
+                .node(id)
+                .and_then(|node| node.content().as_children().map(<[NodeId]>::to_vec))
+                .ok_or(SessionError::SelectionInvalid)
+        };
+        let row_index = children(table)?
+            .iter()
+            .position(|candidate| *candidate == row)
+            .ok_or(SessionError::SelectionInvalid)?;
+        let col_index = children(row)?
+            .iter()
+            .position(|candidate| *candidate == cell)
+            .ok_or(SessionError::SelectionInvalid)?;
+        Ok((table, row_index, col_index))
+    };
+    let (table, anchor_row, anchor_col) = locate(range.anchor())?;
+    let (_, focus_row, focus_col) = locate(range.focus())?;
+    let (row_min, row_max) = (anchor_row.min(focus_row), anchor_row.max(focus_row));
+    let (col_min, col_max) = (anchor_col.min(focus_col), anchor_col.max(focus_col));
+
+    let children = |id: NodeId| {
+        document
+            .node(id)
+            .and_then(|node| node.content().as_children().map(<[NodeId]>::to_vec))
+            .ok_or(SessionError::SelectionInvalid)
+    };
+    let table_rows = children(table)?;
+    let mut rows = Vec::new();
+    for row in &table_rows[row_min..=row_max] {
+        let row_cells = children(*row)?;
+        let mut rect_row = Vec::new();
+        for cell in &row_cells[col_min..=col_max] {
+            rect_row.push(cell_fragment(document, *cell)?);
+        }
+        rows.push(rect_row);
+    }
+    let table_node = ClipboardNode::new(
+        NodeKind::Table,
+        NodeAttrs::empty(),
+        ClipboardNodeContent::Table { rows },
+    );
+    Ok(Some(ClipboardSlice::from_table(table_node)))
+}
+
+/// Captures one whole cell as a fragment node: every child block with its
+/// full inline content, marks and atoms included.
+fn cell_fragment(document: &XiaomuDocument, cell: NodeId) -> Result<ClipboardNode, SessionError> {
+    let node = document.node(cell).ok_or(SessionError::SelectionInvalid)?;
+    let blocks = node
+        .content()
+        .as_children()
+        .ok_or(SessionError::SelectionInvalid)?;
+    let mut children = Vec::new();
+    for block in blocks {
+        let block_node = document
+            .node(*block)
+            .ok_or(SessionError::SelectionInvalid)?;
+        let inline = block_node
+            .content()
+            .as_inline()
+            .ok_or(SessionError::SelectionInvalid)?;
+        let length = inline.len_bytes();
+        children.push(ClipboardNode::new(
+            block_node.kind().clone(),
+            block_node.attrs().clone(),
+            ClipboardNodeContent::Inline(slice_inline(document, inline, 0, 0, length, 0, true)?),
+        ));
+    }
+    Ok(ClipboardNode::new(
+        NodeKind::TableCell,
+        node.attrs().clone(),
+        ClipboardNodeContent::Children(children),
+    ))
 }
 
 struct SourceBlock {

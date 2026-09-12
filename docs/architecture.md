@@ -657,6 +657,8 @@ Cell 编辑（P5.2）复用既有 intent，无表格特例事务：Tab/Shift+Tab
 
 行列操作（P5.3）：插入继续走 Core 语义步骤——`InsertTableRow { table, index }`（P5.2 的追加步骤推广为带索引）与 `InsertTableColumn { table, index }`（每行 index 处插入一个空 cell，step map 报告首行新 cell），因为单一新行/单行多 cell 都会让表在命令中途非法，validated staging 无法表达。删除不用新步骤：`DeleteTableRow` 是单步 `RemoveNode`，`DeleteTableColumn` 是单事务内每行一个 `RemoveNode`——事务只有最终快照验证，中间态 ragged 无妨，均匀性不变量（含最后一行/列删除 fail closed）仍由 Core validation 持有。Runtime 侧 planner 先行校验（表身份、index 范围、最后一行/列 `InvalidTableStructure`）；被删子树内的 caret/selection（含 Gap/Atomic 焦点）收敛到 `CaretAtGap`（行缝/本行 cell 缝），其余 `MapExisting` 穿透；删除的 undo 以 `RestoreSubtree` 恢复同一批 node id（含 inline atom 身份）。测试：`crates/xiaomu-runtime/tests/p5_row_column_ops.rs`。
 
+Cell 选区与 clipboard（P5.5）：`DocumentSelection` 以第三字段 `cell_range: Option<CellRange>` 携带矩形 cell 选区（保持 `Copy`，既有构造器与全部调用点零改动）。端点存 cell 身份而非行列索引，所以行/列插入不移动矩形、只有端点子树被删才收缩；两端皆亡或停靠 caret 被删时收敛到 `NodeRemoved` 的删除缝。矩形与 text selection 不混存：`set_cell_range_selection` 验证同表后把 text 端点停靠在 anchor cell 行缝，内容 intent 经 `collapse_cell_range` 收敛到 anchor cell 首块起点，表结构 op 与 structured paste 保留矩形。Clipboard wire v5 仅对携带 table 的载荷升级信封版本（`ClipboardNodeContent::Table { rows }`，行包 wrapper 在 wire 上省略），v4 reader 对未知 tag/版本静默回退 plain text；plain-text fallback 为 TSV（cell 内 block 边界扁平化为空格）。Paste 矩阵：匹配尺寸的 range 替换、1×1 进 focused cell、普通文本上插入兄弟表（`InsertTable` 语义步骤 + 逐 cell staged 填充 + seed 段删除），其余 fail closed（`ClipboardTableUnsupported`）；`commit_staged` 为此新增 `MapExisting` 折叠（逐 stage `map_through`，cell range 同一折叠路径）。GFM table 不入 baseline codec，Table 导出保持 `UnsupportedNodeKind` fail closed。测试：`crates/xiaomu-runtime/tests/p5_cell_range_clipboard.rs`（13 tests）+ codec `table_nodes_export_fail_closed`。
+
 ## 仓库级约束
 
 架构通过以下机制持续执行：

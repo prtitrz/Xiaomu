@@ -23,6 +23,50 @@ use super::{DocumentSession, SessionError, SessionOutcome};
 /// Cells start as one empty paragraph each. Structural row/column operations
 /// and cell navigation build on this seam in P5.2 / P5.3.
 impl DocumentSession {
+    /// Places a rectangular cell-range selection (P5.5).
+    ///
+    /// Both endpoints must be cells of one table. While the range is active
+    /// the text selection stays collapsed at the anchor cell's seam — the
+    /// two selection forms never mix, and any text-shaped selection or
+    /// caret move replaces the range.
+    pub fn set_cell_range_selection(
+        &mut self,
+        anchor_cell: NodeId,
+        focus_cell: NodeId,
+    ) -> Result<SessionOutcome, SessionError> {
+        let row = self
+            .document
+            .parent_of(anchor_cell)
+            .ok_or(SessionError::SelectionInvalid)?;
+        let index = self
+            .children_of(row)
+            .ok_or(SessionError::SelectionInvalid)?
+            .iter()
+            .position(|cell| *cell == anchor_cell)
+            .ok_or(SessionError::SelectionInvalid)?;
+        let selection = DocumentSelection::cell_range(
+            anchor_cell,
+            focus_cell,
+            DocumentPosition::Gap(NodeGap::new(row, index)),
+        );
+        selection.validate(&self.document)?;
+        self.install_selection(selection)
+    }
+
+    /// Converges an active cell range onto a real caret position: the start
+    /// of the anchor cell's first inline block. Selection-only convergence —
+    /// no transaction, no history (P5.5).
+    pub(super) fn collapse_cell_range(&mut self) {
+        let Some(range) = self.selection.active_cell_range() else {
+            return;
+        };
+        let target = self
+            .leading_caret(range.anchor())
+            .unwrap_or_else(|| self.selection.focus());
+        self.selection = DocumentSelection::collapsed(target);
+        self.notify_selection_changed();
+    }
+
     pub(crate) fn plan_insert_table(
         &self,
         rows: usize,
@@ -290,7 +334,11 @@ impl DocumentSession {
                 xiaomu_core::Error::InvalidTableStructure,
             ));
         }
-        let selection_update = if self.focus_is_within(row) {
+        // An active cell range maps through instead of converging: the
+        // rectangle shrinks to the cells that survive the deletion.
+        let selection_update = if self.selection.active_cell_range().is_some() {
+            SelectionUpdate::MapExisting
+        } else if self.focus_is_within(row) {
             SelectionUpdate::CaretAtGap {
                 gap: NodeGap::new(table, index),
             }
@@ -337,9 +385,13 @@ impl DocumentSession {
         for cell in targets {
             transaction.push_step(TransactionStep::RemoveNode { node: cell });
         }
-        let selection_update = match focus_seam {
-            Some(gap) => SelectionUpdate::CaretAtGap { gap },
-            None => SelectionUpdate::MapExisting,
+        let selection_update = if self.selection.active_cell_range().is_some() {
+            SelectionUpdate::MapExisting
+        } else {
+            match focus_seam {
+                Some(gap) => SelectionUpdate::CaretAtGap { gap },
+                None => SelectionUpdate::MapExisting,
+            }
         };
         Ok(PlannedAction::Commit(
             EditPlan::new(transaction, selection_update, None)

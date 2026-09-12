@@ -15,8 +15,8 @@
 
 use std::collections::HashMap;
 
-use xiaomu_core::document::{NodeId, XiaomuDocument};
-use xiaomu_core::mapping::{ChangeMap, MapBias, MappedPosition};
+use xiaomu_core::document::{NodeId, NodeKind, XiaomuDocument};
+use xiaomu_core::mapping::{ChangeMap, MapBias, MappedPosition, StepMap};
 use xiaomu_core::selection::{InlinePoint, NodeGap, NodeSelection, TextPoint, TextSelection};
 
 use super::SessionError;
@@ -62,6 +62,65 @@ impl From<NodeId> for DocumentPosition {
 pub struct DocumentSelection {
     anchor: DocumentPosition,
     focus: DocumentPosition,
+    /// The active rectangular cell range, if any.
+    ///
+    /// While a range is active the text endpoints are parked (collapsed) at
+    /// its anchor seam and the rectangle is the effective selection; the two
+    /// forms never mix (P5.5).
+    cell_range: Option<CellRange>,
+}
+
+/// A rectangular cell selection inside one table (P5.5).
+///
+/// Endpoints are cell identities, so row/column insertions never move the
+/// rectangle — it only shrinks when an endpoint cell's subtree is removed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CellRange {
+    anchor: NodeId,
+    focus: NodeId,
+}
+
+impl CellRange {
+    pub(crate) const fn new(anchor: NodeId, focus: NodeId) -> Self {
+        Self { anchor, focus }
+    }
+
+    /// Validates both endpoint cells against `document`.
+    ///
+    /// Each endpoint must exist with cell content, and both must belong to
+    /// the same table (their parent rows share the table parent).
+    pub(crate) fn validate(&self, document: &XiaomuDocument) -> Result<(), SessionError> {
+        let table_of = |cell: NodeId| -> Result<NodeId, SessionError> {
+            if !matches!(
+                document.node(cell),
+                Some(node) if matches!(node.kind(), NodeKind::TableCell)
+            ) {
+                return Err(SessionError::SelectionInvalid);
+            }
+            let row = document
+                .parent_of(cell)
+                .ok_or(SessionError::SelectionInvalid)?;
+            document
+                .parent_of(row)
+                .ok_or(SessionError::SelectionInvalid)
+        };
+        if table_of(self.anchor)? != table_of(self.focus)? {
+            return Err(SessionError::SelectionInvalid);
+        }
+        Ok(())
+    }
+
+    /// The cell where the range gesture started.
+    #[must_use]
+    pub const fn anchor(self) -> NodeId {
+        self.anchor
+    }
+
+    /// The cell where the range gesture currently ends.
+    #[must_use]
+    pub const fn focus(self) -> NodeId {
+        self.focus
+    }
 }
 
 impl DocumentSelection {
@@ -70,6 +129,7 @@ impl DocumentSelection {
         Self {
             anchor: anchor.into(),
             focus: focus.into(),
+            cell_range: None,
         }
     }
 
@@ -80,6 +140,21 @@ impl DocumentSelection {
         Self {
             anchor: position,
             focus: position,
+            cell_range: None,
+        }
+    }
+
+    /// Creates a rectangular cell-range selection (P5.5).
+    ///
+    /// `park` is the collapsed text endpoint the caret sits at while the
+    /// rectangle is the effective selection; the two forms never mix.
+    /// Validation against a snapshot happens through [`Self::validate`].
+    #[must_use]
+    pub fn cell_range(anchor_cell: NodeId, focus_cell: NodeId, park: DocumentPosition) -> Self {
+        Self {
+            anchor: park,
+            focus: park,
+            cell_range: Some(CellRange::new(anchor_cell, focus_cell)),
         }
     }
 
@@ -106,6 +181,12 @@ impl DocumentSelection {
     #[must_use]
     pub const fn focus(&self) -> DocumentPosition {
         self.focus
+    }
+
+    /// Returns the active rectangular cell range, if any.
+    #[must_use]
+    pub const fn active_cell_range(&self) -> Option<CellRange> {
+        self.cell_range
     }
 
     /// Returns whether both endpoints coincide.
@@ -159,6 +240,10 @@ impl DocumentSelection {
     }
 
     /// Validates both endpoints against `document`.
+    ///
+    /// An active cell range additionally validates that both endpoint cells
+    /// exist, carry cell content, and belong to one table; the parked text
+    /// endpoints are validated like any other position.
     pub fn validate(&self, document: &XiaomuDocument) -> Result<(), SessionError> {
         let check = |position: DocumentPosition| match position {
             DocumentPosition::Inline(point) => point.validate(document),
@@ -170,22 +255,91 @@ impl DocumentSelection {
         };
         check(self.anchor).map_err(|_| SessionError::SelectionInvalid)?;
         check(self.focus).map_err(|_| SessionError::SelectionInvalid)?;
+        if let Some(range) = self.cell_range {
+            range.validate(document)?;
+        }
         Ok(())
     }
 
-    /// Maps both endpoints through `changes`, whose coordinates are those
-    /// of `document` (the snapshot the transaction was applied to).
+    /// Maps the selection through `changes`, whose coordinates are those of
+    /// `document` (the snapshot the transaction was applied to).
     ///
-    /// A non-collapsed selection maps outward so it still covers mapped
-    /// content: the head endpoint biases toward `MapBias::Start`, the tail
-    /// toward `MapBias::End`. A collapsed selection stays collapsed. An
-    /// endpoint deleted by the change fails the whole mapping; on any error
-    /// the caller must keep its previous state unchanged.
+    /// An active cell range maps first: the rectangle keeps cell identities,
+    /// so only removals can shrink it. An endpoint cell deleted by the
+    /// change shrinks the range to the surviving endpoint; both endpoints
+    /// deleted (or the parked caret deleted) converge the selection onto the
+    /// mapped caret position without a range.
     pub fn map_through(
         &self,
         changes: &ChangeMap,
         document: &XiaomuDocument,
     ) -> Result<Self, SessionError> {
+        let map_one = |endpoint: DocumentPosition,
+                       bias|
+         -> Result<DocumentPosition, SessionError> {
+            match endpoint {
+                DocumentPosition::Inline(point) => match changes.map_inline_point(point, bias) {
+                    MappedPosition::Mapped(mapped) => Ok(DocumentPosition::Inline(mapped)),
+                    MappedPosition::Deleted => Err(SessionError::SelectionDeleted),
+                },
+                DocumentPosition::Gap(gap) => match changes.map_node_gap(gap, bias) {
+                    MappedPosition::Mapped(mapped) => Ok(DocumentPosition::Gap(mapped)),
+                    MappedPosition::Deleted => Err(SessionError::SelectionDeleted),
+                },
+                DocumentPosition::Atomic(node) => {
+                    match changes.map_node_selection(NodeSelection::new(node)) {
+                        MappedPosition::Mapped(mapped) => {
+                            Ok(DocumentPosition::Atomic(mapped.node_id()))
+                        }
+                        MappedPosition::Deleted => Err(SessionError::SelectionDeleted),
+                    }
+                }
+            }
+        };
+
+        if let Some(range) = self.cell_range {
+            let surviving: Vec<NodeId> = [range.anchor(), range.focus()]
+                .into_iter()
+                .filter(|cell| {
+                    !changes.steps().iter().any(|step| match step {
+                        StepMap::NodeRemoved { removed, .. } => removed.contains(cell),
+                        _ => false,
+                    })
+                })
+                .collect();
+            // The parked caret may die with a removed endpoint; the range
+            // then converges onto the structural seam where its anchor cell
+            // was removed (the nearest legal gap in the post snapshot).
+            let seam = changes.steps().iter().find_map(|step| match step {
+                StepMap::NodeRemoved {
+                    removed,
+                    parent,
+                    index,
+                } if removed.contains(&range.anchor()) => {
+                    Some(DocumentPosition::Gap(NodeGap::new(*parent, *index)))
+                }
+                _ => None,
+            });
+            let park = match map_one(self.focus, MapBias::Start) {
+                Ok(mapped) => Some(mapped),
+                Err(SessionError::SelectionDeleted) => seam,
+                Err(other) => return Err(other),
+            };
+            let park = park.or(seam);
+            return match surviving.len() {
+                0 => Ok(Self::collapsed(park.ok_or(SessionError::SelectionDeleted)?)),
+                1 => {
+                    let park = park.ok_or(SessionError::SelectionDeleted)?;
+                    let only = surviving[0];
+                    Ok(Self::cell_range(only, only, park))
+                }
+                _ => {
+                    let park = park.ok_or(SessionError::SelectionDeleted)?;
+                    Ok(Self::cell_range(range.anchor(), range.focus(), park))
+                }
+            };
+        }
+
         let (head, tail) = if self.is_collapsed() {
             (self.anchor, self.focus)
         } else {
@@ -200,27 +354,9 @@ impl DocumentSelection {
                 MapBias::End
             }
         };
-        let map_one = |endpoint: DocumentPosition, bias| -> Result<Self, SessionError> {
-            match endpoint {
-                DocumentPosition::Inline(point) => match changes.map_inline_point(point, bias) {
-                    MappedPosition::Mapped(mapped) => Ok(Self::collapsed(mapped)),
-                    MappedPosition::Deleted => Err(SessionError::SelectionDeleted),
-                },
-                DocumentPosition::Gap(gap) => match changes.map_node_gap(gap, bias) {
-                    MappedPosition::Mapped(mapped) => Ok(Self::collapsed(mapped)),
-                    MappedPosition::Deleted => Err(SessionError::SelectionDeleted),
-                },
-                DocumentPosition::Atomic(node) => {
-                    match changes.map_node_selection(NodeSelection::new(node)) {
-                        MappedPosition::Mapped(mapped) => Ok(Self::collapsed(mapped.node_id())),
-                        MappedPosition::Deleted => Err(SessionError::SelectionDeleted),
-                    }
-                }
-            }
-        };
 
         if self.is_collapsed() {
-            return map_one(head, bias_of(head));
+            return map_one(head, bias_of(head)).map(Self::collapsed);
         }
         let mapped_head = map_one(head, bias_of(head))?;
         let mapped_tail = map_one(tail, bias_of(tail))?;
@@ -228,9 +364,9 @@ impl DocumentSelection {
         // Restore the original orientation: the user's anchor / focus roles
         // survive even when mapping moved both endpoints.
         Ok(if anchor_is_head {
-            Self::new(mapped_head.focus(), mapped_tail.focus())
+            Self::new(mapped_head, mapped_tail)
         } else {
-            Self::new(mapped_tail.focus(), mapped_head.focus())
+            Self::new(mapped_tail, mapped_head)
         })
     }
 

@@ -25,8 +25,12 @@ const FORMAT: &str = "xiaomu.clipboard";
 // list/quote/container semantics survive Xiaomu-to-Xiaomu copy/paste. v3 adds
 // detached inline-atom payloads (kind, attrs, fallback_text) anchored inside
 // the fragment text. v4 adds whole atomic blocks (HorizontalRule, Image, ...)
-// captured as kind + attrs with no editable interior.
+// captured as kind + attrs with no editable interior. v5 adds rectangular
+// table selections (`ClipboardNodeContent::Table`); only slices that actually
+// carry a table bump the envelope, so v4 readers fail soft to plain text on
+// exactly the payloads they cannot represent.
 const VERSION: u32 = 4;
+const VERSION_TABLE: u32 = 5;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -70,7 +74,14 @@ impl std::error::Error for ClipboardMetadataError {}
 ///
 /// The plain-text fallback is deliberately not duplicated in the metadata;
 /// callers put [`ClipboardSlice::plain_text`] in the platform text flavor.
+/// Only slices carrying a table payload encode as v5; everything else stays
+/// at v4 so older readers keep accepting non-table fragments.
 pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetadataError> {
+    let version = if slice.roots().iter().any(WireNode::carries_table) {
+        VERSION_TABLE
+    } else {
+        VERSION
+    };
     let roots = slice
         .roots()
         .iter()
@@ -78,7 +89,7 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
         .collect::<Result<Vec<_>, _>>()?;
     serde_json::to_string(&WireEnvelope {
         format: FORMAT.to_owned(),
-        version: VERSION,
+        version,
         roots,
     })
     .map_err(|_| ClipboardMetadataError::serialization())
@@ -89,11 +100,14 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
 /// Unknown versions, malformed/foreign metadata, unsupported canonical
 /// values, invalid fragment trees, and stale metadata whose computed fallback
 /// differs from the platform text all return `None`. The caller should then
-/// paste the supplied plain text normally.
+/// paste the supplied plain text normally. A v4 envelope cannot carry a
+/// table payload: the unknown wire tag fails deserialization outright.
 #[must_use]
 pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlice> {
     let envelope: WireEnvelope = serde_json::from_str(metadata).ok()?;
-    if envelope.format != FORMAT || envelope.version != VERSION {
+    if envelope.format != FORMAT
+        || (envelope.version != VERSION && envelope.version != VERSION_TABLE)
+    {
         return None;
     }
     let roots = envelope
@@ -105,7 +119,10 @@ pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlic
     if roots.is_empty() || validate_roots(&roots).is_err() {
         return None;
     }
-    let slice = ClipboardSlice::from_roots(roots);
+    let slice = match &roots[..] {
+        [root] if root.content().as_table().is_some() => ClipboardSlice::from_table(root.clone()),
+        _ => ClipboardSlice::from_roots(roots),
+    };
     (slice.plain_text() == plain_text).then_some(slice)
 }
 
@@ -124,6 +141,18 @@ struct WireNode {
 }
 
 impl WireNode {
+    /// Whether this node (or its subtree) carries a table payload, which is
+    /// what bumps the envelope to v5.
+    fn carries_table(node: &ClipboardNode) -> bool {
+        if node.content().as_table().is_some() {
+            return true;
+        }
+        match node.content().as_children() {
+            Some(children) => children.iter().any(Self::carries_table),
+            None => false,
+        }
+    }
+
     fn from_node(node: &ClipboardNode) -> Result<Self, ClipboardMetadataError> {
         let content = match node.content() {
             ClipboardNodeContent::Inline(inline) => WireContent::Inline {
@@ -142,6 +171,17 @@ impl WireNode {
                 children: children
                     .iter()
                     .map(Self::from_node)
+                    .collect::<Result<_, _>>()?,
+            },
+            ClipboardNodeContent::Table { rows } => WireContent::Table {
+                rows: rows
+                    .iter()
+                    .map(|cells| {
+                        cells
+                            .iter()
+                            .map(Self::from_node)
+                            .collect::<Result<Vec<_>, _>>()
+                    })
                     .collect::<Result<_, _>>()?,
             },
             ClipboardNodeContent::Atomic => WireContent::Atomic,
@@ -187,6 +227,17 @@ impl WireNode {
                     .map(Self::into_node)
                     .collect::<Result<Vec<_>, _>>()?,
             ),
+            WireContent::Table { rows } => ClipboardNodeContent::Table {
+                rows: rows
+                    .into_iter()
+                    .map(|cells| {
+                        cells
+                            .into_iter()
+                            .map(Self::into_node)
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .collect::<Result<_, _>>()?,
+            },
             WireContent::Atomic => ClipboardNodeContent::Atomic,
         };
         Ok(ClipboardNode::new(
@@ -198,7 +249,7 @@ impl WireNode {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 enum WireContent {
     Inline {
         runs: Vec<WireRun>,
@@ -207,6 +258,10 @@ enum WireContent {
     },
     Children {
         children: Vec<WireNode>,
+    },
+    /// Rectangular table payload (v5): rows of cell nodes, reading order.
+    Table {
+        rows: Vec<Vec<WireNode>>,
     },
     Atomic,
 }
@@ -266,6 +321,9 @@ enum WireKind {
     CodeBlock,
     HorizontalRule,
     Image,
+    Table,
+    TableRow,
+    TableCell,
     Custom(String),
 }
 
@@ -281,9 +339,11 @@ impl WireKind {
             NodeKind::CodeBlock => Ok(Self::CodeBlock),
             NodeKind::HorizontalRule => Ok(Self::HorizontalRule),
             NodeKind::Image => Ok(Self::Image),
+            NodeKind::Table => Ok(Self::Table),
+            NodeKind::TableRow => Ok(Self::TableRow),
+            NodeKind::TableCell => Ok(Self::TableCell),
             NodeKind::Custom(key) => Ok(Self::Custom(key.clone())),
-            NodeKind::Document => Err(ClipboardMetadataError::unsupported()),
-            _ => Err(ClipboardMetadataError::unsupported()),
+            NodeKind::Document | _ => Err(ClipboardMetadataError::unsupported()),
         }
     }
 
@@ -300,6 +360,9 @@ impl WireKind {
             Self::CodeBlock => Ok(NodeKind::CodeBlock),
             Self::HorizontalRule => Ok(NodeKind::HorizontalRule),
             Self::Image => Ok(NodeKind::Image),
+            Self::Table => Ok(NodeKind::Table),
+            Self::TableRow => Ok(NodeKind::TableRow),
+            Self::TableCell => Ok(NodeKind::TableCell),
             Self::Custom(key) => {
                 NodeKind::custom(key).map_err(|_| ClipboardMetadataError::invalid())
             }

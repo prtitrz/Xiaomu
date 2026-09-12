@@ -9,8 +9,8 @@ P5.1 Table Canonical Model        CLOSED
 P5.2 Runtime Cell Editing         CLOSED
 P5.3 Row / Column Operations      CLOSED
 P5.4 GPUI Table Rendering         CLOSED
-P5.5 Cell Selection / Clipboard   CURRENT
-P5.6 Integration Gate / Closeout  PENDING
+P5.5 Cell Selection / Clipboard   CLOSED
+P5.6 Integration Gate / Closeout  CURRENT
 ```
 
 ## P5.1 Table Canonical Model — CLOSED（PR #80）
@@ -48,13 +48,14 @@ P5.6 Integration Gate / Closeout  PENDING
 - [x] Tab / Shift+Tab keybinding 上下文（cell > list > paragraph：修复 cell 段落 offset 0 上 Tab 误转列表）
 - [x] e2e：`table_gpui.rs` 3 个 `gpui::test`——真实击键 Tab 行走 + last-cell 追加行 + 输入/undo、Up/Down text↔table↔text（文档序）、Enter cell 内分段、点击进入 cell 首段
 
-## P5.5 Cell Selection / Clipboard — PENDING
+## P5.5 Cell Selection / Clipboard — CLOSED（PR #84）
 
-- [ ] cell-range selection variant + validate + mapping
-- [ ] clipboard wire v5 table 载荷 + 旧版本 fail-soft
-- [ ] TSV plain-text fallback
-- [ ] paste 单/多 cell + mixed fail closed
-- [ ] markdown Table 导出 fail closed 断言
+- [x] cell-range selection variant + validate + mapping（`DocumentSelection` 新增 `cell_range: Option<CellRange>` 字段保持 Copy；端点为 cell 身份，插入不动矩形、删除才收缩/收敛；公开 seam `set_cell_range_selection`；内容 intent 收敛到 anchor cell 首块、表结构 op 映射矩形）
+- [x] clipboard wire v5 table 载荷 + 旧版本 fail-soft（仅含 table 的载荷升级 v5 信封，v4 reader 对未知 tag/版本静默回退 plain text；非 table 载荷保持 v4）
+- [x] TSV plain-text fallback（cell `\t` 分列、行 `\n` 分行、cell 内 block 边界扁平化为空格）
+- [x] paste 矩阵：range 替换（尺寸匹配，单 history entry）/ 1×1 进 focused cell / 兄弟表插入（`InsertTable` + 逐 cell 填充 + seed 段删除）/ mixed 与尺寸不符 fail closed（`ClipboardTableUnsupported`）
+- [x] markdown Table 导出 fail closed 断言（codec 测试 `table_nodes_export_fail_closed`）
+- [x] GPUI：range 矩形 cell 高亮（`cell_range_rect`）
 
 ## P5.6 Integration Gate / P5 Closeout — PENDING
 

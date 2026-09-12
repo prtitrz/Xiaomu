@@ -22,7 +22,8 @@ mod intent;
 mod listener;
 mod outcome;
 mod paste;
-mod paste_hierarchy;
+pub(crate) mod paste_hierarchy;
+mod paste_table;
 mod resolve;
 mod selection;
 mod split;
@@ -34,6 +35,7 @@ pub use history::HistoryStack;
 pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
 pub use listener::DocumentChangeListener;
 pub use outcome::{SessionError, SessionOutcome};
+pub use selection::CellRange;
 pub use selection::DocumentPosition;
 pub use selection::DocumentSelection;
 
@@ -134,6 +136,22 @@ impl DocumentSession {
     /// collapsed mark toggle updates Runtime StoredMarks without a Core
     /// transaction.
     pub fn apply_intent(&mut self, intent: &EditIntent) -> Result<SessionOutcome, SessionError> {
+        // A rectangular cell range is a selection-only form: any intent
+        // other than a structured paste or a table row/column operation
+        // converges it onto a real caret in the anchor cell before planning
+        // (P5.5). Table operations map the rectangle through instead.
+        if self.selection.active_cell_range().is_some()
+            && !matches!(
+                intent,
+                EditIntent::PasteSlice { .. }
+                    | EditIntent::InsertTableRow { .. }
+                    | EditIntent::InsertTableColumn { .. }
+                    | EditIntent::DeleteTableRow { .. }
+                    | EditIntent::DeleteTableColumn { .. }
+            )
+        {
+            self.collapse_cell_range();
+        }
         if let EditIntent::MoveCaret {
             caret_move,
             extend_selection,
@@ -471,7 +489,7 @@ impl DocumentSession {
 
     fn commit(&mut self, plan: EditPlan) -> Result<SessionOutcome, SessionError> {
         let before_selection = self.selection;
-        let group = history_group_for_plan(&plan);
+        let group = history::history_group_for_plan(&plan);
         let applied = plan
             .transaction()
             .apply_with_changes(&self.document)
@@ -523,12 +541,19 @@ impl DocumentSession {
         let mut inverse_groups: Vec<Transaction> = Vec::new();
         let mut split_tail = None;
         let mut last_inserted = None;
+        // MapExisting resolves the after-selection by folding the mapped
+        // selection through every stage's change map (cell ranges shrink or
+        // survive through the same fold).
+        let mut mapped = before_selection;
 
         for build in staged.stages {
             let transaction = build(&current)?;
             let applied = transaction
                 .apply_with_changes(&current)
                 .map_err(SessionError::Core)?;
+            if matches!(staged.selection_update, SelectionUpdate::MapExisting) {
+                mapped = mapped.map_through(applied.changes(), &current)?;
+            }
             if split_tail.is_none() {
                 split_tail = applied
                     .changes()
@@ -579,6 +604,10 @@ impl DocumentSession {
             SelectionUpdate::CaretAtLastInsertedOffset { offset } => {
                 let inserted = last_inserted.ok_or(SessionError::SelectionInvalid)?;
                 collapsed_caret(&current, inserted, offset, affinity_of(before_selection))?
+            }
+            SelectionUpdate::MapExisting => {
+                mapped.validate(&current)?;
+                mapped
             }
             _ => return Err(SessionError::SelectionInvalid),
         };
@@ -648,26 +677,5 @@ impl DocumentSession {
         for listener in &mut self.listeners {
             listener.selection_changed(selection);
         }
-    }
-}
-
-fn history_group_for_plan(plan: &EditPlan) -> HistoryGroup {
-    if plan.history_policy() != HistoryPolicy::Typing {
-        return HistoryGroup::Isolated;
-    }
-    let Some(edit) = plan.primary_edit() else {
-        return HistoryGroup::Isolated;
-    };
-    if edit.range().start() != edit.range().end() || edit.inserted_len() == 0 {
-        return HistoryGroup::Isolated;
-    }
-    let start = edit.range().start().as_usize();
-    let Some(end) = start.checked_add(edit.inserted_len()) else {
-        return HistoryGroup::Isolated;
-    };
-    HistoryGroup::Typing {
-        node: edit.node(),
-        start,
-        end,
     }
 }

@@ -7,7 +7,7 @@
 
 use xiaomu_core::document::{InlineContent, NodeContent, NodeId, NodeKind, XiaomuDocument};
 use xiaomu_core::text::TextOffset;
-use xiaomu_runtime::session::DocumentPosition;
+use xiaomu_runtime::session::{CellRange, DocumentPosition};
 
 /// One inline-bearing block in document order.
 #[derive(Clone, Debug)]
@@ -100,6 +100,47 @@ pub(crate) fn selection_is_within(
         current = document.parent_of(id);
     }
     false
+}
+
+/// The cell ids of an active cell range's rectangle, row-major, or `None`
+/// when the endpoints do not resolve inside one table.
+#[must_use]
+pub(crate) fn cell_range_rect(document: &XiaomuDocument, range: CellRange) -> Option<Vec<NodeId>> {
+    let locate = |cell: NodeId| -> Option<(NodeId, usize, usize)> {
+        let row = document.parent_of(cell)?;
+        let table = document.parent_of(row)?;
+        let children = |id: NodeId| {
+            document
+                .node(id)
+                .and_then(|node| node.content().as_children().map(<[NodeId]>::to_vec))
+        };
+        let row_index = children(table)?
+            .iter()
+            .position(|candidate| *candidate == row)?;
+        let col_index = children(row)?
+            .iter()
+            .position(|candidate| *candidate == cell)?;
+        Some((table, row_index, col_index))
+    };
+    let (table, anchor_row, anchor_col) = locate(range.anchor())?;
+    let (_, focus_row, focus_col) = locate(range.focus())?;
+    let (row_min, row_max) = (anchor_row.min(focus_row), anchor_row.max(focus_row));
+    let (col_min, col_max) = (anchor_col.min(focus_col), anchor_col.max(focus_col));
+
+    let children = |id: NodeId| {
+        document
+            .node(id)
+            .and_then(|node| node.content().as_children().map(<[NodeId]>::to_vec))
+    };
+    let table_rows = children(table)?;
+    let mut rect = Vec::new();
+    for row_index in row_min..=row_max {
+        let row_cells = children(*table_rows.get(row_index)?)?;
+        for col_index in col_min..=col_max {
+            rect.push(*row_cells.get(col_index)?);
+        }
+    }
+    Some(rect)
 }
 
 /// One navigation unit in document order: an editable text block or an

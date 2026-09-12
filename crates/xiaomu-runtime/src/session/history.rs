@@ -1,5 +1,6 @@
 //! Runtime undo/redo stack with explicit history grouping.
 
+use super::intent::EditPlan;
 use super::selection::DocumentSelection;
 use xiaomu_core::document::NodeId;
 use xiaomu_core::transaction::{Transaction, TransactionOrigin};
@@ -181,5 +182,32 @@ fn merge_entries(previous: HistoryEntry, next: HistoryEntry, group: HistoryGroup
 impl Default for HistoryStack {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Derives the history group of one committed plan.
+///
+/// Single-scalar insertions with the typing policy coalesce with the open
+/// typing group; everything else owns an isolated entry.
+pub(super) fn history_group_for_plan(plan: &EditPlan) -> HistoryGroup {
+    use super::intent::HistoryPolicy;
+
+    if plan.history_policy() != HistoryPolicy::Typing {
+        return HistoryGroup::Isolated;
+    }
+    let Some(edit) = plan.primary_edit() else {
+        return HistoryGroup::Isolated;
+    };
+    if edit.range().start() != edit.range().end() || edit.inserted_len() == 0 {
+        return HistoryGroup::Isolated;
+    }
+    let start = edit.range().start().as_usize();
+    let Some(end) = start.checked_add(edit.inserted_len()) else {
+        return HistoryGroup::Isolated;
+    };
+    HistoryGroup::Typing {
+        node: edit.node(),
+        start,
+        end,
     }
 }

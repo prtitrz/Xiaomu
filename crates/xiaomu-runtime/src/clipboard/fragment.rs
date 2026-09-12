@@ -210,6 +210,13 @@ pub enum ClipboardNodeContent {
     /// An atomic block captured whole: kind and attrs carry the semantics,
     /// there is no editable interior payload.
     Atomic,
+    /// A rectangular table selection (P5.5): rows of cell fragments in
+    /// reading order. Row wrappers are implied — every inner node is one
+    /// cell captured with its whole block content.
+    Table {
+        /// The rectangle's rows, each holding exactly one fragment per cell.
+        rows: Vec<Vec<ClipboardNode>>,
+    },
 }
 
 impl ClipboardNodeContent {
@@ -227,6 +234,15 @@ impl ClipboardNodeContent {
     pub fn as_children(&self) -> Option<&[ClipboardNode]> {
         match self {
             Self::Children(children) => Some(children),
+            _ => None,
+        }
+    }
+
+    /// Returns the rectangular rows when this fragment node is a table.
+    #[must_use]
+    pub const fn as_table(&self) -> Option<&Vec<Vec<ClipboardNode>>> {
+        match self {
+            Self::Table { rows } => Some(rows),
             _ => None,
         }
     }
@@ -348,6 +364,44 @@ impl ClipboardSlice {
         }
     }
 
+    /// Builds the slice of a rectangular table selection (P5.5).
+    ///
+    /// The plain-text fallback is TSV: cells joined by tabs, rows joined by
+    /// newlines; a cell's internal block boundaries flatten to single spaces
+    /// so the TSV grid stays machine-readable.
+    pub(crate) fn from_table(table: ClipboardNode) -> Self {
+        let rows = table.content().as_table().cloned().unwrap_or_default();
+        let mut blocks = Vec::new();
+        for row in &rows {
+            for cell in row {
+                flatten_blocks(std::slice::from_ref(cell), &mut blocks);
+            }
+        }
+        let plain_text = rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|cell| {
+                        let mut cell_blocks = Vec::new();
+                        flatten_blocks(std::slice::from_ref(cell), &mut cell_blocks);
+                        cell_blocks
+                            .iter()
+                            .map(|block| block.inline().plain_text())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\t")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Self {
+            plain_text,
+            roots: vec![table],
+            blocks,
+        }
+    }
+
     /// Returns the plain-text fallback, with selected block boundaries as
     /// newline characters.
     #[must_use]
@@ -464,6 +518,23 @@ fn insert_fragment(builder: &mut NodeStoreBuilder, node: &ClipboardNode) -> Resu
                 .map(|child| insert_fragment(builder, child))
                 .collect::<Result<Vec<_>>>()?,
         ),
+        // A table fragment rebuilds the canonical row wrappers: the wire
+        // carries rows of cells directly, the document tree nests them.
+        ClipboardNodeContent::Table { rows } => NodeContent::children(
+            rows.iter()
+                .map(|cells| {
+                    let row_cells = cells
+                        .iter()
+                        .map(|cell| insert_fragment(builder, cell))
+                        .collect::<Result<Vec<_>>>()?;
+                    builder.insert(
+                        NodeKind::TableRow,
+                        NodeAttrs::empty(),
+                        NodeContent::children(row_cells),
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?,
+        ),
         ClipboardNodeContent::Atomic => NodeContent::Atomic,
     };
     builder.insert(node.kind().clone(), node.attrs().clone(), content)
@@ -475,6 +546,10 @@ fn flatten_blocks(nodes: &[ClipboardNode], out: &mut Vec<ClipboardBlock>) {
             out.push(block);
         } else if let Some(children) = node.content().as_children() {
             flatten_blocks(children, out);
+        } else if let Some(rows) = node.content().as_table() {
+            for row in rows {
+                flatten_blocks(row, out);
+            }
         }
     }
 }
@@ -491,6 +566,11 @@ fn collect_image_urls(nodes: &[ClipboardNode]) -> Vec<String> {
             }
             ClipboardNodeContent::Children(children) => {
                 urls.extend(collect_image_urls(children));
+            }
+            ClipboardNodeContent::Table { rows } => {
+                for row in rows {
+                    urls.extend(collect_image_urls(row));
+                }
             }
             _ => {}
         }
