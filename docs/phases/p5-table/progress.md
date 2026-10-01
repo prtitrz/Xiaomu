@@ -66,7 +66,7 @@ P5.6 Integration Gate / Closeout  CURRENT
 - [x] multi-editor isolation（独立 window/session/range proxy、输入/clipboard/undo 不改变另一 editor）
 - [ ] architecture / planning / progress final sync
 - [ ] Windows 原生实机 Gate（单独记录 commit、Windows/输入法版本、操作者、步骤/结果；涵盖 P4 遗留 atom/atomic + P5 表格输入法矩阵，不以 TestAppContext 或 windows-latest 代替）
-- [ ] final three-platform `CI Success`
+- [ ] 最新修正 head 三平台 `CI Success`（`809afb5` 的 [run 36828373409](https://github.com/prtitrz/Xiaomu/actions/runs/36828373409) 已通过，但之后发现原生 atom IME 缺陷，不能作为新修正的 CI 证据）
 - [x] P4 遗留 `BlockRendererRegistry` / `LinkOpenService` 列入 P7 Host Extension Contracts，具体归属与验收见 planning P7；不冒充 P4/P5 已交付
 
 ## 2026-10-01 Review 修正（commit `16f9d36`）
@@ -80,7 +80,21 @@ P5.6 Integration Gate / Closeout  CURRENT
 
 回归证据：`p5_review_regressions.rs`、`p5_rich_table_clipboard.rs`、`p5_cell_range_clipboard.rs`、`table_model.rs`、`table_gpui.rs`。这些是本地自动化证据，不是原生实机验收，也不自动关闭 P5.6。
 
-本地 Windows 检查（2026-10-01，`agent/p5-review-fixes` 工作树）：`cargo test --workspace --all-targets --locked` 472 tests PASS；`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、source-size、dependency-boundary、`git diff --check` PASS。未提交/推送，未运行本分支三平台远端 CI；本轮未执行原生 IME 人工 Gate。
+本地 Windows 检查（2026-10-01，`agent/p5-review-fixes`，code head `809afb5`）：`cargo test --workspace --all-targets --locked` **483 tests PASS**；`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、source-size、dependency-boundary、`git diff --check` PASS。实现已提交并推送到 [PR #85](https://github.com/prtitrz/Xiaomu/pull/85)。三平台 CI 独立记录于上方；不以 CI 替代下方的原生验收。
+
+## 2026-10-01 Windows 原生验收记录
+
+- 测试代码：`809afb5`，本地 debug `xiaomu-editor-harness.exe`，默认 fixture v5；独立临时存档，不覆盖用户既有文档。
+- 环境：Windows registry 报告 `Windows 10 IoT Enterprise LTSC 2024`，DisplayVersion `24H2`，build `26100.9168`；Microsoft Pinyin `ChsIME.exe` file version `10.0.26100.8972`。
+- 操作者与方法：用户在真实 Windows 窗口手动操作，Codex 提供逐项步骤、检查截图/fixture/日志。computer-use 曾返回 `failed to activate captured window`，其未成功执行的输入不算证据；之后按用户要求重新打开可见测试窗口，改为用户辅助验收。
+- [x] 普通及嵌套表格 cell 内微软拼音输入：预编辑文字、候选框、中文上屏正常。用户针对该步骤确认“正常”；截图显示嵌套 cell 内新增中文。
+- [x] 第一行左格 `Ctrl+Shift+Space` → `Shift+Right` 选中两格；拼音后 `Esc` 取消保持原内容；再次确认“你好”后仅 anchor 留下文本、其余 cell 清空；`Ctrl+Z` 恢复原矩形内容、`Ctrl+Y` 重做、继续输入。用户针对这三步确认“正常”。
+- [ ] `@xiaomu` 前后中文输入与左右键越过 chip；atomic 分隔线选择后回到文字继续输入。**原 `809afb5` 失败**：用户截图确认标签后有候选框、无拼音预编辑；已补实现及 `ime_atom_tests.rs`，等待新程序实机复测，不能标 PASS。
+- [ ] 表内 Tab / Shift+Tab、末格 Tab 新增行。
+- [x] `Ctrl+S` 保存 fixture v5（两次 `snapshot saved` 日志 + 文件存在，保留 rich/nested table、attrs、atom/image 与用户输入）
+- [ ] 重新打开读取保存结果。
+
+人工确认只覆盖明确列出的步骤，不扩写成所有输入法、平台或所有 Unicode 组合都经过人工验收。Unicode/attrs/clipboard/多 editor 完整矩阵另由永久自动化测试覆盖。
 
 ## P5 Phase Gate
 

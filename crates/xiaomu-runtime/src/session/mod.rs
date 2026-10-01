@@ -295,7 +295,7 @@ impl DocumentSession {
                 } else {
                     atom_edit::plan_ime_commit(
                         &inline,
-                        focus.node_id(),
+                        focus,
                         *range,
                         text,
                         self.stored_marks.as_ref(),

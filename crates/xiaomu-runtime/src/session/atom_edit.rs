@@ -160,22 +160,28 @@ pub(crate) fn plan_text_input(
 /// Builds the plan for an IME composition commit in a node with atoms.
 ///
 /// The composition range is a plain text span produced by the frontend, so
-/// it carries no seam ordinal of its own: atoms anchored at either boundary
-/// sit outside the composed text and survive it, while an atom strictly
+/// it carries no seam ordinal of its own. A collapsed commit at the current
+/// caret retains that exact gap; other ranges keep boundary atoms outside
+/// the composed text, while an atom strictly
 /// inside the range fails the commit — IME composition can never enter an
 /// atom.
 pub(crate) fn plan_ime_commit(
     inline: &InlineContent,
-    node: NodeId,
+    focus: InlinePoint,
     range: TextRange,
     text: &str,
     stored_marks: Option<&MarkSet>,
 ) -> Result<PlannedAction, SessionError> {
     let start = range.start();
+    let node = focus.node_id();
     let at = InlinePoint::new(
         node,
         start,
-        inline.atom_count_at(start),
+        if range.start() == range.end() && focus.text_offset() == start {
+            focus.atom_index()
+        } else {
+            inline.atom_count_at(start)
+        },
         xiaomu_core::selection::CursorAffinity::Before,
     );
     let mut transaction = edit_transaction(TransactionStep::ReplaceInlineText {

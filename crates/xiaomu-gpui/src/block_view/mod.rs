@@ -13,6 +13,9 @@
 mod display;
 mod element;
 mod ime;
+#[cfg(test)]
+mod ime_atom_tests;
+mod ime_geometry;
 mod input_handler;
 mod layout;
 mod scroll;
@@ -114,6 +117,7 @@ actions!(
 ///
 /// Byte offsets are relative to the displayed text so the element can shape
 /// it without knowing about composition internals.
+#[derive(Clone)]
 pub(crate) struct DisplaySegment {
     pub(super) start: usize,
     pub(super) text: String,
@@ -222,6 +226,9 @@ pub struct ParagraphView {
     pub(super) scroll_caret_pending: Cell<bool>,
     pub(super) atom_renderers: Rc<InlineAtomRendererRegistry>,
     composition: Option<CompositionState>,
+    /// Consume the remainder of an unsupported native composition without
+    /// falling through to ordinary typing and deleting selected atoms.
+    rejected_composition: bool,
     focus_out_subscription: Option<Subscription>,
 }
 
@@ -252,6 +259,7 @@ impl ParagraphView {
             scroll_caret_pending: Cell::new(true),
             atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
             composition: None,
+            rejected_composition: false,
             focus_out_subscription: None,
         }
     }
@@ -298,7 +306,7 @@ impl ParagraphView {
     /// Returns whether an IME composition is currently active.
     #[must_use]
     pub(crate) const fn is_composing(&self) -> bool {
-        self.composition.is_some()
+        self.composition.is_some() || self.rejected_composition
     }
 
     /// Returns the virtual caret position while composing, in displayed-text
@@ -307,7 +315,7 @@ impl ParagraphView {
     pub(crate) fn composing_caret_byte(&self) -> Option<usize> {
         self.composition
             .as_ref()
-            .map(CompositionState::caret_virtual_byte)
+            .and_then(|state| self.input_byte_to_layout(state.caret_virtual_byte()))
     }
 
     pub(crate) fn inline(&self) -> Option<InlineContent> {
@@ -340,21 +348,6 @@ impl ParagraphView {
                     .collect()
             })
             .unwrap_or_default()
-    }
-
-    /// Ordered text range of the session selection when it is single-node.
-    pub(crate) fn ordered_range(&self) -> Option<xiaomu_core::text::TextRange> {
-        if self.range_input && self.inline().is_some() {
-            return xiaomu_core::text::TextRange::new(
-                xiaomu_core::text::TextOffset::ZERO,
-                xiaomu_core::text::TextOffset::ZERO,
-            )
-            .ok();
-        }
-        self.session
-            .borrow()
-            .text_selection()
-            .and_then(|selection| selection.ordered_range().ok())
     }
 
     fn apply_intent(&mut self, intent: EditIntent, cx: &mut Context<Self>) {

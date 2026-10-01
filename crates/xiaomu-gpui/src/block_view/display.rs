@@ -103,17 +103,48 @@ fn normalize_segments(mut segments: Vec<DisplaySegment>) -> (String, Vec<Display
     (text, segments)
 }
 
+fn splice_preedit(
+    segments: Vec<DisplaySegment>,
+    range: std::ops::Range<usize>,
+    preedit: &str,
+) -> (String, Vec<DisplaySegment>) {
+    let mut result = Vec::new();
+    // Emit in visual order; collapsed insertion must precede the suffix.
+    for segment in &segments {
+        let end = (segment.start + segment.text.len()).min(range.start);
+        if segment.start < end {
+            let mut piece = segment.clone();
+            piece.text = segment.text[..end - segment.start].to_owned();
+            result.push(piece);
+        }
+    }
+    result.push(DisplaySegment {
+        start: 0,
+        text: preedit.to_owned(),
+        bold: false,
+        italic: false,
+        underline: true,
+        strike: false,
+        code: false,
+    });
+    for segment in &segments {
+        let start = segment.start.max(range.end);
+        if start < segment.start + segment.text.len() {
+            let mut piece = segment.clone();
+            piece.text = segment.text[start - segment.start..].to_owned();
+            result.push(piece);
+        }
+    }
+    normalize_segments(result)
+}
+
 impl ParagraphView {
     /// Builds the visual layout projection.
     ///
-    /// During IME composition the existing editable projection remains the
-    /// source of truth. Outside composition every canonical atom is spliced via
-    /// the current renderer registry and receives a real display span.
+    /// IME preedit is spliced at its captured mixed-inline gap. Atom labels
+    /// remain visible and platform editable-text offsets stay separate.
     #[must_use]
     pub(crate) fn layout_content(&self) -> (String, Vec<DisplaySegment>) {
-        if self.is_composing() {
-            return self.display_content();
-        }
         let Some(inline) = self.inline() else {
             return (String::new(), Vec::new());
         };
@@ -123,7 +154,13 @@ impl ParagraphView {
         if projection.atoms().is_empty() {
             return self.display_content();
         }
-        project_atom_display_content(&inline, &projection)
+        let content = project_atom_display_content(&inline, &projection);
+        if let Some(state) = &self.composition
+            && let Some(range) = self.composition_layout_range(&projection)
+        {
+            return splice_preedit(content.1, range, state.preedit());
+        }
+        content
     }
 
     /// Returns the current canonical-to-visual atom projection for this block.

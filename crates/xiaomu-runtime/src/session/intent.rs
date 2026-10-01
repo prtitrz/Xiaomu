@@ -116,6 +116,9 @@ pub enum EditIntent {
         index: usize,
     },
     /// Commit one native IME composition over an explicit canonical range.
+    /// A collapsed range at the current caret preserves its mixed-inline
+    /// atom ordinal. Nonempty ranges keep boundary atoms and reject atoms
+    /// strictly inside the replaced text.
     ///
     /// Composition updates remain frontend-transient. The final committed
     /// text uses the same StoredMarks semantics as normal typing but owns one

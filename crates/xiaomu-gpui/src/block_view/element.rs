@@ -184,34 +184,21 @@ impl Element for ParagraphElement {
             _ => Vec::new(),
         };
 
-        // Atom chips paint one tinted quad per visual row of every renderer
-        // span. Composition keeps the plain editable projection, which has no
-        // atom spans to decorate.
-        let chips = if composing {
-            Vec::new()
-        } else {
-            view.atom_display_projection()
-                .map(|projection| {
-                    projection
-                        .atoms()
-                        .iter()
-                        .flat_map(|atom| layout.selection_rects(atom.display_range().clone()))
-                        .map(|rect| {
-                            fill(
-                                Bounds::new(
-                                    point(
-                                        bounds.left() + rect.origin.x,
-                                        bounds.top() + rect.origin.y,
-                                    ),
-                                    rect.size,
-                                ),
-                                rgba(0x7755aa30),
-                            )
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
+        // Decorations follow the preedit splice, just like text and caret.
+        let chips = view
+            .layout_atom_ranges()
+            .into_iter()
+            .flat_map(|range| layout.selection_rects(range))
+            .map(|rect| {
+                fill(
+                    Bounds::new(
+                        point(bounds.left() + rect.origin.x, bounds.top() + rect.origin.y),
+                        rect.size,
+                    ),
+                    rgba(0x7755aa30),
+                )
+            })
+            .collect();
 
         let caret_bounds = if focused {
             caret.and_then(|(byte, affinity)| {
