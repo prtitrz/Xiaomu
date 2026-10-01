@@ -1,8 +1,8 @@
 # P5 Table 总览
 
-> 状态：**IN PROGRESS（2026-09-05 启动）**
+> 状态：**CLOSED（2026-10-01；2026-09-05 启动）**。PR #85 完成 P5.6，证据见 [progress](progress.md)。
 >
-> P4：实现已合并；2026-10-01 审计更正原生 Windows Gate 为证据待补（CI 不替代实机验收）。
+> P4：**CLOSED**；2026-10-01 审计发现的原生 Windows Gate 证据缺口已随 P5.6 补齐，CI 与实机记录分开保存。
 
 P5 让晓木跨过"表格"边界：canonical 表格模型、单元格内编辑、Tab 导航、行/列结构操作、单元格选区与 clipboard。P0-P4 已把 transaction / mapping / history / structured clipboard / capability seam 全部铺平，P5 的要求是**全部复用这些机制**，不引入第二套坐标或历史系统。
 

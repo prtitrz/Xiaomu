@@ -29,7 +29,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前阶段事实（2026-10-01 复核）：P0–P3 已完成；P4 inline atom / atomic block / image / baseline Markdown 实现已合并，但原生 Windows Gate 证据待补（windows-latest 只代表自动化）；P5.1–P5.5 已合并，P5.6 集成验收尚未完成。Core 继续持有 canonical tree、UTF-8 `TextOffset`、mixed-inline `InlinePoint`、transaction/inverse/ChangeMap；Runtime 持有 session、结构命令、selection、clipboard 与 history；GPUI（精确 pin `gpui = "=0.2.2"`）持有 native input/focus、布局、paint、hit-test 与平台剪贴板。`InlineAtomRendererRegistry` / `InlineAtomHostCapability` 已交付，不等同于尚未实现的通用 `BlockRendererRegistry`。`EditorInstance` 保持 per-editor session/history/StoredMarks/listener/persistence 隔离。宿主 persistence 经 `DocumentPersistence` 进出 canonical snapshot；fixture 未支持的 node kind 继续 fail closed。各阶段已实现契约与尚未闭合的 Gate 见文末和对应 progress。
+当前阶段事实（2026-10-01 收口）：P0–P5 已完成；P4 inline atom / atomic block / image / baseline Markdown 的原生 Windows Gate 缺口已随 P5.6 补齐，P5 correctness、集成矩阵与 IME 阻塞已闭合。三平台 CI 与原生验收独立记录于 P5 progress；P6 未启动。Core 继续持有 canonical tree、UTF-8 `TextOffset`、mixed-inline `InlinePoint`、transaction/inverse/ChangeMap；Runtime 持有 session、结构命令、selection、clipboard 与 history；GPUI（精确 pin `gpui = "=0.2.2"`）持有 native input/focus、布局、paint、hit-test 与平台剪贴板。`InlineAtomRendererRegistry` / `InlineAtomHostCapability` 已交付，不等同于尚未实现、已归属 P7 的通用 `BlockRendererRegistry` / `LinkOpenService`。`EditorInstance` 保持 per-editor session/history/StoredMarks/listener/persistence 隔离。宿主 persistence 经 `DocumentPersistence` 进出 canonical snapshot；fixture 未支持的 node kind 继续 fail closed。各阶段已实现契约与验收范围见文末和对应 progress。
 
 ## Core 边界
 
@@ -649,7 +649,7 @@ harness fixture 格式升级 **v4**：`hr\n` / `img\n` 原子行 + 既有 attrs 
 
 ## P4 Closeout
 
-P4.9 的实现与三平台 CI 于 2026-09-05 完成。2026-10-01 审计更正：**Windows CI job 不是原生实机 Gate**；仓库缺少对应 native Microsoft Pinyin 操作证据，因此 P4 最终原生 Gate 待补，并纳入 P5.6 同机验收。不得以自动化结果声明该 Gate 完成。
+P4.9 的实现与三平台 CI 于 2026-09-05 完成。2026-10-01 审计更正了把 Windows CI job 当作原生实机 Gate 的错误；随后在 P5.6 同机验收补齐 Microsoft Pinyin 操作证据，并实际发现、修复 chip 旁预编辑不可见和 Esc 后排版残留。最终代码 `6d09167` 的 chip 前后输入/取消/提交、左右跨 atom、atomic → text 焦点恢复通过原生复测；具体版本、环境、操作者和步骤见 P5 progress。P4 CLOSED，但不据此声称 macOS/Linux IME 或所有 Unicode 组合均经过原生验收。
 
 ## P5.1-P5.2 Table 模型与 Cell 编辑事实
 

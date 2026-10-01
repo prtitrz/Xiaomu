@@ -4,7 +4,7 @@
 >
 > Date: 2026-09-01
 >
-> 当前里程碑（2026-10-01 复核）：**P0 / P1 / P2 / P3 CLOSED；P4 实现已合并，原生 Windows Gate 证据待补；P5.1–P5.5 已合并，P5.6 Integration Gate IN PROGRESS；P6 未启动。** CI 与原生输入法实机验收分别记录，前者不能替代后者。
+> 当前里程碑（2026-10-01 收口）：**P0–P5 CLOSED；P4 原生 Windows Gate 缺口已随 P5.6 补齐；P6 未启动。** 最终代码 `6d09167` 的三平台 CI 与分版本原生验收见 [P5 progress](phases/p5-table/progress.md)，二者分别记录，前者不能替代后者。
 >
 > 定位：独立演进、可嵌入宿主应用的 **Rust Native Structured Rich-Text / Block Editor Engine**。首个原生前端基于 GPUI，但核心架构不绑定 GPUI。
 
@@ -1059,7 +1059,7 @@ Gate：固定 Unicode cross-block + visual-line matrix、exact undo/redo 与 ran
 
 ### P4 — Inline Atom / Extension Seam
 
-状态：**实现已合并；原生 Windows Gate 证据待补**（审计更正见 P4 progress）。
+状态：**CLOSED**。2026-10-01 审计发现的原生 Windows Gate 证据缺口已在 P5.6 补齐，含 chip 两侧 IME 与 atomic → text 焦点恢复；分版本操作记录见 P5 progress。
 
 P4.1 与 P4.2 Core 层已完成：
 
@@ -1093,7 +1093,7 @@ Gate：一个 demo atom 作为 one-caret-unit 完整操作，文本/atom seam �
 
 ### P5 — Table
 
-状态：**P5.1–P5.5 已合并，P5.6 CURRENT**。本轮 correctness 修正不等于阶段关闭。
+状态：**CLOSED（2026-10-01）**。P5.6、review correctness 修正、原生 IME 阻塞修复及独立 Gate 均已完成。
 
 已建立的能力：
 
@@ -1105,11 +1105,13 @@ row / column operations
 cell selection
 ```
 
-Gate：表格中英文连续编辑 + undo/redo、所有行列位置映射、富 cell clipboard 无损、用户可操作的矩形选区与视觉列导航、fixture round-trip、多 editor 隔离、三平台 CI、独立 Windows 原生 IME 验收。具体未完成项以 `docs/phases/p5-table/progress.md` 为准；全部闭合前不进入 P6。
+Gate：表格中英文连续编辑 + undo/redo、所有行列位置映射、富 cell clipboard 无损、用户可操作的矩形选区与视觉列导航、fixture round-trip、多 editor 隔离、三平台 CI、独立 Windows 原生 IME 验收。上述项已闭合，证据和原生验收范围见 `docs/phases/p5-table/progress.md`。
 
 ### P6 — Performance / Long Document
 
-完成：
+状态：**未启动**。先建立长文档、复杂表格与多 editor 的可重复 benchmark/profile 基线，测量编辑延迟、布局/绘制耗时及内存；依据瓶颈决定缓存和 virtualization 的实施顺序，不能以缓存命中率替代 selection/IME/undo 正确性。
+
+阶段目标：
 
 ```text
 layout cache

@@ -2,7 +2,7 @@
 
 ## Current status
 
-P0-P3 已关闭。P4 实现已合并，但 2026-10-01 复核发现其原生 Windows Gate 只有 CI 证据，需补验。P5 于 2026-09-05 启动；P5.1–P5.5 的 CLOSED 表示原切片已合并，不表示以下 integration Gate 已完成。
+**P5 CLOSED（2026-10-01）**。P0-P3 已关闭；本轮一并补齐 P4 原生 Windows Gate。P5 于 2026-09-05 启动，P5.1–P5.5 原切片合并后，在 PR #85 完成 correctness 修复、P5.6 集成验收与两个原生 IME 阻塞修复。最终代码 `6d09167` 的 490 项本地测试、三平台 CI 和下方分版本记录的 Windows 原生验收均通过；P6 尚未启动。
 
 ```text
 P5.1 Table Canonical Model        CLOSED
@@ -10,7 +10,7 @@ P5.2 Runtime Cell Editing         CLOSED
 P5.3 Row / Column Operations      CLOSED
 P5.4 GPUI Table Rendering         CLOSED
 P5.5 Cell Selection / Clipboard   CLOSED
-P5.6 Integration Gate / Closeout  CURRENT
+P5.6 Integration Gate / Closeout  CLOSED
 ```
 
 ## P5.1 Table Canonical Model — CLOSED（PR #80）
@@ -57,16 +57,16 @@ P5.6 Integration Gate / Closeout  CURRENT
 - [x] markdown Table 导出 fail closed 断言（codec 测试 `table_nodes_export_fail_closed`）
 - [x] GPUI：range 矩形 cell 高亮（`cell_range_rect`）
 
-## P5.6 Integration Gate / P5 Closeout — PENDING
+## P5.6 Integration Gate / P5 Closeout — CLOSED（PR #85）
 
 - [x] GPUI 矩形入口：Ctrl/Cmd+Shift+Space、Shift+方向键、cell 选择柄拖动；原生输入代理与焦点恢复；自动化 cut/paste/typing/IME cancel/commit/undo
 - [x] Up/Down 按视觉列移动，覆盖不同行高、wrapped cell、空格、嵌套表及 text↔table 边界；修复长内容撑开列宽，旧 row-major 断言已替换
 - [x] realistic table fixture（fixture v5；rich/nested table、各层 scalar attrs、旧版本读兼容、非法表 fail closed、adapter save/load）
 - [x] Unicode + cell + atom matrix（rich clipboard、同锚点 atoms、CJK/emoji/combining/ZWJ、换行及精确 undo/redo）
 - [x] multi-editor isolation（独立 window/session/range proxy、输入/clipboard/undo 不改变另一 editor）
-- [ ] architecture / planning / progress final sync
-- [ ] Windows 原生实机 Gate（单独记录 commit、Windows/输入法版本、操作者、步骤/结果；涵盖 P4 遗留 atom/atomic + P5 表格输入法矩阵，不以 TestAppContext 或 windows-latest 代替）
-- [ ] 最新修正 head 三平台 `CI Success`（`809afb5` 的 [run 36828373409](https://github.com/prtitrz/Xiaomu/actions/runs/36828373409) 已通过，但之后发现原生 atom IME 缺陷，不能作为新修正的 CI 证据）
+- [x] architecture / planning / progress final sync（含 P4 原生 Gate 补验及 P7 宿主接口归属）
+- [x] Windows 原生实机 Gate（下方按代码版本、操作者、步骤记录；涵盖 P4 遗留 atom/atomic + P5 表格输入法矩阵，不以 TestAppContext 或 windows-latest 代替）
+- [x] 最终代码 `6d09167` 三平台 `CI Success`（[run 36838449485](https://github.com/prtitrz/Xiaomu/actions/runs/36838449485)：Windows / macOS / Ubuntu + policy + aggregate 全绿；不是沿用此前 `809afb5` / `6a861cb` 的绿灯）
 - [x] P4 遗留 `BlockRendererRegistry` / `LinkOpenService` 列入 P7 Host Extension Contracts，具体归属与验收见 planning P7；不冒充 P4/P5 已交付
 
 ## 2026-10-01 Review 修正（commit `16f9d36`）
@@ -80,29 +80,37 @@ P5.6 Integration Gate / Closeout  CURRENT
 
 回归证据：`p5_review_regressions.rs`、`p5_rich_table_clipboard.rs`、`p5_cell_range_clipboard.rs`、`table_model.rs`、`table_gpui.rs`。这些是本地自动化证据，不是原生实机验收，也不自动关闭 P5.6。
 
-本地 Windows 检查（2026-10-01，`agent/p5-review-fixes`，code head `809afb5`）：`cargo test --workspace --all-targets --locked` **483 tests PASS**；`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、source-size、dependency-boundary、`git diff --check` PASS。实现已提交并推送到 [PR #85](https://github.com/prtitrz/Xiaomu/pull/85)。三平台 CI 独立记录于上方；不以 CI 替代下方的原生验收。
+本地 Windows 检查（2026-10-01，`agent/p5-review-fixes`，code head `6d09167`）：`cargo test --workspace --all-targets --locked` **490 tests PASS**；`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、source-size、dependency-boundary、`git diff --check` PASS。实现已提交并推送到 [PR #85](https://github.com/prtitrz/Xiaomu/pull/85)。三平台 CI 独立记录于上方；不以 CI 替代下方的原生验收。
+
+## 原生验收发现的 IME 阻塞与修复
+
+- `809afb5` 标签后有候选框但无拼音预编辑：text-only selection 丢失 atom ordinal，组合布局也未保留 chip。`6a861cb` 修正完整 inline gap、预编辑/候选框几何和 commit 落点；新增 5 个 `ime_atom_tests.rs` 回归。
+- `6a861cb` 按 Esc 后仍显示带下划线拼音：用户报告后，临时回调日志证明 empty marked text 和 cancel 均已到达，composition=false、history=(0,0)，没有把拼音写入正文。真实绘制日志显示应绘制 87 bytes 却仍绘制旧的 92 bytes，定位为 intrinsic width 无 key 与 preedit 无 key 的 `None == None` 误命中，不是 GPUI 丢失取消消息。
+- `6d09167` 只允许明确有效的 key 命中缓存；没有引入 Windows 特判、unsafe、定时刷新或 GPUI 升级。`element_tests.rs` 在 MinContent/MaxContent 测量路径重现旧代码失败（实际 shaped text 仍含 `zhongwen`），修正后 PASS；另补多帧预编辑更新/取消后的真实 shaped text 断言。诊断日志代码已移除。
 
 ## 2026-10-01 Windows 原生验收记录
 
-- 测试代码：`809afb5`，本地 debug `xiaomu-editor-harness.exe`，默认 fixture v5；独立临时存档，不覆盖用户既有文档。
+- 测试代码：首轮 `809afb5`，修复复测 `6d09167`，本地 debug `xiaomu-editor-harness.exe`，默认 fixture v5；独立临时存档，不覆盖用户既有文档。
 - 环境：Windows registry 报告 `Windows 10 IoT Enterprise LTSC 2024`，DisplayVersion `24H2`，build `26100.9168`；Microsoft Pinyin `ChsIME.exe` file version `10.0.26100.8972`。
-- 操作者与方法：用户在真实 Windows 窗口手动操作，Codex 提供逐项步骤、检查截图/fixture/日志。computer-use 曾返回 `failed to activate captured window`，其未成功执行的输入不算证据；之后按用户要求重新打开可见测试窗口，改为用户辅助验收。
-- [x] 普通及嵌套表格 cell 内微软拼音输入：预编辑文字、候选框、中文上屏正常。用户针对该步骤确认“正常”；截图显示嵌套 cell 内新增中文。
-- [x] 第一行左格 `Ctrl+Shift+Space` → `Shift+Right` 选中两格；拼音后 `Esc` 取消保持原内容；再次确认“你好”后仅 anchor 留下文本、其余 cell 清空；`Ctrl+Z` 恢复原矩形内容、`Ctrl+Y` 重做、继续输入。用户针对这三步确认“正常”。
-- [ ] `@xiaomu` 前后中文输入与左右键越过 chip；atomic 分隔线选择后回到文字继续输入。**原 `809afb5` 失败**：用户截图确认标签后有候选框、无拼音预编辑；已补实现及 `ime_atom_tests.rs`，等待新程序实机复测，不能标 PASS。
-- [ ] 表内 Tab / Shift+Tab、末格 Tab 新增行。
+- 操作者与方法：首轮由用户在真实 Windows 窗口手动操作，Codex 提供步骤、检查截图/fixture/日志。computer-use 曾返回 `failed to activate captured window`，失败操作不算证据。后续恢复成功，Codex 通过 computer-use 在同机真实窗口按物理键、逐步检查截图，完成下列注明 `6d09167` 的复测（非 `simulate_input` 或 TestAppContext）。
+- [x] `809afb5` 普通及嵌套表格 cell 内微软拼音输入：预编辑文字、候选框、中文上屏正常。用户针对该步骤确认“正常”；截图显示嵌套 cell 内新增中文。
+- [x] `809afb5` 第一行左格 `Ctrl+Shift+Space` → `Shift+Right` 选中两格；拼音后 `Esc` 取消保持原内容；再次确认“你好”后仅 anchor 留下文本、其余 cell 清空；`Ctrl+Z` 恢复原矩形内容、`Ctrl+Y` 重做、继续输入。用户针对这三步确认“正常”；后续通用 Esc 画面残留另按上节定位修复，不能以这次简短确认否定后报缺陷。
+- [x] `6d09167` 原失败位置输入 `zhongwen`，候选框与下划线预编辑可见；Esc 后整段拼音和下划线消失，原文/光标保留。随后 `ni` + Space 正常确认“你”，Ctrl+Z / Ctrl+Y 可撤销/重做。
+- [x] `6d09167` `@xiaomu` 前输入 `ni` + Space，“你”落在 chip 前；undo 后 Right 一次跨到 chip 后，预编辑与候选框在正确位置、chip 不消失；Esc 清除、再次 `ni` + Space 落在 chip 后；undo 后 Left 一次回到 chip 前。
+- [x] `6d09167` 点击 horizontal rule 呈蓝色整节点选择，Left 回到前一引用段落末尾；`ni` + Space 可继续输入“你”，undo 恢复原文。
+- [x] `6d09167` 第一格 Tab 到右格，Shift+Tab 回左格；外表末格 Tab 新增第三行并聚焦其首格。新格输入 `n` 后 Esc 完全清除，再 Ctrl+Z 直接撤销追加行，证明取消未制造 history entry。
 - [x] `Ctrl+S` 保存 fixture v5（两次 `snapshot saved` 日志 + 文件存在，保留 rich/nested table、attrs、atom/image 与用户输入）
-- [ ] 重新打开读取保存结果。
+- [x] 原生程序重开读取同一存档：`loaded from` 日志、rich/nested outline 和截图确认用户已保存的中文/数字、嵌套表、mention 与 image 均保留；先后启动 atom 修复版和 Esc 修复版都成功读取。
 
-人工确认只覆盖明确列出的步骤，不扩写成所有输入法、平台或所有 Unicode 组合都经过人工验收。Unicode/attrs/clipboard/多 editor 完整矩阵另由永久自动化测试覆盖。
+人工/原生确认只覆盖明确列出的步骤，不扩写成所有输入法、平台或所有 Unicode 组合都经过实机验收。Unicode/attrs/clipboard/多 editor 完整矩阵另由永久自动化测试覆盖。Codex 复测插入的文字和追加行均已 undo，保留用户原有测试内容。
 
 ## P5 Phase Gate
 
-- [ ] 表格中英文连续编辑 + undo/redo（planning 总 Gate）
-- [ ] Tab / Shift+Tab 全表稳定行走
-- [ ] 行列操作 caret/selection 可预测
-- [ ] cell 矩形选区 clipboard 无损
-- [ ] canonical 不变量由 Core validation 持有
-- [ ] 三平台 CI + Windows 实机 Gate 全绿
+- [x] 表格中英文连续编辑 + undo/redo（原生记录 + `p5_cell_editing.rs` / GPUI 矩阵）
+- [x] Tab / Shift+Tab 全表稳定行走（原生普通/末格 + 自动化完整位置矩阵）
+- [x] 行列操作 caret/selection 可预测（Core maps + `p5_row_column_ops.rs` / review regressions）
+- [x] cell 矩形选区 clipboard 无损（rich/attrs/Unicode 矩阵 + GPUI 输入/undo）
+- [x] canonical 不变量由 Core validation 持有（非法形状、事务原子性、精确 inverse）
+- [x] 三平台 CI + Windows 实机 Gate 全绿（自动化与原生操作分别取证）
 
-只有上述 Gate 完成，才允许 **P5 = CLOSED** 并进入 P6 Performance。
+上述 Gate 已闭合，**P5 = CLOSED**。下一步为 P6 Performance：先建立长文档/复杂表格/多 editor 的可重复 benchmark 与 profile 基线，再依据实测瓶颈安排缓存优化和 virtualization；不将此处 closeout 误记为 P6 已开始。
