@@ -30,7 +30,8 @@ pub(super) fn resolve_selection(
             };
             collapsed_caret(document, edit.node(), raw, affinity_of(before))
         }
-        SelectionUpdate::CaretAtLastInsertedOffset { offset } => {
+        SelectionUpdate::CaretAtLastInsertedOffset { .. }
+        | SelectionUpdate::CaretAtStartOfLastInsertedSubtree => {
             let inserted = changes
                 .steps()
                 .iter()
@@ -40,7 +41,27 @@ pub(super) fn resolve_selection(
                     _ => None,
                 })
                 .ok_or(SessionError::SelectionInvalid)?;
-            collapsed_caret(document, inserted, *offset, affinity_of(before))
+            match plan.selection_update() {
+                SelectionUpdate::CaretAtLastInsertedOffset { offset } => {
+                    collapsed_caret(document, inserted, *offset, affinity_of(before))
+                }
+                _ => {
+                    let mut pending = vec![inserted];
+                    while let Some(node) = pending.pop() {
+                        let content = document
+                            .node(node)
+                            .ok_or(SessionError::SelectionInvalid)?
+                            .content();
+                        if content.as_inline().is_some() {
+                            return collapsed_caret(document, node, 0, affinity_of(before));
+                        }
+                        if let Some(children) = content.as_children() {
+                            pending.extend(children.iter().rev().copied());
+                        }
+                    }
+                    Err(SessionError::SelectionInvalid)
+                }
+            }
         }
         SelectionUpdate::CaretAtJoinPoint => {
             let edit = plan.primary_edit().ok_or(SessionError::SelectionInvalid)?;

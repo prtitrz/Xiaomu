@@ -189,7 +189,7 @@ fn cell_range_validates_and_chooses_one_table() {
 }
 
 #[test]
-fn a_content_intent_collapses_the_range_back_to_the_parked_caret() {
+fn typing_replaces_range_content_and_undo_restores_the_rectangle() {
     let fixture = fixture();
     let mut session = session_at(&fixture.document, fixture.intro, 0);
     session
@@ -202,15 +202,23 @@ fn a_content_intent_collapses_the_range_back_to_the_parked_caret() {
         })
         .unwrap();
     assert!(session.selection().active_cell_range().is_none());
-    // The range converged onto the anchor cell's first block start before
-    // the intent ran, so typing landed there.
+    // Replacement clears the rectangle and writes at the anchor cell.
     let (node, offset) = match session.selection().focus() {
         DocumentPosition::Inline(point) => (point.node_id(), point.text_offset().as_usize()),
         other => panic!("expected inline focus, got {other:?}"),
     };
-    assert_eq!(node, fixture.texts_a[0]);
+    assert_eq!(session.document().parent_of(node), Some(fixture.cells_a[0]));
     assert_eq!(offset, 3, "the caret sits after the typed scalar");
-    assert_eq!(text_of(&session, fixture.texts_a[0]), "中a1");
+    assert_eq!(text_of(&session, node), "中");
+    for cell in &fixture.cells_a[1..] {
+        assert_eq!(
+            text_of(&session, children_of(session.document(), *cell)[0]),
+            ""
+        );
+    }
+    session.undo().unwrap();
+    assert_eq!(session.document().store(), fixture.document.store());
+    assert!(session.selection().active_cell_range().is_some());
 }
 
 #[test]

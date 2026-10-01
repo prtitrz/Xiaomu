@@ -2,7 +2,7 @@
 
 ## Current status
 
-P0-P4 已关闭。P5 于 2026-09-05 启动。
+P0-P3 已关闭。P4 实现已合并，但 2026-10-01 复核发现其原生 Windows Gate 只有 CI 证据，需补验。P5 于 2026-09-05 启动；P5.1–P5.5 的 CLOSED 表示原切片已合并，不表示以下 integration Gate 已完成。
 
 ```text
 P5.1 Table Canonical Model        CLOSED
@@ -26,7 +26,7 @@ P5.6 Integration Gate / Closeout  CURRENT
 ## P5.2 Runtime Cell Editing — CLOSED（PR #81）
 
 - [x] `EditIntent::MoveToNextCell / MoveToPreviousCell`（caret-only 导航，无事务无 history；Atomic 焦点导航，Gap 焦点不导航）
-- [x] last-cell Tab 追加新行（Core 语义步骤 `TransactionStep::InsertTableRow`，step map 报告新行首 cell paragraph 作 caret 目标；redo 恢复同一批 node id）；first-cell Shift+Tab no-op
+- [x] last-cell Tab 追加新行（Core `InsertTableRow` 的 map 报告实际新行，Runtime 解析首个 inline 后代作 caret 目标；redo 恢复同一批 node id）；first-cell Shift+Tab no-op
 - [x] cell 内 Enter / Backspace / Delete 边界行为（Backspace cell 起点 no-op 记录；Enter split 留在原 cell）
 - [x] cell 内 typing coalescing / IME（isolated entry + stored marks 复用）验证
 - [x] undo / redo 精确矩阵（`crates/xiaomu-runtime/tests/p5_cell_editing.rs` 9 tests + `table_model.rs` row-append 矩阵）
@@ -44,13 +44,13 @@ P5.6 Integration Gate / Closeout  CURRENT
 
 - [x] table grid layout / borders / focus affordance（`document_view/table_block.rs`：每行 flex row、cell 边框、表级聚焦蓝框、选中 cell 底色、空 cell 最小高度）
 - [x] cell 内块渲染递归复用（走既有 `render_block_tree`，cell 内 heading/list/quote 展示与 atom 渲染不变）
-- [x] caret / selection / IME / hit-test 复用验证（`text_blocks` 本就收集 cell 段落，鼠标经共享 paint registry 命中，无表格专用指针路径）
+- [x] cell 内容复用普通块投影；本轮修正鼠标命中：先约束到完整 cell bounds，再按二维 block bounds 投影，覆盖左右同高与短 cell 空白区
 - [x] Tab / Shift+Tab keybinding 上下文（cell > list > paragraph：修复 cell 段落 offset 0 上 Tab 误转列表）
 - [x] e2e：`table_gpui.rs` 3 个 `gpui::test`——真实击键 Tab 行走 + last-cell 追加行 + 输入/undo、Up/Down text↔table↔text（文档序）、Enter cell 内分段、点击进入 cell 首段
 
 ## P5.5 Cell Selection / Clipboard — CLOSED（PR #84）
 
-- [x] cell-range selection variant + validate + mapping（`DocumentSelection` 新增 `cell_range: Option<CellRange>` 字段保持 Copy；端点为 cell 身份，插入不动矩形、删除才收缩/收敛；公开 seam `set_cell_range_selection`；内容 intent 收敛到 anchor cell 首块、表结构 op 映射矩形）
+- [x] cell-range selection variant + validate + mapping（公开 Runtime seam `set_cell_range_selection`；端点为 cell 身份；表结构 op 映射矩形）。本轮修正 Delete/Cut 清空全矩形，typing 清空矩形后写入 anchor，不再隐式只改首 cell
 - [x] clipboard wire v5 table 载荷 + 旧版本 fail-soft（仅含 table 的载荷升级 v5 信封，v4 reader 对未知 tag/版本静默回退 plain text；非 table 载荷保持 v4）
 - [x] TSV plain-text fallback（cell `\t` 分列、行 `\n` 分行、cell 内 block 边界扁平化为空格）
 - [x] paste 矩阵：range 替换（尺寸匹配，单 history entry）/ 1×1 进 focused cell / 兄弟表插入（`InsertTable` + 逐 cell 填充 + seed 段删除）/ mixed 与尺寸不符 fail closed（`ClipboardTableUnsupported`）
@@ -59,12 +59,28 @@ P5.6 Integration Gate / Closeout  CURRENT
 
 ## P5.6 Integration Gate / P5 Closeout — PENDING
 
+- [ ] GPUI 矩形选区的鼠标/键盘入口（目前仅 Runtime API + 绘制投影），覆盖 native focus、输入替换、IME、cut/paste/undo
+- [ ] Up/Down 按视觉列移动，覆盖不同行高、wrapped cell、嵌套表及 text↔table 边界；现有 row-major 用例不能作为该 Gate
 - [ ] realistic table fixture（fixture v5）
 - [ ] Unicode + cell + atom matrix
 - [ ] multi-editor isolation
 - [ ] architecture / planning / progress final sync
-- [ ] Windows real-machine Gate
+- [ ] Windows 原生实机 Gate（单独记录 commit、Windows/输入法版本、操作者、步骤/结果；涵盖 P4 遗留 atom/atomic + P5 表格输入法矩阵，不以 TestAppContext 或 windows-latest 代替）
 - [ ] final three-platform `CI Success`
+- [ ] P4 遗留 `BlockRendererRegistry` / `LinkOpenService` 明确交付阶段与验收，勿与已交付 inline registry 混记
+
+## 2026-10-01 Review 修正（本地工作分支，未推送）
+
+- [x] 右侧同高 cell 点击不再误入左侧；短 cell 空白命中限制在该 cell 内
+- [x] Cut/Delete/Backspace 清空全部选中 cell、保留表形状/身份/attrs，exact undo/redo；输入替换为一次独立历史记录
+- [x] `InsertTableColumn` 对每一行发出真实 `NodeInserted` map；`InsertTableRow` map 指向实际 row，由 Runtime 单独解析 caret
+- [x] 复制/粘贴合法 rich cell 子树（quote/list/atomic/nested table/marks/inline atoms），不限定直接 inline child
+- [x] table/row/cell/block attrs 无损；行属性使 wire 升 v6，普通表保持 v5，非表保持 v4；旧信封带新特性 fail soft
+- [x] 完整矩形枚举集中于 `CellRange::cells`，供 Runtime 命令、clipboard、GPUI 高亮共用
+
+回归证据：`p5_review_regressions.rs`、`p5_rich_table_clipboard.rs`、`p5_cell_range_clipboard.rs`、`table_model.rs`、`table_gpui.rs`。这些是本地自动化证据，不是原生实机验收，也不自动关闭 P5.6。
+
+本地 Windows 检查（2026-10-01，`agent/p5-review-fixes` 工作树）：`cargo test --workspace --all-targets --locked` 472 tests PASS；`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、source-size、dependency-boundary、`git diff --check` PASS。未提交/推送，未运行本分支三平台远端 CI；本轮未执行原生 IME 人工 Gate。
 
 ## P5 Phase Gate
 

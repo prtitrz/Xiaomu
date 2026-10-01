@@ -24,7 +24,7 @@ impl ApplyContext {
         at: InlinePoint,
         end: TextOffset,
         replacement: &str,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         let node = at.node_id();
         let content = self.inline_content(node)?;
         let range = TextRange::new(at.text_offset(), end)?;
@@ -44,7 +44,7 @@ impl ApplyContext {
         };
         let inverse_steps =
             inverse::replace_inline_text_inverse(at, range, replacement, &content, &spans);
-        Ok((Some(step_map), inverse_steps))
+        Ok((vec![step_map], inverse_steps))
     }
 
     pub(super) fn apply_insert_inline_atom(
@@ -53,7 +53,7 @@ impl ApplyContext {
         kind: &crate::document::AtomKind,
         attrs: NodeAttrs,
         content: InlineAtomContent,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         self.validate_inline_gap(at)?;
         let id = self.allocate_node(
             NodeKind::InlineAtom(kind.clone()),
@@ -69,13 +69,13 @@ impl ApplyContext {
             inserted: id,
         };
         let inverse = vec![TransactionStep::RemoveInlineAtom { atom: id }];
-        Ok((Some(step_map), inverse))
+        Ok((vec![step_map], inverse))
     }
 
     pub(super) fn apply_remove_inline_atom(
         &mut self,
         atom: NodeId,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         let payload = self.store.get(atom).ok_or(Error::UnknownNode)?.clone();
         if !matches!(payload.kind(), NodeKind::InlineAtom(_)) {
             return Err(Error::InvalidTransaction);
@@ -109,14 +109,14 @@ impl ApplyContext {
             ),
             node: payload,
         }];
-        Ok((Some(step_map), inverse))
+        Ok((vec![step_map], inverse))
     }
 
     pub(super) fn apply_restore_inline_atom(
         &mut self,
         at: InlinePoint,
         node: &Node,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         if self.store.contains(node.id()) || !matches!(node.kind(), NodeKind::InlineAtom(_)) {
             return Err(Error::InvalidTransaction);
         }
@@ -141,7 +141,7 @@ impl ApplyContext {
             inserted: node.id(),
         };
         let inverse = vec![TransactionStep::RemoveInlineAtom { atom: node.id() }];
-        Ok((Some(step_map), inverse))
+        Ok((vec![step_map], inverse))
     }
 
     fn validate_inline_gap(&self, at: InlinePoint) -> Result<()> {

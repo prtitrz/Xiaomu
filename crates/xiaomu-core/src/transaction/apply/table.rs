@@ -19,7 +19,7 @@ impl ApplyContext {
         index: usize,
         rows: usize,
         columns: usize,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         if rows == 0 || columns == 0 {
             return Err(Error::InvalidTransaction);
         }
@@ -72,21 +72,20 @@ impl ApplyContext {
             inserted: table,
         };
         let inverse = vec![TransactionStep::RemoveNode { node: table }];
-        Ok((Some(step_map), inverse))
+        Ok((vec![step_map], inverse))
     }
 
     /// Applies one row insertion to an existing valid table.
     ///
     /// The new row mirrors the table's column count; every cell carries one
-    /// empty paragraph. The step map reports the FIRST cell's paragraph as
-    /// the inserted node, so frontends can move the caret into the new row's
-    /// first cell after a Tab on the last cell. `index` may be the current
-    /// row count to append.
+    /// empty paragraph. The step map names the inserted row, not a
+    /// descendant caret target. `index` may be the current row count to append.
     pub(super) fn apply_insert_table_row(
         &mut self,
         table: NodeId,
         index: usize,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
+        self.require_table(table)?;
         let mut table_children = self.children(table)?;
         if index > table_children.len() {
             return Err(Error::InvalidTransaction);
@@ -135,24 +134,24 @@ impl ApplyContext {
         let step_map = StepMap::NodeInserted {
             parent: table,
             index,
-            inserted: paragraphs[0],
+            inserted: row,
         };
         let inverse = vec![TransactionStep::RemoveNode { node: row }];
-        Ok((Some(step_map), inverse))
+        Ok((vec![step_map], inverse))
     }
 
     /// Applies one column insertion to an existing valid table.
     ///
     /// Every row gains one cell (carrying one empty paragraph) at `index`,
-    /// so the uniform column count holds in the produced snapshot. The step
-    /// map reports the FIRST row's inserted cell paragraph; carets in other
-    /// rows map through unchanged because their own row children did not
-    /// move. The inverse removes one cell per row in reverse order.
+    /// so the uniform column count holds in the produced snapshot. One
+    /// insertion map per row tracks every changed child list. The inverse
+    /// removes one cell per row in reverse order.
     pub(super) fn apply_insert_table_column(
         &mut self,
         table: NodeId,
         index: usize,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
+        self.require_table(table)?;
         let table_children = self.children(table)?;
         let first_row = table_children
             .first()
@@ -164,6 +163,7 @@ impl ApplyContext {
         }
 
         let mut inserted_cells = Vec::with_capacity(table_children.len());
+        let mut step_maps = Vec::with_capacity(table_children.len());
         for row in &table_children {
             let mut row_children = self.children(*row)?;
             let cell = self.allocate_node(
@@ -184,20 +184,26 @@ impl ApplyContext {
                 NodeContent::children(row_children),
             )?;
             inserted_cells.push(cell);
+            step_maps.push(StepMap::NodeInserted {
+                parent: *row,
+                index,
+                inserted: cell,
+            });
         }
 
-        // Rows are processed in order, so the first inserted cell belongs
-        // to the table's first row.
-        let step_map = StepMap::NodeInserted {
-            parent: first_row,
-            index,
-            inserted: inserted_cells[0],
-        };
         let inverse = inserted_cells
             .into_iter()
             .rev()
             .map(|cell| TransactionStep::RemoveNode { node: cell })
             .collect();
-        Ok((Some(step_map), inverse))
+        Ok((step_maps, inverse))
+    }
+
+    fn require_table(&self, table: NodeId) -> Result<()> {
+        match self.store.get(table) {
+            Some(node) if matches!(node.kind(), NodeKind::Table) => Ok(()),
+            Some(_) => Err(Error::InvalidTableStructure),
+            None => Err(Error::UnknownNode),
+        }
     }
 }

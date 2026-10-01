@@ -1,6 +1,6 @@
 # P4 Structured Content / Extension 总览
 
-> 状态：**CLOSED（2026-09-05）**
+> 状态：**实现已合并（原 2026-09-05 CLOSED）；2026-10-01 复核：原生 Windows Gate 证据待补**。CI 不替代原生输入法实机验收，补验纳入 P5.6。
 >
 > P3：**CLOSED（2026-09-01）**
 >

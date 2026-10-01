@@ -53,6 +53,8 @@ pub struct DocumentView {
     /// invalidate.
     epoch: Rc<Cell<u64>>,
     registry: BlockBoundsRegistry,
+    /// Full cell bounds, including padding and space below shorter content.
+    cell_registry: BlockBoundsRegistry,
     /// Shared viewport scroll state. Focused blocks use it to keep the caret
     /// visible without leaking viewport geometry into Core or runtime.
     scroll_handle: ScrollHandle,
@@ -86,6 +88,7 @@ impl DocumentView {
             session,
             epoch: Rc::new(Cell::new(0)),
             registry: Rc::new(RefCell::new(Vec::new())),
+            cell_registry: Rc::new(RefCell::new(Vec::new())),
             scroll_handle: ScrollHandle::new(),
             children: Vec::new(),
             is_dragging: false,
@@ -570,6 +573,7 @@ impl Render for DocumentView {
 
         // Each paint pass repopulates the registry; stale entries must go.
         self.registry.borrow_mut().clear();
+        self.cell_registry.borrow_mut().clear();
 
         let tree = self.render_block_tree(root, false, 0, 0, cx);
 

@@ -409,8 +409,8 @@ fn insert_table_row_step_appends_one_uniform_row() {
         assert_eq!(cells.len(), 2, "the new row mirrors the column count");
     }
 
-    // The step map reports the new row's FIRST cell paragraph as the caret
-    // target, and it really lives inside the appended row.
+    // Mapping names the real child inserted into the table, not a
+    // descendant paragraph chosen for a frontend caret.
     let inserted = applied
         .changes()
         .steps()
@@ -421,16 +421,8 @@ fn insert_table_row_step_appends_one_uniform_row() {
             _ => None,
         })
         .expect("one inserted node");
-    let first_cell = snapshot.parent_of(inserted).unwrap();
-    assert_eq!(snapshot.parent_of(first_cell).unwrap(), rows[1]);
-    let first_cell_blocks = snapshot
-        .node(first_cell)
-        .unwrap()
-        .content()
-        .as_children()
-        .unwrap()
-        .to_vec();
-    assert_eq!(first_cell_blocks, vec![inserted]);
+    assert_eq!(inserted, rows[1]);
+    assert_eq!(snapshot.parent_of(inserted), Some(table));
 
     // The inverse removes exactly the appended row and validates.
     let inverse = applied.inverse().clone();
@@ -536,19 +528,18 @@ fn insert_table_column_step_adds_one_cell_per_row() {
     assert_eq!(row_cells[0], first, "cells keep their identities");
     assert_eq!(row2_cells[0], third);
 
-    // The step map reports the first row's inserted cell as the caret
-    // target.
+    // Every row gets a mapping entry naming its actual inserted cell.
     let inserted = applied
         .changes()
         .steps()
         .iter()
-        .rev()
         .find_map(|step| match step {
             StepMap::NodeInserted { inserted, .. } => Some(*inserted),
             _ => None,
         })
-        .expect("one inserted node");
+        .expect("inserted cell");
     assert_eq!(snapshot.parent_of(inserted).unwrap(), row);
+    assert_eq!(applied.changes().steps().len(), 2);
 
     // The inverse removes one cell per row and validates.
     let inverse = applied.inverse().clone();

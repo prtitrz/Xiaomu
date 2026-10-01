@@ -52,6 +52,9 @@ pub(crate) fn plan_paste_slice(
     {
         return paste_table::plan_table_paste(document, selection, slice);
     }
+    if let Some(range) = selection.active_cell_range() {
+        return paste_table::plan_fill_range(document, range, slice.roots());
+    }
 
     let contains_atomic = slice.roots().iter().any(fragment_contains_atomic);
     if slice.blocks().is_empty() && !contains_atomic {

@@ -238,9 +238,8 @@ impl DocumentSession {
 
     /// Tab from the table's last cell: append one trailing row and enter it.
     ///
-    /// Core's `InsertTableRow` step reports the new row's first paragraph as
-    /// its inserted node, so the caret resolves inside the new row after the
-    /// commit — including on redo.
+    /// Core reports the actual inserted row. Runtime resolves its first
+    /// inline descendant after commit; redo restores the same target identity.
     fn append_row_and_enter(&mut self, table: NodeId) -> Result<SessionOutcome, SessionError> {
         self.history.break_group();
         self.clear_stored_marks();
@@ -249,7 +248,7 @@ impl DocumentSession {
             .with_step(TransactionStep::InsertTableRow { table, index });
         let plan = EditPlan::new(
             transaction,
-            SelectionUpdate::CaretAtLastInsertedOffset { offset: 0 },
+            SelectionUpdate::CaretAtStartOfLastInsertedSubtree,
             None,
         )
         .with_history_policy(HistoryPolicy::Isolated);

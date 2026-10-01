@@ -264,6 +264,9 @@ pub enum SelectionUpdate {
         /// UTF-8 byte offset in the last inserted inline-bearing node.
         offset: usize,
     },
+    /// Enter the first editable descendant of the last inserted subtree.
+    /// Used when Tab appends a table row; mapping still names the actual row.
+    CaretAtStartOfLastInsertedSubtree,
     /// Collapse the caret at the start of the primary edit
     /// (Backspace / Delete).
     CaretAtEditStart,

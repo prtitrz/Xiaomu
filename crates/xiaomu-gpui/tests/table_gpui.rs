@@ -360,3 +360,49 @@ fn enter_splits_within_a_cell_and_click_enters_one(cx: &mut TestAppContext) {
         "the click lands in the first cell's text, got {node:?}"
     );
 }
+
+#[gpui::test]
+fn clicking_right_cell_enters_right_cell(cx: &mut TestAppContext) {
+    let fixture = fixture();
+    let selection = caret_at(&fixture.document, fixture.first, 0);
+    let (window, session) = open_with(fixture.document, selection, cx);
+    let width = window
+        .update(cx, |_, window, _| window.viewport_size().width)
+        .unwrap();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.simulate_click(Point::new(width * 0.75, px(75.0)), Modifiers::default());
+    cx.background_executor.run_until_parked();
+    assert_eq!(
+        inline_focus(&session).0,
+        fixture.b1,
+        "a click in the right cell must not enter the left cell"
+    );
+}
+
+#[gpui::test]
+fn clicking_blank_space_in_a_short_cell_stays_in_that_cell(cx: &mut TestAppContext) {
+    use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
+    let fixture = fixture();
+    let left_cell = fixture.document.parent_of(fixture.a1).unwrap();
+    let document = Transaction::new(TransactionOrigin::UserInput)
+        .with_step(TransactionStep::InsertNode {
+            parent: left_cell,
+            index: 1,
+            kind: NodeKind::Paragraph,
+            attrs: NodeAttrs::empty(),
+            content: NodeContent::empty_inline(),
+        })
+        .apply(&fixture.document)
+        .unwrap();
+    let selection = caret_at(&document, fixture.first, 0);
+    let (window, session) = open_with(document, selection, cx);
+    let width = window
+        .update(cx, |_, window, _| window.viewport_size().width)
+        .unwrap();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    // The left cell has two paragraphs; the right cell only one. A click
+    // level with the left tail still belongs to the right cell's blank area.
+    visual.simulate_click(Point::new(width * 0.75, px(104.0)), Modifiers::default());
+    cx.background_executor.run_until_parked();
+    assert_eq!(inline_focus(&session).0, fixture.b1);
+}

@@ -216,6 +216,9 @@ pub enum ClipboardNodeContent {
     Table {
         /// The rectangle's rows, each holding exactly one fragment per cell.
         rows: Vec<Vec<ClipboardNode>>,
+        /// Attributes of each row, in the same order. Empty means legacy
+        /// clipboard rows without attributes; otherwise one entry per row.
+        row_attrs: Vec<NodeAttrs>,
     },
 }
 
@@ -242,7 +245,7 @@ impl ClipboardNodeContent {
     #[must_use]
     pub const fn as_table(&self) -> Option<&Vec<Vec<ClipboardNode>>> {
         match self {
-            Self::Table { rows } => Some(rows),
+            Self::Table { rows, .. } => Some(rows),
             _ => None,
         }
     }
@@ -384,11 +387,12 @@ impl ClipboardSlice {
                     .map(|cell| {
                         let mut cell_blocks = Vec::new();
                         flatten_blocks(std::slice::from_ref(cell), &mut cell_blocks);
-                        cell_blocks
+                        let mut parts = cell_blocks
                             .iter()
                             .map(|block| block.inline().plain_text())
-                            .collect::<Vec<_>>()
-                            .join(" ")
+                            .collect::<Vec<_>>();
+                        parts.extend(collect_image_urls(std::slice::from_ref(cell)));
+                        parts.join(" ").replace(['\t', '\r', '\n'], " ")
                     })
                     .collect::<Vec<_>>()
                     .join("\t")
@@ -520,21 +524,25 @@ fn insert_fragment(builder: &mut NodeStoreBuilder, node: &ClipboardNode) -> Resu
         ),
         // A table fragment rebuilds the canonical row wrappers: the wire
         // carries rows of cells directly, the document tree nests them.
-        ClipboardNodeContent::Table { rows } => NodeContent::children(
+        ClipboardNodeContent::Table { rows, row_attrs } => NodeContent::children({
+            if !row_attrs.is_empty() && row_attrs.len() != rows.len() {
+                return Err(xiaomu_core::Error::InvalidTableStructure);
+            }
             rows.iter()
-                .map(|cells| {
+                .enumerate()
+                .map(|(index, cells)| {
                     let row_cells = cells
                         .iter()
                         .map(|cell| insert_fragment(builder, cell))
                         .collect::<Result<Vec<_>>>()?;
                     builder.insert(
                         NodeKind::TableRow,
-                        NodeAttrs::empty(),
+                        row_attrs.get(index).cloned().unwrap_or_default(),
                         NodeContent::children(row_cells),
                     )
                 })
-                .collect::<Result<Vec<_>>>()?,
-        ),
+                .collect::<Result<Vec<_>>>()?
+        }),
         ClipboardNodeContent::Atomic => NodeContent::Atomic,
     };
     builder.insert(node.kind().clone(), node.attrs().clone(), content)
@@ -567,7 +575,7 @@ fn collect_image_urls(nodes: &[ClipboardNode]) -> Vec<String> {
             ClipboardNodeContent::Children(children) => {
                 urls.extend(collect_image_urls(children));
             }
-            ClipboardNodeContent::Table { rows } => {
+            ClipboardNodeContent::Table { rows, .. } => {
                 for row in rows {
                     urls.extend(collect_image_urls(row));
                 }

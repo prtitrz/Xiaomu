@@ -14,6 +14,8 @@
 mod atom_edit;
 mod atomic_block;
 mod caret;
+mod cell_edit;
+mod cell_range;
 mod cross_block;
 mod cross_block_atom;
 mod history;
@@ -22,6 +24,7 @@ mod intent;
 mod listener;
 mod outcome;
 mod paste;
+mod paste_fragment;
 pub(crate) mod paste_hierarchy;
 mod paste_table;
 mod resolve;
@@ -136,21 +139,8 @@ impl DocumentSession {
     /// collapsed mark toggle updates Runtime StoredMarks without a Core
     /// transaction.
     pub fn apply_intent(&mut self, intent: &EditIntent) -> Result<SessionOutcome, SessionError> {
-        // A rectangular cell range is a selection-only form: any intent
-        // other than a structured paste or a table row/column operation
-        // converges it onto a real caret in the anchor cell before planning
-        // (P5.5). Table operations map the rectangle through instead.
-        if self.selection.active_cell_range().is_some()
-            && !matches!(
-                intent,
-                EditIntent::PasteSlice { .. }
-                    | EditIntent::InsertTableRow { .. }
-                    | EditIntent::InsertTableColumn { .. }
-                    | EditIntent::DeleteTableRow { .. }
-                    | EditIntent::DeleteTableColumn { .. }
-            )
-        {
-            self.collapse_cell_range();
+        if let Some(outcome) = self.apply_cell_range_intent(intent)? {
+            return Ok(outcome);
         }
         if let EditIntent::MoveCaret {
             caret_move,

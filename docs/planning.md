@@ -4,7 +4,7 @@
 >
 > Date: 2026-09-01
 >
-> 当前里程碑：**P0 / P1 / P2 / P3 CLOSED；P4 — Inline Atom / Extension Seam IN PROGRESS，P4.1 mixed-inline coordinate contract 与 P4.2 canonical inline atom Core 层已完成。**
+> 当前里程碑（2026-10-01 复核）：**P0 / P1 / P2 / P3 CLOSED；P4 实现已合并，原生 Windows Gate 证据待补；P5.1–P5.5 已合并，P5.6 Integration Gate IN PROGRESS；P6 未启动。** CI 与原生输入法实机验收分别记录，前者不能替代后者。
 >
 > 定位：独立演进、可嵌入宿主应用的 **Rust Native Structured Rich-Text / Block Editor Engine**。首个原生前端基于 GPUI，但核心架构不绑定 GPUI。
 
@@ -783,14 +783,14 @@ TableNode
 └─ attrs
 ```
 
-第一阶段 Cell 仅允许 paragraph-like inline fragment，后续再开放 richer fragment。
+P5 已采用 `Table → TableRow → TableCell → block…` 的普通树模型，cell 至少一个 block；允许 paragraph、heading、quote、list、code、atomic block 和嵌套 table。剪贴板须完整保留合法子树及各层 attrs。列数由每行 cell 数推导，列宽仍属前端布局，不在 canonical 中冗余存储。
 
 Selection：
 
 ```text
 caret in cell
 cell range
-row / column axis selection
+row / column axis selection（后续扩展，不作为 P5 已实现能力）
 ```
 
 Tab / Shift+Tab 属于 table command。
@@ -1059,7 +1059,7 @@ Gate：固定 Unicode cross-block + visual-line matrix、exact undo/redo 与 ran
 
 ### P4 — Inline Atom / Extension Seam
 
-状态：**IN PROGRESS**
+状态：**实现已合并；原生 Windows Gate 证据待补**（审计更正见 P4 progress）。
 
 P4.1 与 P4.2 Core 层已完成：
 
@@ -1076,22 +1076,26 @@ InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom
 atom-aware ReplaceInlineText contract + InlineTextReplaced mapping + exact inverse
 ```
 
-继续完成：
+P4.3–P4.9 已实现：
 
 ```text
 atom navigation/delete/copy（Runtime / GPUI）
 renderer registry
-block renderer registry
 host capability callbacks
 extension accessibility fallback
 extension + capability-service integration fixture
+atomic node selection / image contract / asset service / baseline Markdown codec
 ```
+
+`BlockRendererRegistry` 尚未交付，不能与已实现的 `InlineAtomRendererRegistry` 混记；跨宿主 block renderer 扩展与 `LinkOpenService` 的归属/验收在 P5.6 文档收敛时明确，未完成前不得从路线中静默删除。
 
 Gate：一个 demo atom 作为 one-caret-unit 完整操作，文本/atom seam 不污染 UTF-8 `TextOffset` contract，undo/redo 与 mapping 精确，且 Core 无宿主业务类型。
 
 ### P5 — Table
 
-完成：
+状态：**P5.1–P5.5 已合并，P5.6 CURRENT**。本轮 correctness 修正不等于阶段关闭。
+
+已建立的能力：
 
 ```text
 structured table model
@@ -1101,7 +1105,7 @@ row / column operations
 cell selection
 ```
 
-Gate：表格中英文连续编辑 + undo/redo。
+Gate：表格中英文连续编辑 + undo/redo、所有行列位置映射、富 cell clipboard 无损、用户可操作的矩形选区与视觉列导航、fixture round-trip、多 editor 隔离、三平台 CI、独立 Windows 原生 IME 验收。具体未完成项以 `docs/phases/p5-table/progress.md` 为准；全部闭合前不进入 P6。
 
 ### P6 — Performance / Long Document
 

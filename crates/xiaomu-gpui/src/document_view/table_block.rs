@@ -4,11 +4,11 @@
 //! bordered cell per table cell. Cells recurse through the ordinary block
 //! renderer, so every block kind inside a cell keeps its existing
 //! presentation, caret, IME, and hit-test seams. The grid and the cell
-//! holding the selection gain a focus affordance; clicking a cell's padding
-//! resolves through the shared paint registry to that row's nearest text
-//! block, so no table-specific pointer path exists.
+//! holding the selection gain a focus affordance. Full cell bounds constrain
+//! pointer hits before the ordinary per-block caret projection, including
+//! blank space below a shorter cell's content and nested table cells.
 
-use gpui::{Context, IntoElement, ParentElement, Styled, div, px};
+use gpui::{Context, IntoElement, ParentElement, Styled, canvas, div, px};
 use xiaomu_core::document::NodeId;
 use xiaomu_runtime::session::DocumentPosition;
 
@@ -80,13 +80,27 @@ impl DocumentView {
             let mut row_element = div().flex().flex_row();
             let last_cell = cells.len().saturating_sub(1);
             for (cell_index, cell) in cells.into_iter().enumerate() {
+                let cell_registry = self.cell_registry.clone();
                 let mut cell_element = div()
+                    .relative()
                     .flex()
                     .flex_col()
                     .flex_1()
                     .min_h(px(28.0))
                     .px_2()
-                    .py_1();
+                    .py_1()
+                    .child(
+                        canvas(
+                            |_, _, _| (),
+                            move |bounds, (), _, _| {
+                                cell_registry.borrow_mut().push((cell, bounds));
+                            },
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    );
                 if highlight.contains(&cell) {
                     cell_element = cell_element.bg(gpui::rgba(0xeef4fbff));
                 }

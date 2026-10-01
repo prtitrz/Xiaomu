@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use xiaomu_core::document::{NodeId, NodeKind, XiaomuDocument};
+use xiaomu_core::document::{NodeId, XiaomuDocument};
 use xiaomu_core::mapping::{ChangeMap, MapBias, MappedPosition, StepMap};
 use xiaomu_core::selection::{InlinePoint, NodeGap, NodeSelection, TextPoint, TextSelection};
 
@@ -70,58 +70,7 @@ pub struct DocumentSelection {
     cell_range: Option<CellRange>,
 }
 
-/// A rectangular cell selection inside one table (P5.5).
-///
-/// Endpoints are cell identities, so row/column insertions never move the
-/// rectangle — it only shrinks when an endpoint cell's subtree is removed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CellRange {
-    anchor: NodeId,
-    focus: NodeId,
-}
-
-impl CellRange {
-    pub(crate) const fn new(anchor: NodeId, focus: NodeId) -> Self {
-        Self { anchor, focus }
-    }
-
-    /// Validates both endpoint cells against `document`.
-    ///
-    /// Each endpoint must exist with cell content, and both must belong to
-    /// the same table (their parent rows share the table parent).
-    pub(crate) fn validate(&self, document: &XiaomuDocument) -> Result<(), SessionError> {
-        let table_of = |cell: NodeId| -> Result<NodeId, SessionError> {
-            if !matches!(
-                document.node(cell),
-                Some(node) if matches!(node.kind(), NodeKind::TableCell)
-            ) {
-                return Err(SessionError::SelectionInvalid);
-            }
-            let row = document
-                .parent_of(cell)
-                .ok_or(SessionError::SelectionInvalid)?;
-            document
-                .parent_of(row)
-                .ok_or(SessionError::SelectionInvalid)
-        };
-        if table_of(self.anchor)? != table_of(self.focus)? {
-            return Err(SessionError::SelectionInvalid);
-        }
-        Ok(())
-    }
-
-    /// The cell where the range gesture started.
-    #[must_use]
-    pub const fn anchor(self) -> NodeId {
-        self.anchor
-    }
-
-    /// The cell where the range gesture currently ends.
-    #[must_use]
-    pub const fn focus(self) -> NodeId {
-        self.focus
-    }
-}
+pub use super::cell_range::CellRange;
 
 impl DocumentSelection {
     /// Creates a selection from two endpoints without validating.
@@ -189,10 +138,10 @@ impl DocumentSelection {
         self.cell_range
     }
 
-    /// Returns whether both endpoints coincide.
+    /// Returns whether this is a coincident endpoint selection, not a cell range.
     #[must_use]
     pub fn is_collapsed(&self) -> bool {
-        self.anchor == self.focus
+        self.cell_range.is_none() && self.anchor == self.focus
     }
 
     /// Returns the single-block Core selection when both endpoints are
@@ -217,6 +166,9 @@ impl DocumentSelection {
     /// cross-block code paths own those selections.
     #[must_use]
     pub fn as_same_node_inline(&self) -> Option<(InlinePoint, InlinePoint)> {
+        if self.cell_range.is_some() {
+            return None;
+        }
         match (self.anchor, self.focus) {
             (DocumentPosition::Inline(anchor), DocumentPosition::Inline(focus))
                 if anchor.node_id() == focus.node_id() =>
@@ -231,7 +183,8 @@ impl DocumentSelection {
     /// node selection.
     #[must_use]
     pub fn as_atomic_node(&self) -> Option<NodeId> {
-        if self.anchor == self.focus
+        if self.cell_range.is_none()
+            && self.anchor == self.focus
             && let DocumentPosition::Atomic(node) = self.anchor
         {
             return Some(node);
