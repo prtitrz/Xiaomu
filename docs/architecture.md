@@ -661,7 +661,11 @@ Cell 选区与 clipboard（P5.5）：`DocumentSelection` 携带 `Option<CellRang
 
 Clipboard 捕获完整合法子树（含 quote/list、atomic、嵌套 table、marks、inline atoms）及 table/row/cell/block attrs。`Table { rows, row_attrs }` 的空 row_attrs 表示兼容旧载荷；非空行属性写 wire v6，普通表仍 v5。匹配 range paste 替换 cell 内容与 attrs、保留目标 table/row attrs；1×1 粘入 cell 时在 caret 所属直接 child block 后追加；兄弟表插入完整重建所有层级 attrs。非表片段可填充矩形各 cell 内容；尺寸不符/未定义落点 fail closed。hidden validated stages 统一提交一次 history，任何失败不发布中间文档。Table Markdown 导出仍 fail closed。回归见 `p5_cell_range_clipboard.rs`、`p5_review_regressions.rs`、`p5_rich_table_clipboard.rs`。
 
-GPUI 表格点击先用 cell 全边界限制目标（含 padding、短 cell 空白与嵌套 cell），再按 block 的二维 bounds 命中并投影 caret。当前矩形选区只有 Runtime API + 高亮，没有完整用户入口；Up/Down 仍按文档序，尚非视觉列导航。这两项及 fixture、多 editor、原生 IME 证据、三平台 CI 是 P5.6 阻断项，不能从单个自动化用例推断阶段关闭。
+GPUI 表格点击先用 cell 全边界限制目标（含 padding、短 cell 空白与嵌套 cell），再按 block 的二维 bounds 命中并投影 caret。Ctrl/Cmd+Shift+Space 选格、Shift+方向键扩展；拖动 cell 左上角选择柄也可建立矩形。普通方向键/Escape 回到 focus cell 首个可导航后代。矩形由一个前端空 `ParagraphView` 代理接收原生输入：不增加 canonical 节点，复用现有 UTF-16/IME 投影，预编辑/取消不修改 snapshot；commit 交给 Runtime，一次历史替换矩形。替换及 undo/redo 后重新建立 child/focus，支持继续输入。代理与 document/history 都按 editor 隔离。
+
+Up/Down 保留窗口坐标 desired-x：同格视觉行 → 同列相邻行 → 外层 cell / 文档。进入不等高行时按完整 cell bounds 选列；离开嵌套表先在外层 cell 查找，不横跳同一行的另一列。atomic-only cell 没有文本视觉行，Up/Down 跳过而 Tab 可访问。表格列 `min-width:0` 约束长文本，使普通 ParagraphView 的 wrapped layout 生效。`table_gpui.rs` 覆盖空格、不等高/换行/嵌套 cell、Unicode、鼠标、选区输入及原子格导航。
+
+Harness writer 现统一写 fixture v5：`table` / `row` / `cell` 与 `end` 容器栈、各层 scalar attrs、rich blocks、atoms 和嵌套 table。无冗余行列数，形状由 Core 验证；reader 向后兼容 v2/v3/v4，但拒绝低版本信封的 table 标签。未支持的 node kind 或 list/object attr 返回错误，不能静默丢失。默认 fixture 已包含 Unicode、mention、引用和嵌套表；自动化 save/load 用 canonical semantics 比较。原生 IME 与三平台 CI 仍须独立验收，不从这些自动化用例推断阶段关闭。
 
 ## 仓库级约束
 

@@ -217,9 +217,10 @@ impl DocumentSession {
     ///
     /// Cells usually hold paragraphs directly, but list and quote nesting is
     /// legal, so the walk descends through containers to the first inline
-    /// content. A cell without inline content has no caret target.
+    /// content, falling back to the first atomic block for atomic-only cells.
     fn leading_caret(&self, node: NodeId) -> Option<DocumentPosition> {
         let mut queue = vec![node];
+        let mut atomic = None;
         while let Some(current) = queue.pop() {
             match self.document.node(current)?.content() {
                 NodeContent::Inline(_) => {
@@ -228,12 +229,15 @@ impl DocumentSession {
                 NodeContent::Children(children) => {
                     queue.extend(children.iter().rev().copied());
                 }
+                NodeContent::Atomic => {
+                    atomic.get_or_insert(DocumentPosition::Atomic(current));
+                }
                 // Atoms and other payloads carry no caret-enterable inline
                 // content; `NodeContent` is non-exhaustive.
                 _ => {}
             }
         }
-        None
+        atomic
     }
 
     /// Tab from the table's last cell: append one trailing row and enter it.

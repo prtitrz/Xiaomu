@@ -1087,7 +1087,7 @@ extension + capability-service integration fixture
 atomic node selection / image contract / asset service / baseline Markdown codec
 ```
 
-`BlockRendererRegistry` 尚未交付，不能与已实现的 `InlineAtomRendererRegistry` 混记；跨宿主 block renderer 扩展与 `LinkOpenService` 的归属/验收在 P5.6 文档收敛时明确，未完成前不得从路线中静默删除。
+`BlockRendererRegistry` 尚未交付，不能与已实现的 `InlineAtomRendererRegistry` 混记。2026-10-01 明确将通用 block renderer 扩展与 `LinkOpenService` 列入 **P7 Host Extension Contracts**（见 P7 验收项），不计作 P4/P5 已交付。现有内置 atomic renderer 与 image URL fallback 不等价于通用宿主接口。
 
 Gate：一个 demo atom 作为 one-caret-unit 完整操作，文本/atom seam 不污染 UTF-8 `TextOffset` contract，undo/redo 与 mapping 精确，且 Core 无宿主业务类型。
 
@@ -1130,7 +1130,10 @@ frontend compatibility policy
 examples
 docs
 license / release automation
+Host Extension Contracts: BlockRendererRegistry / LinkOpenService
 ```
+
+P7 Host Extension Contracts 由 GPUI/host 层交付，不下沉 Core/Runtime：`BlockRendererRegistry` 按稳定 kind key 注册并对未知 kind 提供无损 fallback，验收自定义 atomic block 渲染、a11y 与多 editor 隔离；`LinkOpenService` 由宿主显式注入，验收文本 link 与 image URL fallback 调用、未注入时不私自联网/启动应用、URL 保留及多 editor 隔离。规划入口保留到该切片验收完成。
 
 ---
 

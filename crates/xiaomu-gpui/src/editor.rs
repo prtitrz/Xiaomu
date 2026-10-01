@@ -25,7 +25,11 @@ use crate::block_view::{
     SelectRight, SelectUp, SharedSession, ShiftTabIndent, TabIndent, ToggleBold, ToggleCode,
     ToggleItalic, ToggleStrike, ToggleUnderline, Undo, Up,
 };
-use crate::document_view::{DocumentView, actions::HardBreak};
+use crate::document_view::{
+    DocumentView,
+    actions::HardBreak,
+    cell_selection::{EscapeCellRange, SelectCell},
+};
 use crate::image_block::SharedImageAssetService;
 use crate::inline_atom::InlineAtomRendererRegistry;
 
@@ -138,6 +142,9 @@ pub fn bind_default_editor_keys(cx: &mut App) {
         KeyBinding::new("shift-right", SelectRight, None),
         KeyBinding::new("shift-up", SelectUp, None),
         KeyBinding::new("shift-down", SelectDown, None),
+        KeyBinding::new("ctrl-shift-space", SelectCell, Some("XiaomuDocument")),
+        KeyBinding::new("cmd-shift-space", SelectCell, Some("XiaomuDocument")),
+        KeyBinding::new("escape", EscapeCellRange, Some("XiaomuDocument")),
         KeyBinding::new("home", Home, None),
         KeyBinding::new("end", End, None),
         KeyBinding::new("shift-home", SelectHome, None),

@@ -13,6 +13,9 @@ use xiaomu_gpui::document_view::DocumentView;
 use xiaomu_gpui::editor::{EditorHooks, EditorInstance, bind_default_editor_keys};
 use xiaomu_runtime::session::{DocumentPosition, DocumentSelection};
 
+#[path = "table/vertical.rs"]
+mod vertical;
+
 fn offset_of(
     document: &XiaomuDocument,
     node: NodeId,
@@ -36,9 +39,11 @@ fn paragraph(builder: &mut NodeStoreBuilder, text: &str) -> NodeId {
         .insert(
             NodeKind::Paragraph,
             NodeAttrs::empty(),
-            NodeContent::Inline(
-                InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()]).unwrap(),
-            ),
+            NodeContent::Inline(if text.is_empty() {
+                InlineContent::empty()
+            } else {
+                InlineContent::new([TextRun::new(text, MarkSet::empty()).unwrap()]).unwrap()
+            }),
         )
         .unwrap()
 }
@@ -270,18 +275,11 @@ fn up_down_crosses_text_table_text(cx: &mut TestAppContext) {
         cx.background_executor.run_until_parked();
     };
 
-    // Up/Down step one text block in document order (cells participate as
-    // ordinary text blocks): 后 → b1 → a1 → 前, and back down.
+    // Up/Down preserves the visual column: 后 → a1 → 前 and back.
+    // A same-row neighbor belongs to Tab/Left/Right, not vertical movement.
     step(&window, cx, "up");
     let (node, _) = inline_focus(&session);
-    assert_eq!(node, fixture.b1, "up enters the table's last cell");
-
-    step(&window, cx, "up");
-    let (node, _) = inline_focus(&session);
-    assert_eq!(
-        node, fixture.a1,
-        "up walks the row's cells in document order"
-    );
+    assert_eq!(node, fixture.a1, "up enters the visually aligned cell");
 
     step(&window, cx, "up");
     focus_is(
@@ -297,10 +295,6 @@ fn up_down_crosses_text_table_text(cx: &mut TestAppContext) {
     step(&window, cx, "down");
     let (node, _) = inline_focus(&session);
     assert_eq!(node, fixture.a1, "down re-enters the table");
-
-    step(&window, cx, "down");
-    let (node, _) = inline_focus(&session);
-    assert_eq!(node, fixture.b1);
 
     step(&window, cx, "down");
     focus_is(
@@ -405,4 +399,95 @@ fn clicking_blank_space_in_a_short_cell_stays_in_that_cell(cx: &mut TestAppConte
     visual.simulate_click(Point::new(width * 0.75, px(104.0)), Modifiers::default());
     cx.background_executor.run_until_parked();
     assert_eq!(inline_focus(&session).0, fixture.b1);
+}
+
+fn cell_text(document: &XiaomuDocument, cell: NodeId) -> String {
+    document
+        .node(cell)
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap()
+        .iter()
+        .filter_map(|id| document.node(*id).unwrap().content().as_inline())
+        .flat_map(|inline| inline.runs())
+        .map(|run| run.text().as_str())
+        .collect()
+}
+
+#[gpui::test]
+fn rectangular_keyboard_entry_typing_and_focus_continue_after_replacement(cx: &mut TestAppContext) {
+    let fixture = fixture();
+    let left = fixture.document.parent_of(fixture.a1).unwrap();
+    let right = fixture.document.parent_of(fixture.b1).unwrap();
+    let before = fixture.document.clone();
+    let selection = caret_at(&fixture.document, fixture.a1, 1);
+    let (window, session) = open_with(fixture.document, selection, cx);
+    cx.simulate_keystrokes(window.into(), "ctrl-shift-space shift-right");
+    let range = session.borrow().selection();
+    assert_eq!(range.active_cell_range().unwrap().anchor(), left);
+    assert_eq!(range.active_cell_range().unwrap().focus(), right);
+    assert_eq!(session.borrow().history_depths(), (0, 0));
+    cx.simulate_input(window.into(), "XYZ");
+    assert_eq!(cell_text(session.borrow().document(), left), "XYZ");
+    assert_eq!(cell_text(session.borrow().document(), right), "");
+    // Replacement is isolated; subsequent typing is a separate coalesced unit.
+    cx.simulate_keystrokes(window.into(), "ctrl-z ctrl-z");
+    assert_eq!(session.borrow().document().store(), before.store());
+    assert_eq!(session.borrow().selection(), range);
+    cx.simulate_keystrokes(window.into(), "ctrl-y ctrl-y");
+    cx.simulate_input(window.into(), "Q");
+    assert_eq!(cell_text(session.borrow().document(), left), "XYZQ");
+}
+
+#[gpui::test]
+fn rectangular_cut_paste_and_escape_use_the_native_action_route(cx: &mut TestAppContext) {
+    let fixture = fixture();
+    let before = fixture.document.clone();
+    let left = fixture.document.parent_of(fixture.a1).unwrap();
+    let right = fixture.document.parent_of(fixture.b1).unwrap();
+    let selection = caret_at(&fixture.document, fixture.a1, 0);
+    let (window, session) = open_with(fixture.document, selection, cx);
+    cx.simulate_keystrokes(window.into(), "ctrl-shift-space shift-right ctrl-x");
+    assert_eq!(cell_text(session.borrow().document(), left), "");
+    assert_eq!(cell_text(session.borrow().document(), right), "");
+    assert_eq!(session.borrow().history_depths(), (1, 0));
+    cx.simulate_keystrokes(window.into(), "ctrl-v");
+    assert_eq!(cell_text(session.borrow().document(), left), "a1");
+    assert_eq!(cell_text(session.borrow().document(), right), "b1");
+    cx.simulate_keystrokes(window.into(), "ctrl-z ctrl-z escape");
+    assert_eq!(session.borrow().document().store(), before.store());
+    assert!(session.borrow().selection().active_cell_range().is_none());
+    assert_eq!(inline_focus(&session).0, fixture.b1);
+}
+
+#[gpui::test]
+fn cell_handle_drag_creates_a_rectangle_without_text_selection(cx: &mut TestAppContext) {
+    let fixture = fixture();
+    let left = fixture.document.parent_of(fixture.a1).unwrap();
+    let right = fixture.document.parent_of(fixture.b1).unwrap();
+    let selection = caret_at(&fixture.document, fixture.first, 0);
+    let (window, session) = open_with(fixture.document, selection, cx);
+    let width = window
+        .update(cx, |_, window, _| window.viewport_size().width)
+        .unwrap();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.simulate_mouse_down(
+        Point::new(px(20.0), px(59.0)),
+        gpui::MouseButton::Left,
+        Modifiers::default(),
+    );
+    visual.simulate_event(gpui::MouseMoveEvent {
+        position: Point::new(width * 0.75, px(75.0)),
+        pressed_button: Some(gpui::MouseButton::Left),
+        modifiers: Modifiers::default(),
+    });
+    visual.simulate_mouse_up(
+        Point::new(width * 0.75, px(75.0)),
+        gpui::MouseButton::Left,
+        Modifiers::default(),
+    );
+    let range = session.borrow().selection().active_cell_range().unwrap();
+    assert_eq!((range.anchor(), range.focus()), (left, right));
+    assert!(session.borrow().text_selection().is_none());
 }

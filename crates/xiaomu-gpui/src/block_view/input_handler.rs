@@ -46,6 +46,12 @@ impl EntityInputHandler for ParagraphView {
             });
         }
 
+        if self.is_range_input() {
+            return Some(UTF16Selection {
+                range: 0..0,
+                reversed: false,
+            });
+        }
         let selection = self.session.borrow().text_selection()?;
         let anchor = selection.anchor().offset().as_usize();
         let focus = selection.focus().offset().as_usize();
@@ -87,7 +93,7 @@ impl EntityInputHandler for ParagraphView {
             return;
         }
 
-        if let Some(range_utf16) = replacement_range {
+        if let Some(range_utf16) = replacement_range.filter(|_| !self.is_range_input()) {
             // Select the explicit range with selection-only intents (no
             // history entries), then insert over it as one transaction.
             let full_text = self.canonical_text();

@@ -8,7 +8,10 @@
 //! pointer hits before the ordinary per-block caret projection, including
 //! blank space below a shorter cell's content and nested table cells.
 
-use gpui::{Context, IntoElement, ParentElement, Styled, canvas, div, px};
+use gpui::{
+    Context, InteractiveElement as _, IntoElement, MouseButton, ParentElement, Styled, canvas, div,
+    px,
+};
 use xiaomu_core::document::NodeId;
 use xiaomu_runtime::session::DocumentPosition;
 
@@ -64,6 +67,8 @@ impl DocumentView {
         let mut grid = div()
             .flex()
             .flex_col()
+            .w_full()
+            .min_w_0()
             .border_1()
             .border_color(border)
             .my_3();
@@ -77,7 +82,7 @@ impl DocumentView {
                     .and_then(|node| node.content().as_children().map(<[NodeId]>::to_vec))
                     .unwrap_or_default()
             };
-            let mut row_element = div().flex().flex_row();
+            let mut row_element = div().flex().flex_row().w_full().min_w_0();
             let last_cell = cells.len().saturating_sub(1);
             for (cell_index, cell) in cells.into_iter().enumerate() {
                 let cell_registry = self.cell_registry.clone();
@@ -86,6 +91,7 @@ impl DocumentView {
                     .flex()
                     .flex_col()
                     .flex_1()
+                    .min_w_0()
                     .min_h(px(28.0))
                     .px_2()
                     .py_1()
@@ -121,6 +127,33 @@ impl DocumentView {
                     index + row_index + cell_index,
                     cx,
                 ));
+                if let Some((anchor, input)) = &self.range_input
+                    && *anchor == cell
+                {
+                    let mut proxy = div().absolute().top_0().left_0().w_full().px_2().py_1();
+                    if input.read(cx).is_composing() {
+                        proxy = proxy.bg(gpui::white());
+                    }
+                    cell_element = cell_element.child(proxy.child(input.clone()));
+                }
+                cell_element = cell_element.child(
+                    div()
+                        .id(gpui::SharedString::from(format!("cell-select-{cell:?}")))
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .w(px(7.0))
+                        .h(px(7.0))
+                        .bg(gpui::rgba(0x718096ff))
+                        .cursor(gpui::CursorStyle::Crosshair)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                                cx.stop_propagation();
+                                this.begin_cell_range(cell, event.modifiers.shift, window, cx);
+                            }),
+                        ),
+                );
                 row_element = row_element.child(cell_element);
             }
             grid = grid.child(row_element);

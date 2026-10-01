@@ -15,10 +15,12 @@
 
 pub(crate) mod actions;
 pub(crate) mod cache_key;
+pub(crate) mod cell_selection;
 pub(crate) mod markers;
 pub(crate) mod mouse;
 pub(crate) mod navigation;
 mod table_block;
+mod vertical_geometry;
 mod visual_navigation;
 
 use std::cell::{Cell, RefCell};
@@ -55,6 +57,9 @@ pub struct DocumentView {
     registry: BlockBoundsRegistry,
     /// Full cell bounds, including padding and space below shorter content.
     cell_registry: BlockBoundsRegistry,
+    cell_drag_anchor: Option<NodeId>,
+    range_input: Option<(NodeId, Entity<ParagraphView>)>,
+    focus_handle: Option<gpui::FocusHandle>,
     /// Shared viewport scroll state. Focused blocks use it to keep the caret
     /// visible without leaking viewport geometry into Core or runtime.
     scroll_handle: ScrollHandle,
@@ -89,6 +94,9 @@ impl DocumentView {
             epoch: Rc::new(Cell::new(0)),
             registry: Rc::new(RefCell::new(Vec::new())),
             cell_registry: Rc::new(RefCell::new(Vec::new())),
+            cell_drag_anchor: None,
+            range_input: None,
+            focus_handle: None,
             scroll_handle: ScrollHandle::new(),
             children: Vec::new(),
             is_dragging: false,
@@ -412,6 +420,8 @@ impl DocumentView {
     /// Syncs child entities to the current snapshot's block list, dropping
     /// views whose nodes no longer exist.
     fn sync_children(&mut self, cx: &mut Context<Self>) {
+        self.focus_handle.get_or_insert_with(|| cx.focus_handle());
+        self.sync_range_input(cx);
         let nodes: Vec<NodeId> = {
             let session = self.session.borrow();
             navigation::text_blocks(session.document())
@@ -561,8 +571,18 @@ impl DocumentView {
 }
 
 impl Render for DocumentView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let restore_focus = self.range_input_is_focused(window, cx)
+            && self
+                .session
+                .borrow()
+                .selection()
+                .active_cell_range()
+                .is_none();
         self.sync_children(cx);
+        if restore_focus {
+            self.route_focus(window, cx);
+        }
 
         {
             let document = self.session.borrow().document().clone();
@@ -579,6 +599,7 @@ impl Render for DocumentView {
 
         div()
             .key_context("XiaomuDocument")
+            .track_focus(self.focus_handle.as_ref().expect("synced focus handle"))
             .size_full()
             .bg(gpui::white())
             .p_4()
@@ -604,6 +625,8 @@ impl Render for DocumentView {
             .on_action(cx.listener(Self::select_home))
             .on_action(cx.listener(Self::select_end))
             .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::select_cell))
+            .on_action(cx.listener(Self::escape_cell_range))
             .on_action(cx.listener(Self::enter))
             .on_action(cx.listener(Self::hard_break))
             .on_action(cx.listener(Self::tab_indent))

@@ -59,17 +59,17 @@ P5.6 Integration Gate / Closeout  CURRENT
 
 ## P5.6 Integration Gate / P5 Closeout — PENDING
 
-- [ ] GPUI 矩形选区的鼠标/键盘入口（目前仅 Runtime API + 绘制投影），覆盖 native focus、输入替换、IME、cut/paste/undo
-- [ ] Up/Down 按视觉列移动，覆盖不同行高、wrapped cell、嵌套表及 text↔table 边界；现有 row-major 用例不能作为该 Gate
-- [ ] realistic table fixture（fixture v5）
-- [ ] Unicode + cell + atom matrix
-- [ ] multi-editor isolation
+- [x] GPUI 矩形入口：Ctrl/Cmd+Shift+Space、Shift+方向键、cell 选择柄拖动；原生输入代理与焦点恢复；自动化 cut/paste/typing/IME cancel/commit/undo
+- [x] Up/Down 按视觉列移动，覆盖不同行高、wrapped cell、空格、嵌套表及 text↔table 边界；修复长内容撑开列宽，旧 row-major 断言已替换
+- [x] realistic table fixture（fixture v5；rich/nested table、各层 scalar attrs、旧版本读兼容、非法表 fail closed、adapter save/load）
+- [x] Unicode + cell + atom matrix（rich clipboard、同锚点 atoms、CJK/emoji/combining/ZWJ、换行及精确 undo/redo）
+- [x] multi-editor isolation（独立 window/session/range proxy、输入/clipboard/undo 不改变另一 editor）
 - [ ] architecture / planning / progress final sync
 - [ ] Windows 原生实机 Gate（单独记录 commit、Windows/输入法版本、操作者、步骤/结果；涵盖 P4 遗留 atom/atomic + P5 表格输入法矩阵，不以 TestAppContext 或 windows-latest 代替）
 - [ ] final three-platform `CI Success`
-- [ ] P4 遗留 `BlockRendererRegistry` / `LinkOpenService` 明确交付阶段与验收，勿与已交付 inline registry 混记
+- [x] P4 遗留 `BlockRendererRegistry` / `LinkOpenService` 列入 P7 Host Extension Contracts，具体归属与验收见 planning P7；不冒充 P4/P5 已交付
 
-## 2026-10-01 Review 修正（本地工作分支，未推送）
+## 2026-10-01 Review 修正（commit `16f9d36`）
 
 - [x] 右侧同高 cell 点击不再误入左侧；短 cell 空白命中限制在该 cell 内
 - [x] Cut/Delete/Backspace 清空全部选中 cell、保留表形状/身份/attrs，exact undo/redo；输入替换为一次独立历史记录

@@ -297,7 +297,9 @@ impl Element for ParagraphElement {
 
         let node_id = self.view.read(cx).node();
         let registry = self.view.read(cx).bounds_registry.clone();
-        registry.borrow_mut().push((node_id, bounds));
+        if !self.view.read(cx).is_range_input() {
+            registry.borrow_mut().push((node_id, bounds));
+        }
 
         self.view.update(cx, |view, _| {
             view.last_layout = Some(layout);

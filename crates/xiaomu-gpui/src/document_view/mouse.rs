@@ -34,6 +34,7 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.cell_drag_anchor = None;
         self.is_dragging = true;
         if let Some(hit) = self.hit_test(event.position, cx) {
             #[cfg(debug_assertions)]
@@ -101,6 +102,12 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(anchor) = self.cell_drag_anchor {
+            if let Some(cell) = self.cell_at_position(event.position) {
+                self.install_cell_range(anchor, cell, window, cx);
+            }
+            return;
+        }
         if !self.is_dragging {
             return;
         }
@@ -111,6 +118,7 @@ impl DocumentView {
 
     pub(crate) fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.is_dragging = false;
+        self.cell_drag_anchor = None;
     }
 
     /// Maps a window-space point to a validated caret point via the paint
@@ -126,13 +134,7 @@ impl DocumentView {
     fn hit_test(&self, position: Point<Pixels>, cx: &App) -> Option<MouseHit> {
         // Parent cells publish before their descendants, so the last
         // containing cell is the innermost one for a nested table hit.
-        let hit_cell = self
-            .cell_registry
-            .borrow()
-            .iter()
-            .rev()
-            .find(|(_, bounds)| bounds.contains(&position))
-            .map(|(cell, _)| *cell);
+        let hit_cell = self.cell_at_position(position);
         let session = self.session.borrow();
         let registry = self.registry.borrow();
         let mut nearest: Option<(NodeId, (Pixels, Pixels))> = None;

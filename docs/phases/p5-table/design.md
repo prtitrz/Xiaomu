@@ -58,7 +58,7 @@ map_through：矩形随 cell 身份走——插入不动矩形；端点子树被
 矩形选区不与 text selection 混存：range 激活时 text 端点停靠在 anchor cell 行缝；
   Delete/Backspace/Cut 清空整个矩形（每 cell 留空 Paragraph、保留 cell 身份/attrs）；
   typing/plain-text paste/IME commit 清空矩形并仅在 anchor cell 写入文本，caret 随输入；
-  导航才收敛到 anchor cell 首个 inline 后代；表结构 op 映射矩形；
+  Runtime Tab 从 anchor 定位相邻格；GPUI 普通方向键/Escape 退出到 focus cell 首个可导航后代；表结构 op 映射矩形；
   未定义的格式/结构内容命令 fail closed，不静默改第一个 cell
 ```
 
@@ -72,7 +72,7 @@ caret 在 cell 内 → MoveToNextCell：caret 移到下一 cell 首段的 (0, or
   InsertTable 同理：整行构造一次成型，列数取自表首行；step map 报告实际新行，
   Runtime 解析该子树首个 inline 后代作为 caret 目标），单 isolated history entry，redo 恢复
   同一批 node id
-Atomic 焦点（cell 内 HR/Image）同样导航；Gap 焦点不导航
+Atomic 焦点（cell 内 HR/Image）同样导航；atomic-only 目标格落在首个 atomic 节点；普通 Gap 焦点不导航
 Shift+Tab 反向；第一个 cell 上 no-op
 GPUI keybinding 上下文优先级：table cell > list item（Tab 缩进）> paragraph（Tab 变列表）
 ```
@@ -142,7 +142,13 @@ TableBlockPresentation：
   caret / selection / IME：复用普通块；hit-test 必须区分同高度的不同列
   表格级 hit-test：点击 cell 空白 → caret 到该 cell 首段；点击既有块 → 既有路径
 keyboard：Tab / Shift+Tab action 在 cell 上下文注册；上下文判定依据 focus 所在块的祖先链
-P5.6 待闭合：矩形选区用户入口及 native focus/IME；Up/Down 保持视觉列（当前仍按文档序）
+Ctrl/Cmd+Shift+Space 选中当前格；Shift+方向键扩展矩形；普通方向键/Escape 退出矩形
+格左上角选择柄可拖动矩形，Shift+点击选择柄扩展；外层矩形命中嵌套格时归一到外层 cell
+矩形使用前端空 ParagraphView 输入代理（不创建 canonical 假节点），复用 UTF-16/IME 投影
+  预编辑/取消不改文档，commit 经 Runtime 一次事务替换矩形，撤销恢复矩形并重新聚焦代理
+Up/Down 保持窗口坐标 desired-x，优先同格视觉行，再同列相邻行，最后离开表格
+  嵌套表先回到所属外层 cell；atomic-only 格没有文字视觉行，Up/Down 跳过、Tab 可访问
+等宽列必须 min-width:0，避免内容固有宽度把列撑开；wrapped layout 仍属于普通块
 accessibility：Table/TableRow/TableCell 投影为对应 role，cell 内容递归投影
 ```
 
@@ -150,9 +156,10 @@ accessibility：Table/TableRow/TableCell 投影为对应 role，cell 内容递�
 
 ```text
 harness fixture v5：table 块行编码
-  table\t<rows>\t<cols> 行 + end 包裹 row/cell 容器（复用 quote/ul 的 end 栈模型）
-  cell 作为容器帧（新 Frame::Cell），cell 内沿用 p/code/atom/img 行
-  v4 及以下读兼容；Table 在 v4 写路径仍 fail closed
+  table / row / cell 标签 + end（复用 quote/ul 的容器栈；不冗余存储 rows/cols）
+  各层可带 @ attrs，cell 内沿用 p/code/atom/img/quote/list/table 行
+  reader 接受 v2/v3/v4/v5；低版本信封携带 table 标签 fail closed；writer 统一写 v5
+  列数一致、非空表/行/cell 等仍由 Core 最终验证；scalar attrs 无损，list/object attrs 明确拒绝保存
 markdown codec：不变（Table 导出 fail closed，见 §4）
 ```
 

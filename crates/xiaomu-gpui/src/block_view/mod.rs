@@ -208,6 +208,9 @@ pub(crate) enum SelectionProjection {
 pub struct ParagraphView {
     pub(super) session: SharedSession,
     node: NodeId,
+    /// A frontend-only empty input surface anchored to a rectangular
+    /// selection. Its offsets never identify canonical cell content.
+    range_input: bool,
     focus_handle: FocusHandle,
     pub(super) last_layout: Option<BlockTextLayout>,
     pub(super) last_bounds: Option<Bounds<Pixels>>,
@@ -238,6 +241,7 @@ impl ParagraphView {
         Self {
             session,
             node,
+            range_input: false,
             focus_handle,
             last_layout: None,
             last_bounds: None,
@@ -250,6 +254,23 @@ impl ParagraphView {
             composition: None,
             focus_out_subscription: None,
         }
+    }
+
+    /// Reuses the ordinary native input/IME pipeline for a cell rectangle.
+    /// The cell identity is only a layout anchor; no document node is added.
+    pub(crate) fn for_cell_range(
+        session: SharedSession,
+        epoch: Rc<std::cell::Cell<u64>>,
+        cell: NodeId,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut view = Self::new(session, epoch, Rc::new(RefCell::new(Vec::new())), cell, cx);
+        view.range_input = true;
+        view
+    }
+
+    pub(crate) const fn is_range_input(&self) -> bool {
+        self.range_input
     }
 
     /// Attaches the owning document viewport's scroll handle.
@@ -290,6 +311,15 @@ impl ParagraphView {
     }
 
     pub(crate) fn inline(&self) -> Option<InlineContent> {
+        if self.range_input {
+            return self
+                .session
+                .borrow()
+                .selection()
+                .active_cell_range()
+                .filter(|range| range.anchor() == self.node)
+                .map(|_| InlineContent::empty());
+        }
         self.session
             .borrow()
             .document()
@@ -314,6 +344,13 @@ impl ParagraphView {
 
     /// Ordered text range of the session selection when it is single-node.
     pub(crate) fn ordered_range(&self) -> Option<xiaomu_core::text::TextRange> {
+        if self.range_input && self.inline().is_some() {
+            return xiaomu_core::text::TextRange::new(
+                xiaomu_core::text::TextOffset::ZERO,
+                xiaomu_core::text::TextOffset::ZERO,
+            )
+            .ok();
+        }
         self.session
             .borrow()
             .text_selection()

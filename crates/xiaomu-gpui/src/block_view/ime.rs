@@ -79,7 +79,7 @@ impl ParagraphView {
             if new_text.is_empty() {
                 return;
             }
-            let (start, end) = match range_utf16 {
+            let (start, end) = match range_utf16.filter(|_| !self.is_range_input()) {
                 Some(range) => (
                     utf16::utf8_offset(&canonical, range.start),
                     utf16::utf8_offset(&canonical, range.end),
