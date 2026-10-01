@@ -163,7 +163,7 @@ P4.1 引入 `InlinePoint` 作为 mixed-inline canonical coordinate seam：
 InlinePoint(node_id, text_offset, atom_index, affinity)
 ```
 
-`text_offset` 继续严格表示 canonical text 的 UTF-8 byte offset；inline atom 不占 fake byte，也不使用 U+FFFC/private-use sentinel。若同一 text boundary 上未来存在 N 个 atom，则 `atom_index = 0..=N` 表达 N+1 个唯一 caret gap；`CursorAffinity` 仍只处理 visual ambiguity，不承担 canonical atom order。当前文档尚未建立 atom placement，所以 pure-text path 只允许 `atom_index = 0`，非零 ordinal 返回 typed failure。`TextPoint ↔ InlinePoint` 在 ordinal 0 时精确兼容。
+`text_offset` 继续严格表示 canonical text 的 UTF-8 byte offset；inline atom 不占 fake byte，也不使用 U+FFFC/private-use sentinel。同一 text boundary 上的 N 个 atom 由 `atom_index = 0..=N` 表达 N+1 个唯一 caret gap；`CursorAffinity` 仍只处理 visual ambiguity，不承担 canonical atom order。P4.2 已建立 atom placement 与非零 ordinal 的验证，P4.3 起 Runtime editing path 消费完整 mixed-inline coordinate。纯文本路径使用 ordinal 0；`TextPoint ↔ InlinePoint` 在 ordinal 0 时精确兼容。
 
 `NodeGap` 表示 parent child list 的结构边界位置。`TextSelection` 保存 anchor / focus；Core 语义仍要求两端在同一个 inline node。跨 block selection 位于 Runtime `DocumentSelection`。
 
@@ -537,7 +537,7 @@ GPUI 已绑定 Left / Right / visual Home / End / Up / Down、Shift visual selec
 
 普通 rich-text `Enter` 继续结构 `SplitBlock`，`Shift+Enter` 插入 canonical LF HardBreak。CodeBlock 的 Enter / Shift+Enter 都插入 LF；Tab 插入四个可见空格，并绕开 list conversion / list indent，Shift-Tab 当前只保证不触发 list structural command。
 
-Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 Xiaomu v2 structured metadata。外部应用按普通文本消费；晓木 Paste 优先验证 structured metadata，metadata 缺失、过期或非法时自动走 `PasteText` plain-text fallback。普通 rich-text plain paste 当前把 line break 折叠为空格；CodeBlock plain paste 保留多行并规范化为 LF。若剪贴板带有效 Xiaomu structured metadata但目标是 CodeBlock，frontend 主动使用 `ClipboardSlice::plain_text` 而不重建 rich structure，使代码块保持 plain-code destination semantics。structured paste 与 plain-text paste 都是显式 history boundary；平台 adapter 只负责 transport，不进入 Core 类型系统。
+Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 versioned Xiaomu structured metadata：普通片段使用 v4，含 table 使用 v5，含 table row attrs 使用 v6。外部应用按普通文本消费；晓木 Paste 优先验证 structured metadata，metadata 缺失、过期或非法时自动走 `PasteText` plain-text fallback。普通 rich-text plain paste 当前把 line break 折叠为空格；CodeBlock plain paste 保留多行并规范化为 LF。若剪贴板带有效 Xiaomu structured metadata 但目标是 CodeBlock，frontend 主动使用 `ClipboardSlice::plain_text` 而不重建 rich structure，使代码块保持 plain-code destination semantics。structured paste 与 plain-text paste 都是显式 history boundary；平台 adapter 只负责 transport，不进入 Core 类型系统。
 
 ### Host hooks / reusable editor instance
 
@@ -547,7 +547,7 @@ P3.6 引入可复用 `EditorInstance`，每个 instance 独立持有 session/his
 
 `multi_editor_host.rs` 用两个独立 GPUI editor/window 验证 input、selection、accessibility focus owner、listener、Ctrl+S persistence、session/history 均不串状态。`gpui` 的 test-support 只存在于 dev/test 依赖，不扩散到 production contract。
 
-`examples/editor_harness` 使用 harness-private fixture v3 演示：
+`examples/editor_harness` 使用 harness-private fixture v5 演示：
 
 ```text
 create editor
@@ -558,7 +558,7 @@ create editor
 → restart / load
 ```
 
-fixture v3 保存 tree shape、inline runs、MarkSet（含 Link attrs）、NodeAttrs 与 inline atom placement，并对 inline LF / `{` 使用转义后 round-trip，因此 Paragraph HardBreak / CodeBlock newline 不会在保存时丢失。atom 编码为独立 `atom\t<kind>\t<fallback>` 行（可选 `@` attrs 行），父 leaf 的行内字段用 `{a#N}` token 标记放置位置；v2 文件读取保持兼容（v2 不含 atom），引用未定义 atom 的文件 fail closed。它不是公共 codec；`HorizontalRule`、`Image`、`Custom` 等尚未编码的 node kind 会返回 `PersistenceError`，不会静默跳过。
+fixture v5 保存 tree shape、inline runs、MarkSet（含 Link attrs）、scalar NodeAttrs、inline atom placement、Image/HorizontalRule 与嵌套 table，并对 inline LF / `{` 使用转义后 round-trip。atom 编码为独立 `atom\t<kind>\t<fallback>` 行（可选 `@` attrs 行），父 leaf 的行内字段用 `{a#N}` token 标记放置位置。reader 兼容 v2/v3/v4，但拒绝低版本信封中的 table 标签与未定义 atom 引用；`Custom` 等未支持的 node kind 或 list/object attr 返回 `PersistenceError`，不会静默跳过。它不是公共 codec，Image 的语义/引用持久化也不等于保存资产字节；资产存储仍由宿主负责。
 
 ## Codec 边界
 
@@ -572,7 +572,7 @@ codec crate
 xiaomu-core document model
 ```
 
-Core 永远不反向依赖 codec。ADR 0004 只规定 canonical LF 语义；Markdown 后续如何把 Paragraph LF 编码为 hard break、如何保留 CodeBlock LF，属于 codec 自身 contract。
+Core 永远不反向依赖 codec。ADR 0004 只规定 canonical LF 语义；P4.9 baseline codec 已实现 Paragraph hard break 与 CodeBlock LF 的导入/导出，支持范围及 fail-closed 规则见下方 P4.9 说明。
 
 ## Host 边界
 
@@ -638,6 +638,8 @@ Atomic block 进入了统一的 document position 模型：`DocumentPosition::At
 Image 走 typed canonical 语义（`crates/xiaomu-core/src/document/image.rs`）：`ImageAttrs` 经 attrs 键 `src`/`asset`/`alt`/`title`/`width`/`height` 读写，`ImageSource::AssetRef`（宿主 opaque 引用）与 `ExternalUrl`（codec/host 显式导入）二选一。`EditIntent::InsertImage` 把 Image 原子块作为聚焦块兄弟插入。`AssetService::resolve(AssetRef, Rc<dyn AssetSink>)`（`crates/xiaomu-runtime/src/assets.rs`）是 host capability seam：宿主拥有存储/网络/缓存/权限，`ResolvedAsset` 携带 `revision` 供 stale 判定，回调无前端上下文、不直接改 canonical document。GPUI 侧（`image_block.rs`）以 node identity + source key 缓存 `Arc<gpui::Image>`，Resolved 状态经 `gpui::ImageSource::Image` 绘制真实纹理（`w_full` + `max_h(320px)` + `ObjectFit::Contain`），Loading/Failed/无 service 状态渲染占位；accessibility 把 Image 投影为 alt 文本、HorizontalRule 投影为 Separator。
 
 Clipboard wire v4 携带 atomic 载荷（`ClipboardNodeContent::Atomic`、`WireContent::Atomic`、`WireKind::HorizontalRule/Image`）；collapsed atomic selection 投影为单 atomic root 的 ClipboardSlice，粘贴为聚焦块后的兄弟块；mixed inline/atomic 层级粘贴 fail closed（`SessionError::ClipboardAtomicUnsupported`）。plain-text fallback 语义化：image copy 在 plain text 中携带 ExternalUrl。
+
+**外部图片导入边界（2026-10-01）：** 上述 structured clipboard 保存的是图片节点语义/引用，不是系统图片字节。`crates/xiaomu-gpui/src/input/platform_clipboard.rs` 当前仅返回 `Structured` 或 `Text`，读取首先要求 `ClipboardItem::text()` 存在，尚无截图/位图或图片文件导入分支。`AssetService` 只提供 resolve，不提供 import/store；`examples/editor_harness/src/main.rs` 仍配置 `asset_service: None`。因此测试窗口尚不能通过 Ctrl+V 导入外部截图，示例 Image 占位也不能作为实际资产导入、显示及保存重开的证据。待排期范围见 [planning 交付边界](planning.md#delivery-boundaries)。
 
 ## P4.9 Markdown Baseline Codec 事实
 

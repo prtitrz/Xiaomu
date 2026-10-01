@@ -1,8 +1,8 @@
 # P3 Visual Lines / Cross-block Clipboard / History 设计
 
-状态：进行中
+状态：**CLOSED**。本文保留阶段设计契约；完成情况与验收证据见 [progress](progress.md)。
 
-本文档是 P3 的可执行设计。顶层方向以 `docs/planning.md` 为准；P2 收官后的查缺补漏见 `docs/roadmap-gap-review.md`；已经真实成立的架构事实记录在 `docs/architecture.md`。
+本文档保留 P3 的设计契约。顶层方向以 `docs/planning.md` 为准；P2 收官后的查缺补漏已吸收进本阶段，原始发现见 [历史审计归档](../../archive/2026-08-27-roadmap-gap-review.md)；已经真实成立的架构事实记录在 `docs/architecture.md`。
 
 P2 已经把晓木从单块输入升级为完整 document tree 编辑：multi-block、DocumentSelection、结构 transaction、list、跨块键鼠选择、position mapping 与 minimal host-contract harness 均已闭环。P3 的任务是把当前“每个 block 只有一条视觉行”的过渡模型升级为真实文本布局，并补齐跨块编辑、structured clipboard 与可用的本地 history 语义。
 

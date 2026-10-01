@@ -5,6 +5,7 @@ Xiaomu is an early-stage Rust native structured rich-text editor engine. The pro
 Before contributing, read:
 
 - `README.md`
+- `docs/README.md`
 - `docs/planning.md`
 - `docs/engineering-rules.md`
 - `docs/architecture.md`
@@ -63,9 +64,14 @@ Public API changes during the `0.x` phase may be breaking, but they must still b
 
 The documentation layers have different purposes:
 
-- `docs/planning.md` describes intended direction and roadmap.
+- `docs/README.md` is the navigation entry point, not a duplicate status log.
+- `docs/planning.md` is the single execution roadmap: intended direction, phase scope, gates and explicitly unscheduled work.
 - `docs/architecture.md` records architecture that is currently true.
+- `docs/phases/*/design.md` and phase overviews define contracts; `progress.md` records delivery and verification evidence.
 - `docs/adr/` records decisions whose rationale should survive implementation changes.
+- Completed audits live in `docs/archive/` and preserve dated findings. Accepted work must be reconciled into planning / phase contracts; audits are not parallel work queues.
+
+When closing a phase, align the top-level milestone, README summary and phase status labels. Distinguish delivered engine APIs from host integration and user-operable features; keep CI results separate from native interaction evidence. Preserve historical audit findings with an explicit dated status note instead of silently rewriting them as current facts.
 
 If a code change makes `docs/architecture.md` inaccurate, update that document in the same pull request.
 

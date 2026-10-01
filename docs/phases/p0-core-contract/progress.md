@@ -1,6 +1,6 @@
 # P0 Core Contract 进度
 
-状态：进行中
+状态：**CLOSED**
 
 本文档只记录 P0 的执行状态和验证证据。长期架构事实放在 `docs/architecture.md`，P0 设计放在 `design.md`，顶层路线以 `docs/planning.md` 为准。
 
@@ -15,11 +15,7 @@
 
 ## 当前状态
 
-当前切片：**P0.7 Contract Stabilization 已完成实现，本 PR 合并即 P0 收官**
-
-当前分支：`feat/p0-contract-stabilization`
-
-P0.0–P0.6（含评审修复 #9/#10/#12）已合并。
+P0.0–P0.7（含评审修复 #9/#10/#12）已完成，P0 Phase Gate 已满足。本文保留下方各切片的历史执行记录；当前工作和下一阶段入口以 [planning](../../planning.md) 为准，不再沿当时分支继续执行。
 
 ## P0.0 Phase Contract 与模块骨架
 
@@ -313,7 +309,7 @@ structural sharing / normalized marks / text boundary / position-selection / bas
 StepMap-ChangeMap / validation / inverse prototype），P1 段落无需修改。
 ```
 
-P1 尚未解决的依赖（进入 P1 前需要明确归属）：
+P0 收口时移交 P1 的依赖（历史记录，不是当前待办）：
 
 ```text
 1. Transaction 未携带 before/after selection 与 history_group（planning §6 的长期字段）；
@@ -337,7 +333,7 @@ cargo fmt --all -- --check 全绿
 cargo clippy --workspace --all-targets -- -D warnings 全绿（含 missing_docs）
 cargo test --workspace 18 个 test target 全绿
 tools/check_source_size.py 与 tools/check_dependency_boundaries.py 全绿
-本 PR head 的 CI Success 即 P0 最终 Gate 证据；合并后 P0 标记完成。
+当时以 P0.7 PR head 的 CI Success 作为最终 Gate 证据；P0 已收口，当前状态见页首。
 ```
 
 ## P0 Phase Gate

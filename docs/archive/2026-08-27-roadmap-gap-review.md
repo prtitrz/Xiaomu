@@ -1,6 +1,23 @@
-# 晓木路线查缺补漏审计（P2 收官前）
+# 历史归档：晓木路线查缺补漏审计（P2 收官前）
 
 日期：2026-08-27
+
+> **历史审计，不是当前执行路线。** 正文中的“当前”“尚未实现”和阶段建议均指 2026-08-27 的仓库状态。执行主线以 [planning](../planning.md) 为准，当前代码事实见 [architecture](../architecture.md)，文档入口见 [README](../README.md)。
+>
+> 2026-10-01 对照说明：P0–P5 已收口；本文保留原始判断以便追溯，不再逐段改写为当前状态。未完成项必须进入 planning / phase contract，不能只留在此页。
+
+## 后续归属（2026-10-01 核对）
+
+| 原审计项 | 后续归属 / 当前边界 |
+| --- | --- |
+| Soft-wrap、StoredMarks、CodeBlock、HardBreak | 已进入 P3 并完成，见 [P3 progress](../phases/p3-cross-block-history/progress.md) |
+| Inline atom、atomic navigation、Image、HorizontalRule | 已进入 P4 并完成对应引擎契约，见 [P4 progress](../phases/p4-structured-content-extension/progress.md)；外部截图粘贴仍是 [未排期缺口](../planning.md#delivery-boundaries) |
+| Markdown bootstrap 桩 | P4.9 已交付 baseline codec；支持范围与显式拒绝项见 [architecture](../architecture.md) |
+| Accessibility | P3/P4 已建立 projection / fallback；平台接入限制仍存在，screen-reader smoke test 留在 P7 范围 |
+| Renderer registries / link | Inline atom registry 已交付；通用 `BlockRendererRegistry` / `LinkOpenService` 已归属 P7；链接编辑 UI 另列 planning 待排期项 |
+| 阶段顺序 | 当前正式路线及调整入口只在 [planning](../planning.md)；下文 §5 保留历史建议 |
+
+以下为原审计正文。
 
 本文档是对 P0/P1 已完成状态、P2 当前实现和 `docs/planning.md` 后续路线的一次查缺补漏。它不替代阶段 design；结论应在对应阶段启动或收官时并入顶层 planning / phase contract。
 
@@ -15,7 +32,7 @@ A. P2 收官 correctness / persistence contract
 B. 后续路线漏列的“成熟富文本编辑器基础能力”
 ```
 
-P2 的具体 blocker 见 `docs/phases/p2-document-tree/closeout-audit.md`。
+P2 的具体 blocker 及后续处置见 [P2 closeout 审计归档](p2-closeout-audit.md)。
 
 ## 2. 已经覆盖得比较完整的能力
 
@@ -81,7 +98,7 @@ BlockRendererRegistry
 
 处置：P4 调整为 **Atomic Node / Image / Extension Seam**，详见：
 
-`docs/phases/p4-atomic-media-extension/design.md`
+[P4 structured content 总览](../phases/p4-structured-content-extension/overview.md) 与 [atomic media 设计](../phases/p4-structured-content-extension/atomic-media.md)（原设计路径已调整）。
 
 ### 3.2 Soft-wrap / visual-line editing 没有明确阶段
 

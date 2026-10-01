@@ -2,11 +2,13 @@
 
 > Status: **EARLY / INDEPENDENT PROJECT**
 >
-> Date: 2026-09-01
+> Updated: 2026-10-01
 >
 > 当前里程碑（2026-10-01 收口）：**P0–P5 CLOSED；P4 原生 Windows Gate 缺口已随 P5.6 补齐；P6 未启动。** 最终代码 `6d09167` 的三平台 CI 与分版本原生验收见 [P5 progress](phases/p5-table/progress.md)，二者分别记录，前者不能替代后者。
 >
 > 定位：独立演进、可嵌入宿主应用的 **Rust Native Structured Rich-Text / Block Editor Engine**。首个原生前端基于 GPUI，但核心架构不绑定 GPUI。
+
+本文是**唯一执行主线**：阶段顺序、交付范围、Gate 与未排期事项以此为入口。各阶段 `progress.md` 提供执行和验收证据；`architecture.md` 记录当前实现；已结束的审计进入 `archive/`，不作为另一套路线。文档导航见 [docs/README](README.md)。
 
 ## 1. 项目定位
 
@@ -206,11 +208,13 @@ Xiaomu/
 ├─ examples/
 │  └─ editor_harness/
 └─ docs/
+   ├─ README.md
    ├─ planning.md
    ├─ architecture.md
-   ├─ document-model.md
-   ├─ transaction-model.md
-   └─ gpui-boundary.md
+   ├─ engineering-rules.md
+   ├─ phases/
+   ├─ adr/
+   └─ archive/
 ```
 
 第一阶段允许目录暂时少于上述结构，但依赖方向从第一天固定。
@@ -974,6 +978,33 @@ Core 尽早加入随机 transaction sequence + inverse replay + mapping invarian
 
 ## 16. Roadmap
 
+<a id="delivery-boundaries"></a>
+
+### 交付边界与待排期编辑功能（2026-10-01）
+
+阶段 **CLOSED** 表示对应 contract / Gate 已闭合，不等价于完整写作产品的全部交互已交付。尤其要区分 canonical/API、frontend 接入和宿主资源管理。
+
+| 能力 | 当前已交付 | 尚未交付 / 排期 |
+| --- | --- | --- |
+| 文本、格式与结构编辑 | 原生输入/IME、基础格式快捷键、跨块选区与 history、列表、代码块、HardBreak | 完整工具栏、菜单等产品 UI 不由阶段 CLOSED 自动承诺 |
+| 图片节点与显示 | `InsertImage`、typed image attrs、atomic selection/delete/undo、注入 `AssetService` 后的图片渲染 | harness 尚未注入真实资产服务，示例图片仍为占位；宿主资产导入/存储示例待排期 |
+| 图片复制粘贴 | 已有 Image 节点通过 Xiaomu structured clipboard 保留图片语义和引用；资产仍由宿主管理 | 系统截图/外部图片位图 Ctrl+V **未实现、待排期**；不会自动复制资产字节 |
+| 图片文件与后续操作 | 复用 image / asset contract 的基础具备 | 文件选择、文件拖入、交互式缩放/裁剪均未交付；不与第一版截图粘贴捆绑 |
+| 链接 | canonical Link mark、structured clipboard 与 baseline Markdown 保留链接语义 | 链接添加/编辑 UI 待排期；宿主打开回调 `LinkOpenService` 已列入 P7 |
+| 表格 | P5 范围内的 cell 编辑、导航、行列操作、矩形选区与 clipboard | 长文档/复杂表格性能基线由 P6 建立，不据正确性 Gate 宣称性能已达标 |
+
+**当前正式顺序仍是 P5 → P6 → P7。** 新发现的外部图片粘贴缺口不算作 P4 已交付，也不自动推迟到 P7；需单独确认优先级。建议在大规模性能优化前安排一个窄的“图片导入可用闭环”切片，是否放在 P6 前实施仍待确认，本次文档整理不改变阶段编号或启动实现。
+
+该切片至少需要在启动时明确并验收：
+
+- 平台读取截图/图片载荷，定义与 Xiaomu structured metadata / 普通文本的粘贴优先级，以及格式、尺寸与失败行为。
+- 宿主导入并保存资产，产生稳定 `AssetRef`，通过 `AssetService` 解析；文件/网络/权限策略不进入 Core。
+- 粘贴落点与选区策略明确，一次粘贴对应一个 undo/redo 步骤；异步导入期间的编辑、取消及 editor 生命周期不能导致插错位置或跨 editor 写入。
+- harness 能粘贴真实图片并显示；保存、关闭、重开后资产仍能解析；错误有反馈，既有文本/表格 clipboard 和 IME 不回归。
+- 先通过 Windows 原生截图粘贴 Gate；macOS/Linux 分别记录实际支持与验收情况，不能用三平台编译通过代替剪贴板实机验收。
+
+文件选择/拖入、链接编辑 UI、图片尺寸控制分别作为后续待排期项，不把裁剪、图库或图文环绕混入最小闭环。
+
 ### P0 — Core Contract
 
 状态：**CLOSED**
@@ -1057,7 +1088,7 @@ Windows final real-machine Gate
 
 Gate：固定 Unicode cross-block + visual-line matrix、exact undo/redo 与 randomized history/mapping invariants 全绿；Host Contract 无产品专用类型即可完成真实 load/change/persistence/selection/focus 闭环；Windows 最终实机 Gate PASS；三平台 workspace tests、fmt、Clippy、source-size、dependency-boundary 与 policy 全绿。
 
-### P4 — Inline Atom / Extension Seam
+### P4 — Structured Content / Extension Seam
 
 状态：**CLOSED**。2026-10-01 审计发现的原生 Windows Gate 证据缺口已在 P5.6 补齐，含 chip 两侧 IME 与 atomic → text 焦点恢复；分版本操作记录见 P5 progress。
 
@@ -1123,7 +1154,9 @@ multi-editor stress
 
 ### P7 — Library Stabilization
 
-完成：
+状态：**未启动**。
+
+阶段目标：
 
 ```text
 public API reduction

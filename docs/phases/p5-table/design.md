@@ -1,5 +1,7 @@
 # P5 Table Design
 
+> 状态：**CLOSED**。本文保留阶段设计契约；完成情况及验收范围见 [overview](overview.md) / [progress](progress.md)。
+
 ## 1. Canonical 模型
 
 ```text

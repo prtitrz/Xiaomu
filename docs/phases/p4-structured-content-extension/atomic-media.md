@@ -1,6 +1,8 @@
 # P4B Atomic Block / Image / Asset Capability 设计
 
-> 状态：**PLANNED AFTER P4A**
+> 状态：**阶段已 CLOSED；本文保留设计契约，不作为执行进度表。** 当前实现与验收见 [overview](overview.md) / [progress](progress.md)；2026-10-01 补齐的 Windows 原生证据见 [P5 progress](../p5-table/progress.md)。
+>
+> 边界澄清：P4 交付 Image/API、asset resolve seam、内置渲染及图片节点的 structured clipboard，不包含系统截图 Ctrl+V 与宿主资产导入闭环。原设计中的通用 `BlockRendererRegistry` / `LinkOpenService` 已明确延期到 P7。当前归属及未交付项以 [planning](../../planning.md#delivery-boundaries) 为准，不能仅凭下文设计目标认定功能已完成。
 
 P4B 补齐顶层路线中已经存在 `Image` / `HorizontalRule` / `Atomic` / `AssetService` 概念、但此前缺少明确实施阶段的问题。
 
