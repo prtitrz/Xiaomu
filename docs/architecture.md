@@ -509,7 +509,7 @@ Left / Right 保持 Unicode scalar navigation，并在 soft-wrap 共享 logical 
 
 `DocumentView` 持有一个 GPUI `ScrollHandle` 并绑定在 document scroll viewport。每个 `ParagraphView` 共享该 handle；focused block 在 prepaint 中根据 canonical focus 或 IME virtual caret 计算 window-space caret bounds，只请求保持 focus 可见所需的最小纵向滚动。滚动写入延迟到 next frame，避免同一 prepaint / paint pass 内各 child 观察到不同 scroll offset。
 
-layout cache key = `(node, editing epoch, rounded width)`；composition 期因虚拟文本不经过 document epoch 而绕过缓存。
+layout cache key = `(node, editing epoch, rounded width)`；composition 期因虚拟文本不经过 document epoch 而绕过缓存。缓存复用必须有明确的 `Some(key)`，不能把两个 `None` 当作命中：intrinsic min/max-content 测量没有确定宽度，刚取消的 preedit 也没有缓存身份，误复用会在 composition 已清空后继续绘制下划线拼音。`block_view/element_tests.rs` 在取消后立即走这条真实测量路径，断言 shaped text 回到原正文且 snapshot/selection/history 不变；普通固定宽度窗口不足以覆盖这个回归。
 
 ### Block projection
 

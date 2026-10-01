@@ -9,7 +9,7 @@ use xiaomu_core::selection::{CursorAffinity, InlinePoint};
 use xiaomu_core::text::TextBuffer;
 use xiaomu_runtime::session::DocumentSelection;
 
-fn open(
+pub(super) fn open(
     cx: &mut TestAppContext,
     ordinal: usize,
 ) -> (WindowHandle<ParagraphView>, SharedSession, NodeId) {
@@ -315,5 +315,56 @@ fn long_unicode_preedit_wraps_with_chips_and_candidate_geometry(cx: &mut TestApp
         })
         .unwrap();
     assert_eq!(session.borrow().document().store(), before.store());
+    assert_eq!(session.borrow().history_depths(), (0, 0));
+}
+
+#[gpui::test]
+fn cancelling_preedit_repaints_canonical_layout_without_a_followup_edit(cx: &mut TestAppContext) {
+    let (window, session, _) = open(cx, 2);
+    let before = session.borrow().document().clone();
+    let selection = session.borrow().selection();
+    for text in ["z", "zhong", "zhongwen"] {
+        window
+            .update(cx, |view, window, cx| {
+                view.replace_and_mark_text_in_range(None, text, None, window, cx);
+            })
+            .unwrap();
+        cx.background_executor.run_until_parked();
+        window
+            .update(cx, |view, _, _| {
+                let shaped: String = view
+                    .last_layout
+                    .as_ref()
+                    .unwrap()
+                    .lines()
+                    .iter()
+                    .map(|line| line.text.as_ref())
+                    .collect();
+                assert_eq!(shaped, visual(2, text));
+            })
+            .unwrap();
+    }
+    window
+        .update(cx, |view, window, cx| {
+            view.replace_and_mark_text_in_range(None, "", None, window, cx);
+            assert!(!view.is_composing());
+        })
+        .unwrap();
+    cx.background_executor.run_until_parked();
+    window
+        .update(cx, |view, _, _| {
+            let shaped: String = view
+                .last_layout
+                .as_ref()
+                .unwrap()
+                .lines()
+                .iter()
+                .map(|line| line.text.as_ref())
+                .collect();
+            assert_eq!(shaped, "A@Ann🙂中Z");
+        })
+        .unwrap();
+    assert_eq!(session.borrow().document().store(), before.store());
+    assert_eq!(session.borrow().selection(), selection);
     assert_eq!(session.borrow().history_depths(), (0, 0));
 }

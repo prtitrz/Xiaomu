@@ -20,6 +20,10 @@ use super::layout::BlockTextLayout;
 use super::{ParagraphView, SelectionProjection};
 use crate::document_view::cache_key::LayoutCacheKey;
 
+#[cfg(test)]
+#[path = "element_tests.rs"]
+mod tests;
+
 /// Renders one block view's inline content.
 pub struct ParagraphElement {
     pub(super) view: Entity<ParagraphView>,
@@ -99,7 +103,11 @@ impl Element for ParagraphElement {
 
                 let cache_key =
                     wrap_width.map(|width| LayoutCacheKey::new(node, epoch, f32::from(width)));
+                // None is not a cache identity: intrinsic width probes have
+                // no key, and a painted preedit deliberately has no key too.
+                // Treating None == None as a hit resurrects cancelled preedit.
                 if !composing
+                    && cache_key.is_some()
                     && cache_key == cached_key
                     && let Some(layout) = cached_layout.as_ref()
                 {

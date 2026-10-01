@@ -22,9 +22,10 @@ pub(crate) struct LayoutCacheKey {
 impl LayoutCacheKey {
     /// Derives the key for one block render pass.
     ///
-    /// `epoch` advances on every edit or composition change observed by the
-    /// owning document view; widths are rounded to whole pixels so sub-pixel
-    /// jitter does not invalidate the cache.
+    /// `epoch` advances on edits. Composition is frontend-transient and its
+    /// layout has no reusable key; intrinsic measurements without a definite
+    /// width also cannot hit the cache. Widths are rounded to whole pixels so
+    /// sub-pixel jitter does not invalidate the cache.
     #[must_use]
     pub(crate) fn new(node: NodeId, epoch: u64, width_px: f32) -> Self {
         Self {
