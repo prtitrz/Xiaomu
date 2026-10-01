@@ -34,6 +34,8 @@ use super::utf16;
 pub(crate) struct CompositionState {
     /// Half-open canonical byte range the committed text will replace.
     base_range: core::ops::Range<usize>,
+    /// Exact mixed-inline gap at the start; renderer bytes are never text offsets.
+    start_atom_index: usize,
     /// Current marked text.
     preedit: String,
     /// Selected range inside the preedit, in UTF-16 code units.
@@ -86,6 +88,7 @@ impl CompositionState {
         Self::apply_update(
             Self {
                 base_range,
+                start_atom_index: 0,
                 preedit: String::new(),
                 preedit_selected_utf16: 0..0,
             },
@@ -121,6 +124,16 @@ impl CompositionState {
     #[must_use]
     pub(crate) fn base_range(&self) -> core::ops::Range<usize> {
         self.base_range.clone()
+    }
+
+    /// Attaches the canonical gap ordinal captured when composition began.
+    pub(crate) fn at_atom_gap(mut self, atom_index: usize) -> Self {
+        self.start_atom_index = atom_index;
+        self
+    }
+
+    pub(crate) const fn start_atom_index(&self) -> usize {
+        self.start_atom_index
     }
 
     /// Returns the current marked text.

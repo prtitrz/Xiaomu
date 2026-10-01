@@ -92,7 +92,12 @@ pub(crate) fn selection_is_within(
         DocumentPosition::Atomic(node) => node,
         DocumentPosition::Gap(gap) => gap.parent(),
     };
-    let mut current = Some(start);
+    node_is_within(document, start, target)
+}
+
+/// Whether `node` belongs to the target subtree, including the root itself.
+pub(super) fn node_is_within(document: &XiaomuDocument, node: NodeId, target: NodeId) -> bool {
+    let mut current = Some(node);
     while let Some(id) = current {
         if id == target {
             return true;
@@ -106,41 +111,7 @@ pub(crate) fn selection_is_within(
 /// when the endpoints do not resolve inside one table.
 #[must_use]
 pub(crate) fn cell_range_rect(document: &XiaomuDocument, range: CellRange) -> Option<Vec<NodeId>> {
-    let locate = |cell: NodeId| -> Option<(NodeId, usize, usize)> {
-        let row = document.parent_of(cell)?;
-        let table = document.parent_of(row)?;
-        let children = |id: NodeId| {
-            document
-                .node(id)
-                .and_then(|node| node.content().as_children().map(<[NodeId]>::to_vec))
-        };
-        let row_index = children(table)?
-            .iter()
-            .position(|candidate| *candidate == row)?;
-        let col_index = children(row)?
-            .iter()
-            .position(|candidate| *candidate == cell)?;
-        Some((table, row_index, col_index))
-    };
-    let (table, anchor_row, anchor_col) = locate(range.anchor())?;
-    let (_, focus_row, focus_col) = locate(range.focus())?;
-    let (row_min, row_max) = (anchor_row.min(focus_row), anchor_row.max(focus_row));
-    let (col_min, col_max) = (anchor_col.min(focus_col), anchor_col.max(focus_col));
-
-    let children = |id: NodeId| {
-        document
-            .node(id)
-            .and_then(|node| node.content().as_children().map(<[NodeId]>::to_vec))
-    };
-    let table_rows = children(table)?;
-    let mut rect = Vec::new();
-    for row_index in row_min..=row_max {
-        let row_cells = children(*table_rows.get(row_index)?)?;
-        for col_index in col_min..=col_max {
-            rect.push(*row_cells.get(col_index)?);
-        }
-    }
-    Some(rect)
+    Some(range.cells(document).ok()?.into_iter().flatten().collect())
 }
 
 /// One navigation unit in document order: an editable text block or an

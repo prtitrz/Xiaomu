@@ -77,7 +77,7 @@ impl ApplyContext {
     fn apply_step(
         &mut self,
         step: &TransactionStep,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         match step {
             TransactionStep::ReplaceText {
                 node,
@@ -154,7 +154,7 @@ impl ApplyContext {
         node: NodeId,
         range: TextRange,
         replacement: &str,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         let content = self.inline_content(node)?;
         let spans = inverse::spans_within(&content, range)?;
         let next = inline::replace_text(&content, range, replacement)?;
@@ -167,7 +167,7 @@ impl ApplyContext {
         };
         let inverse_steps =
             inverse::replace_text_inverse(node, range, replacement, &content, &spans);
-        Ok((Some(step_map), inverse_steps))
+        Ok((vec![step_map], inverse_steps))
     }
 
     fn apply_mark_change(
@@ -175,7 +175,7 @@ impl ApplyContext {
         node: NodeId,
         range: TextRange,
         change: MarkChange,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         let content = self.inline_content(node)?;
         let spans = inverse::spans_within(&content, range)?;
         let inverse_steps = match &change {
@@ -189,7 +189,7 @@ impl ApplyContext {
         };
         self.rewrite_node(node, self.attrs_of(node)?, NodeContent::Inline(next))?;
 
-        Ok((None, inverse_steps))
+        Ok((Vec::new(), inverse_steps))
     }
 
     fn attrs_of(&self, id: NodeId) -> Result<NodeAttrs> {
@@ -203,7 +203,7 @@ impl ApplyContext {
         &mut self,
         node: NodeId,
         attrs: &NodeAttrs,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         if self.store.get(node).is_none() {
             return Err(Error::UnknownNode);
         }
@@ -215,14 +215,14 @@ impl ApplyContext {
             node,
             attrs: previous,
         }];
-        Ok((None, inverse))
+        Ok((Vec::new(), inverse))
     }
 
     fn apply_set_node_kind(
         &mut self,
         node: NodeId,
         kind: &NodeKind,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         let current = self.store.get(node).ok_or(Error::UnknownNode)?;
         if current.id() == self.root {
             return Err(Error::InvalidRootNode);
@@ -247,7 +247,7 @@ impl ApplyContext {
             node,
             kind: previous,
         }];
-        Ok((None, inverse))
+        Ok((Vec::new(), inverse))
     }
 
     fn apply_insert_node(
@@ -257,7 +257,7 @@ impl ApplyContext {
         kind: &NodeKind,
         attrs: NodeAttrs,
         content: NodeContent,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         let mut children = self.children(parent)?;
         if index > children.len() {
             return Err(Error::InvalidTransaction);
@@ -277,7 +277,7 @@ impl ApplyContext {
             inserted: id,
         };
         let inverse = vec![TransactionStep::RemoveNode { node: id }];
-        Ok((Some(step_map), inverse))
+        Ok((vec![step_map], inverse))
     }
 
     fn apply_restore_subtree(
@@ -286,7 +286,7 @@ impl ApplyContext {
         index: usize,
         root: NodeId,
         nodes: &[Node],
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         if !nodes.iter().any(|node| node.id() == root) {
             return Err(Error::InvalidTransaction);
         }
@@ -321,13 +321,10 @@ impl ApplyContext {
             inserted: root,
         };
         let inverse = vec![TransactionStep::RemoveNode { node: root }];
-        Ok((Some(step_map), inverse))
+        Ok((vec![step_map], inverse))
     }
 
-    fn apply_remove_node(
-        &mut self,
-        node: NodeId,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    fn apply_remove_node(&mut self, node: NodeId) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         if node == self.root {
             return Err(Error::InvalidTransaction);
         }
@@ -363,7 +360,7 @@ impl ApplyContext {
             root: node,
             nodes: payloads,
         }];
-        Ok((Some(step_map), inverse))
+        Ok((vec![step_map], inverse))
     }
 
     /// Splits an inline-bearing node at `at`; the text from `at` onward
@@ -372,7 +369,7 @@ impl ApplyContext {
         &mut self,
         node: NodeId,
         at: TextOffset,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         let content = self.inline_content(node)?;
         content.validate_offset(at)?;
         if !content.atoms().is_empty() {
@@ -452,7 +449,7 @@ impl ApplyContext {
             first: node,
             second: tail_id,
         }];
-        Ok((Some(step_map), inverse))
+        Ok((vec![step_map], inverse))
     }
 
     /// Merges `second` into its immediately preceding sibling `first`.
@@ -460,7 +457,7 @@ impl ApplyContext {
         &mut self,
         first: NodeId,
         second: NodeId,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         // Unknown identities surface as `UnknownNode`; structural problems
         // (same node, non-siblings) surface as `InvalidTransaction`.
         let first_content = self.inline_content(first)?;
@@ -533,7 +530,7 @@ impl ApplyContext {
                 nodes: payloads,
             },
         ];
-        Ok((Some(step_map), inverse))
+        Ok((vec![step_map], inverse))
     }
 
     fn find_parent(&self, target: NodeId) -> Result<NodeId> {
@@ -605,9 +602,7 @@ pub(super) fn apply_steps(
     let mut inverse_groups: Vec<Vec<TransactionStep>> = Vec::new();
     for step in steps {
         let (step_map, inverse_steps) = context.apply_step(step)?;
-        if let Some(step_map) = step_map {
-            step_maps.push(step_map);
-        }
+        step_maps.extend(step_map);
         inverse_groups.push(inverse_steps);
     }
 

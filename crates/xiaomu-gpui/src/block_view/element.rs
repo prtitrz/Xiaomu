@@ -20,6 +20,10 @@ use super::layout::BlockTextLayout;
 use super::{ParagraphView, SelectionProjection};
 use crate::document_view::cache_key::LayoutCacheKey;
 
+#[cfg(test)]
+#[path = "element_tests.rs"]
+mod tests;
+
 /// Renders one block view's inline content.
 pub struct ParagraphElement {
     pub(super) view: Entity<ParagraphView>,
@@ -99,7 +103,11 @@ impl Element for ParagraphElement {
 
                 let cache_key =
                     wrap_width.map(|width| LayoutCacheKey::new(node, epoch, f32::from(width)));
+                // None is not a cache identity: intrinsic width probes have
+                // no key, and a painted preedit deliberately has no key too.
+                // Treating None == None as a hit resurrects cancelled preedit.
                 if !composing
+                    && cache_key.is_some()
                     && cache_key == cached_key
                     && let Some(layout) = cached_layout.as_ref()
                 {
@@ -184,34 +192,21 @@ impl Element for ParagraphElement {
             _ => Vec::new(),
         };
 
-        // Atom chips paint one tinted quad per visual row of every renderer
-        // span. Composition keeps the plain editable projection, which has no
-        // atom spans to decorate.
-        let chips = if composing {
-            Vec::new()
-        } else {
-            view.atom_display_projection()
-                .map(|projection| {
-                    projection
-                        .atoms()
-                        .iter()
-                        .flat_map(|atom| layout.selection_rects(atom.display_range().clone()))
-                        .map(|rect| {
-                            fill(
-                                Bounds::new(
-                                    point(
-                                        bounds.left() + rect.origin.x,
-                                        bounds.top() + rect.origin.y,
-                                    ),
-                                    rect.size,
-                                ),
-                                rgba(0x7755aa30),
-                            )
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
+        // Decorations follow the preedit splice, just like text and caret.
+        let chips = view
+            .layout_atom_ranges()
+            .into_iter()
+            .flat_map(|range| layout.selection_rects(range))
+            .map(|rect| {
+                fill(
+                    Bounds::new(
+                        point(bounds.left() + rect.origin.x, bounds.top() + rect.origin.y),
+                        rect.size,
+                    ),
+                    rgba(0x7755aa30),
+                )
+            })
+            .collect();
 
         let caret_bounds = if focused {
             caret.and_then(|(byte, affinity)| {
@@ -297,7 +292,9 @@ impl Element for ParagraphElement {
 
         let node_id = self.view.read(cx).node();
         let registry = self.view.read(cx).bounds_registry.clone();
-        registry.borrow_mut().push((node_id, bounds));
+        if !self.view.read(cx).is_range_input() {
+            registry.borrow_mut().push((node_id, bounds));
+        }
 
         self.view.update(cx, |view, _| {
             view.last_layout = Some(layout);

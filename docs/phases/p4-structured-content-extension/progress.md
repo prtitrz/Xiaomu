@@ -2,7 +2,7 @@
 
 ## Current status
 
-P0 / P1 / P2 / P3 / P4 已关闭。P4 统一为两条连续子线：
+P0 / P1 / P2 / P3 已关闭。**P4 CLOSED**：2026-09-05 完成实现与自动化，2026-10-01 审计更正了原生 Windows Gate 证据缺口，并在 P5.6 同机补验、修复 IME 阻塞后闭合。CI 与原生操作不互相替代；分版本步骤、环境和操作者见 [P5 progress](../p5-table/progress.md)。P4 统一为两条连续子线：
 
 ```text
 P4A Inline Atom / Extension Seam  ← CLOSED
@@ -206,7 +206,7 @@ P4.4 Gate：未知 renderer fail soft；相邻 atom 的 caret、selection、layo
 - [x] composition + boundary atom matrix——`CommitComposition`：range 起点=atom 缝（ordinal=count）→ 缝上 atom 存活、纯替换其余文本；range 严格覆盖 atom anchor → fail closed 且文档原子不变；Unicode preedit（你好😀）字节 delta 正确平移；IME commit 独立 history entry
 - [x] P4A root docs sync——architecture.md 新增 P4.5 gate 事实、视觉导航 chip 缝 stepping 修正、运行时 `atoms_inside_span` 修正
 - [x] source-size / dependency / fmt / Clippy / tests——本地全绿
-- [x] inline-atom Windows real-machine Gate——本 PR CI run 34011360127 的 windows-latest job 真机执行含 gate 矩阵的完整测试套件通过
+- [x] inline-atom Windows 原生实机 Gate——原 CI run 34011360127 的 windows-latest 仅证明自动化；2026-10-01 随 P5.6 补齐独立 native Microsoft Pinyin 操作与 IME 修复记录（见 P5 progress）
 - [x] three-platform `CI Success`——同 run Ubuntu / macOS / Windows / policy / 汇总 `CI Success` 全部通过
 
 P4.5 gate 审计发现并修复两个不一致（随本切片交付）：
@@ -269,7 +269,7 @@ PR 轨迹：
 - [x] realistic media fixture——harness fixture **v4**：`hr\n` / `img\n` 原子行 + 既有 attrs 编码承载 image 语义；v2/v3 读兼容；Custom 仍 fail closed；demo fixture 加入 HR + 带 extension tag 的 Image；`format.rs` marks 编解码拆分 `marks_text.rs`
 - [x] multi-editor isolation——`p4_final_gate.rs::multi_editor_sessions_stay_isolated_with_atomic_blocks`（A 删除 HR + 输入 CJK，B 文档 fingerprint 逐字节不变；undo 链互不泄漏）
 - [x] Unicode + atom + atomic matrix——`p4_final_gate.rs`：CJK+emoji 文本 + mention atom 缝输入、atomic 删除 undo 回整节点选择、clipboard wire 往返、InsertImage canonical attrs、gap 经 atomic 删除的 mapping；markdown 侧 Unicode（CJK/BiDi/emoji 文本与 alt）round-trip 独立覆盖
-- [x] Windows final real-machine Gate——本切片 PR 的 windows-latest CI job 执行完整测试套件（含最终矩阵、codec round-trip、harness 测试）通过
+- [x] Windows final 原生实机 Gate——2026-10-01 随 P5.6 补验；`6d09167` 的 chip 前后微软拼音/取消/提交、左右跨 chip、atomic → text 继续输入通过。详见 P5 progress，非 windows-latest 结果替代
 - [x] architecture / planning / progress final sync——architecture.md 记录 P4 closeout 事实与本切片契约
 - [x] final three-platform `CI Success`——本切片 PR 的 CI run 全绿
 
@@ -305,9 +305,9 @@ P4.6 遗留复核结论（随 closeout 固定）：
 ### Regression / integration
 
 - [x] P0-P3 regression remains green through P4.3
-- [x] P4A integration Gate（#70）
-- [x] P4B integration Gate（#70/#72/#75/#76 + 本切片 final matrix）
-- [x] final Windows real-machine Gate（本切片 PR windows-latest CI）
+- [x] P4A 自动化 integration matrix（#70；原生 Gate 于 P5.6 单独补验）
+- [x] P4B 自动化 integration matrix（#70/#72/#75/#76 + 本切片 final matrix；原生 Gate 于 P5.6 单独补验）
+- [x] final Windows 原生实机 Gate（P5 progress 独立操作记录）
 - [x] final three-platform `CI Success`（本切片 PR CI run）
 
-以上 Gate 全部完成：**P4 = CLOSED**，可以进入 P5 Table。
+收口结论：**P4 CLOSED**。P5.6 补验未把历史 CI 当作原生证据，而是实际复现并修复了 atom IME 与 Esc 残留问题；最终代码 `6d09167` 的 [三平台 CI](https://github.com/prtitrz/Xiaomu/actions/runs/36838449485) 和原生验收分别通过。`BlockRendererRegistry` / `LinkOpenService` 明确归属 P7，未冒充 P4 已实现能力。

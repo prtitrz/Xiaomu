@@ -1,10 +1,11 @@
 //! Harness-internal fixture persistence: canonical snapshot <-> text format.
 //!
 //! Format is a harness convention for the P2 host-contract gate, not a
-//! codec commitment. v3 preserves current-stage canonical semantics: node
+//! codec commitment. v5 preserves current-stage canonical semantics: node
 //! kind / tree shape, inline run boundaries, [`MarkSet`] (including Link
 //! attributes), [`NodeAttrs`] actually present on a node, and inline atom
-//! placements with their atom nodes (kind / fallback / attrs).
+//! placements with their atom nodes (kind / fallback / attrs), media and
+//! nested tables. Scalar attrs are supported; unsupported values fail closed.
 
 use std::path::PathBuf;
 
@@ -19,6 +20,9 @@ use xiaomu_runtime::persistence::{DocumentPersistence, PersistenceError};
 
 mod format;
 mod marks_text;
+mod table_demo;
+#[cfg(test)]
+mod table_tests;
 
 pub use format::parse_document;
 use format::write_node;
@@ -27,7 +31,7 @@ use format::write_node;
 pub use format::{escape_text, unescape_text};
 
 /// File-backed fixture adapter: the on-disk format is harness-internal
-/// (`v2`, one node per line, BEGIN/END nesting) and explicitly not a codec
+/// (`v5`, one node per line, tagged containers / END nesting) and explicitly not a codec
 /// commitment.
 pub struct FixtureStore {
     path: PathBuf,
@@ -41,7 +45,7 @@ impl FixtureStore {
 
 impl DocumentPersistence for FixtureStore {
     fn save(&mut self, document: &XiaomuDocument) -> Result<(), PersistenceError> {
-        let mut out = String::from("xiaomu-fixture-doc v4\n");
+        let mut out = String::from("xiaomu-fixture-doc v5\n");
         write_node(document, document.root(), &mut out)?;
         std::fs::write(&self.path, out)
             .map_err(|error| PersistenceError(format!("{}: {error}", self.path.display())))
@@ -84,6 +88,7 @@ pub fn demo_fixture() -> XiaomuDocument {
         "多块文档：↑↓ 或鼠标在块间移动；Enter 拆块；普通段落 Tab 变列表；列表项 Tab / Shift-Tab 缩进与退出（有上一兄弟才能缩进）。",
         &mut builder,
     );
+    let table = table_demo::append(&mut builder);
     // Inline-atom demo: one mention chip anchored at the paragraph start.
     // The chip round-trips through the v3 fixture format and renders via the
     // harness demo renderer.
@@ -214,7 +219,7 @@ pub fn demo_fixture() -> XiaomuDocument {
             NodeKind::Document,
             NodeAttrs::empty(),
             NodeContent::children([
-                heading, intro, mention, quote, rule, image, todo, steps, outro,
+                heading, intro, table, mention, quote, rule, image, todo, steps, outro,
             ]),
         )
         .unwrap();
@@ -344,9 +349,9 @@ mod tests {
     }
 
     #[test]
-    fn fixture_v4_round_trips_inline_atom_chips_and_media() {
+    fn fixture_v5_round_trips_inline_atom_chips_media_and_tables() {
         let document = demo_fixture();
-        let mut encoded = String::from("xiaomu-fixture-doc v4\n");
+        let mut encoded = String::from("xiaomu-fixture-doc v5\n");
         write_node(&document, document.root(), &mut encoded).unwrap();
 
         // The mention chip serializes as an atom token plus its atom line,

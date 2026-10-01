@@ -46,14 +46,23 @@ impl EntityInputHandler for ParagraphView {
             });
         }
 
-        let selection = self.session.borrow().text_selection()?;
-        let anchor = selection.anchor().offset().as_usize();
-        let focus = selection.focus().offset().as_usize();
-        let (start, end) = (anchor.min(focus), anchor.max(focus));
+        if self.is_range_input() {
+            return Some(UTF16Selection {
+                range: 0..0,
+                reversed: false,
+            });
+        }
+        let (anchor, focus) = self.session.borrow().selection().as_same_node_inline()?;
+        if anchor.node_id() != self.node() {
+            return None;
+        }
+        let a = (anchor.text_offset().as_usize(), anchor.atom_index());
+        let f = (focus.text_offset().as_usize(), focus.atom_index());
+        let (start, end) = (a.0.min(f.0), a.0.max(f.0));
         Some(UTF16Selection {
             range: utf16::utf16_offset(&text, start)..utf16::utf16_offset(&text, end),
             // The platform sees the focus (cursor) as the selection head.
-            reversed: focus < anchor,
+            reversed: f < a,
         })
     }
 
@@ -76,6 +85,10 @@ impl EntityInputHandler for ParagraphView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.rejected_composition {
+            self.cancel_composition(cx);
+            return;
+        }
         if self.composition.is_some() {
             // macOS commits through here (insertText); Windows ends a
             // composition through here as well — including cancellations,
@@ -87,32 +100,20 @@ impl EntityInputHandler for ParagraphView {
             return;
         }
 
-        if let Some(range_utf16) = replacement_range {
-            // Select the explicit range with selection-only intents (no
-            // history entries), then insert over it as one transaction.
-            let full_text = self.canonical_text();
-            let start = utf16::utf8_offset(&full_text, range_utf16.start);
-            let end = utf16::utf8_offset(&full_text, range_utf16.end);
-            let Some(inline) = self.inline() else {
+        if let Some(range_utf16) = replacement_range.filter(|_| !self.is_range_input()) {
+            // Preserve a platform echo's seam ordinal instead of converting
+            // it through the legacy text-only PlaceCaret intent.
+            let Some((start, end)) = self.input_range_points(Some(range_utf16)) else {
                 return;
             };
-            let (Ok(start), Ok(end)) = (inline.offset_at(start), inline.offset_at(end)) else {
+            if self
+                .session
+                .borrow_mut()
+                .set_inline_selection(start, end)
+                .is_err()
+            {
                 return;
-            };
-            self.apply_intent(
-                EditIntent::PlaceCaret {
-                    offset: start,
-                    extend_selection: false,
-                },
-                cx,
-            );
-            self.apply_intent(
-                EditIntent::PlaceCaret {
-                    offset: end,
-                    extend_selection: true,
-                },
-                cx,
-            );
+            }
         }
         self.apply_intent(
             EditIntent::InsertText {
@@ -146,8 +147,8 @@ impl EntityInputHandler for ParagraphView {
         let text = self.display_content().0;
         let start = utf16::utf8_offset(&text, range_utf16.start);
         let end = utf16::utf8_offset(&text, range_utf16.end);
-        let start_position = layout.position_for_index(start)?;
-        let end_position = layout.position_for_index(end)?;
+        let start_position = layout.position_for_index(self.input_byte_to_layout(start)?)?;
+        let end_position = layout.position_for_index(self.input_byte_to_layout(end)?)?;
 
         let left = start_position.x.min(end_position.x);
         let right = start_position.x.max(end_position.x);
@@ -171,13 +172,16 @@ impl EntityInputHandler for ParagraphView {
         let raw = if point_in_window.y < bounds.top() {
             0
         } else if point_in_window.y > bounds.bottom() {
-            text.len()
+            self.layout_content().0.len()
         } else {
             layout.closest_index_for_position(point(
                 point_in_window.x - bounds.left(),
                 point_in_window.y - bounds.top(),
             ))
         };
-        Some(utf16::utf16_offset(&text, raw.min(text.len())))
+        Some(utf16::utf16_offset(
+            &text,
+            self.layout_byte_to_input(raw)?.min(text.len()),
+        ))
     }
 }

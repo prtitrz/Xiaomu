@@ -1,4 +1,4 @@
-//! Harness-internal fixture text format (v4).
+//! Harness-internal fixture text format (v5).
 //!
 //! Not a codec: this encodes current-stage canonical semantics for the
 //! host-contract harness only.
@@ -53,6 +53,9 @@ pub(crate) fn write_node(
                 NodeKind::BulletList => out.push_str("ul\n"),
                 NodeKind::OrderedList => out.push_str("ol\n"),
                 NodeKind::ListItem => out.push_str("li\n"),
+                NodeKind::Table => out.push_str("table\n"),
+                NodeKind::TableRow => out.push_str("row\n"),
+                NodeKind::TableCell => out.push_str("cell\n"),
                 NodeKind::Document => {}
                 _ => return Err(unsupported_node_error(node.kind())),
             }
@@ -340,16 +343,22 @@ fn parse_inline_pending(rest: &str) -> Result<PendingInline, String> {
 
 pub fn parse_document(text: &str) -> Result<XiaomuDocument, String> {
     let mut lines = text.lines();
-    match lines.next() {
-        Some("xiaomu-fixture-doc v2" | "xiaomu-fixture-doc v3" | "xiaomu-fixture-doc v4") => {}
+    let version = match lines.next() {
+        Some("xiaomu-fixture-doc v2") => 2,
+        Some("xiaomu-fixture-doc v3") => 3,
+        Some("xiaomu-fixture-doc v4") => 4,
+        Some("xiaomu-fixture-doc v5") => 5,
         _ => return Err("unknown fixture header".to_owned()),
-    }
+    };
 
     enum Frame {
         Quote,
         BulletList,
         OrderedList,
         ListItem,
+        Table,
+        TableRow,
+        TableCell,
     }
 
     struct Builder {
@@ -536,6 +545,20 @@ pub fn parse_document(text: &str) -> Result<XiaomuDocument, String> {
                 let attrs = builder.take_attrs();
                 builder.stack.push((Frame::ListItem, Vec::new(), attrs));
             }
+            "table" | "row" | "cell" => {
+                if version < 5 || !rest.is_empty() {
+                    return Err(
+                        "table containers require fixture v5 and no trailing fields".to_owned()
+                    );
+                }
+                let frame = match tag {
+                    "table" => Frame::Table,
+                    "row" => Frame::TableRow,
+                    _ => Frame::TableCell,
+                };
+                let attrs = builder.take_attrs();
+                builder.stack.push((frame, Vec::new(), attrs));
+            }
             "end" => {
                 let (frame, children, attrs) = builder
                     .stack
@@ -546,6 +569,9 @@ pub fn parse_document(text: &str) -> Result<XiaomuDocument, String> {
                     Frame::BulletList => NodeKind::BulletList,
                     Frame::OrderedList => NodeKind::OrderedList,
                     Frame::ListItem => NodeKind::ListItem,
+                    Frame::Table => NodeKind::Table,
+                    Frame::TableRow => NodeKind::TableRow,
+                    Frame::TableCell => NodeKind::TableCell,
                 };
                 let id = builder
                     .store

@@ -13,6 +13,9 @@
 mod display;
 mod element;
 mod ime;
+#[cfg(test)]
+mod ime_atom_tests;
+mod ime_geometry;
 mod input_handler;
 mod layout;
 mod scroll;
@@ -114,6 +117,7 @@ actions!(
 ///
 /// Byte offsets are relative to the displayed text so the element can shape
 /// it without knowing about composition internals.
+#[derive(Clone)]
 pub(crate) struct DisplaySegment {
     pub(super) start: usize,
     pub(super) text: String,
@@ -208,6 +212,9 @@ pub(crate) enum SelectionProjection {
 pub struct ParagraphView {
     pub(super) session: SharedSession,
     node: NodeId,
+    /// A frontend-only empty input surface anchored to a rectangular
+    /// selection. Its offsets never identify canonical cell content.
+    range_input: bool,
     focus_handle: FocusHandle,
     pub(super) last_layout: Option<BlockTextLayout>,
     pub(super) last_bounds: Option<Bounds<Pixels>>,
@@ -219,6 +226,9 @@ pub struct ParagraphView {
     pub(super) scroll_caret_pending: Cell<bool>,
     pub(super) atom_renderers: Rc<InlineAtomRendererRegistry>,
     composition: Option<CompositionState>,
+    /// Consume the remainder of an unsupported native composition without
+    /// falling through to ordinary typing and deleting selected atoms.
+    rejected_composition: bool,
     focus_out_subscription: Option<Subscription>,
 }
 
@@ -238,6 +248,7 @@ impl ParagraphView {
         Self {
             session,
             node,
+            range_input: false,
             focus_handle,
             last_layout: None,
             last_bounds: None,
@@ -248,8 +259,26 @@ impl ParagraphView {
             scroll_caret_pending: Cell::new(true),
             atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
             composition: None,
+            rejected_composition: false,
             focus_out_subscription: None,
         }
+    }
+
+    /// Reuses the ordinary native input/IME pipeline for a cell rectangle.
+    /// The cell identity is only a layout anchor; no document node is added.
+    pub(crate) fn for_cell_range(
+        session: SharedSession,
+        epoch: Rc<std::cell::Cell<u64>>,
+        cell: NodeId,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut view = Self::new(session, epoch, Rc::new(RefCell::new(Vec::new())), cell, cx);
+        view.range_input = true;
+        view
+    }
+
+    pub(crate) const fn is_range_input(&self) -> bool {
+        self.range_input
     }
 
     /// Attaches the owning document viewport's scroll handle.
@@ -277,7 +306,7 @@ impl ParagraphView {
     /// Returns whether an IME composition is currently active.
     #[must_use]
     pub(crate) const fn is_composing(&self) -> bool {
-        self.composition.is_some()
+        self.composition.is_some() || self.rejected_composition
     }
 
     /// Returns the virtual caret position while composing, in displayed-text
@@ -286,10 +315,19 @@ impl ParagraphView {
     pub(crate) fn composing_caret_byte(&self) -> Option<usize> {
         self.composition
             .as_ref()
-            .map(CompositionState::caret_virtual_byte)
+            .and_then(|state| self.input_byte_to_layout(state.caret_virtual_byte()))
     }
 
     pub(crate) fn inline(&self) -> Option<InlineContent> {
+        if self.range_input {
+            return self
+                .session
+                .borrow()
+                .selection()
+                .active_cell_range()
+                .filter(|range| range.anchor() == self.node)
+                .map(|_| InlineContent::empty());
+        }
         self.session
             .borrow()
             .document()
@@ -310,14 +348,6 @@ impl ParagraphView {
                     .collect()
             })
             .unwrap_or_default()
-    }
-
-    /// Ordered text range of the session selection when it is single-node.
-    pub(crate) fn ordered_range(&self) -> Option<xiaomu_core::text::TextRange> {
-        self.session
-            .borrow()
-            .text_selection()
-            .and_then(|selection| selection.ordered_range().ok())
     }
 
     fn apply_intent(&mut self, intent: EditIntent, cx: &mut Context<Self>) {

@@ -4,7 +4,7 @@
 >
 > Date: 2026-09-01
 >
-> 当前里程碑：**P0 / P1 / P2 / P3 CLOSED；P4 — Inline Atom / Extension Seam IN PROGRESS，P4.1 mixed-inline coordinate contract 与 P4.2 canonical inline atom Core 层已完成。**
+> 当前里程碑（2026-10-01 收口）：**P0–P5 CLOSED；P4 原生 Windows Gate 缺口已随 P5.6 补齐；P6 未启动。** 最终代码 `6d09167` 的三平台 CI 与分版本原生验收见 [P5 progress](phases/p5-table/progress.md)，二者分别记录，前者不能替代后者。
 >
 > 定位：独立演进、可嵌入宿主应用的 **Rust Native Structured Rich-Text / Block Editor Engine**。首个原生前端基于 GPUI，但核心架构不绑定 GPUI。
 
@@ -783,14 +783,14 @@ TableNode
 └─ attrs
 ```
 
-第一阶段 Cell 仅允许 paragraph-like inline fragment，后续再开放 richer fragment。
+P5 已采用 `Table → TableRow → TableCell → block…` 的普通树模型，cell 至少一个 block；允许 paragraph、heading、quote、list、code、atomic block 和嵌套 table。剪贴板须完整保留合法子树及各层 attrs。列数由每行 cell 数推导，列宽仍属前端布局，不在 canonical 中冗余存储。
 
 Selection：
 
 ```text
 caret in cell
 cell range
-row / column axis selection
+row / column axis selection（后续扩展，不作为 P5 已实现能力）
 ```
 
 Tab / Shift+Tab 属于 table command。
@@ -1059,7 +1059,7 @@ Gate：固定 Unicode cross-block + visual-line matrix、exact undo/redo 与 ran
 
 ### P4 — Inline Atom / Extension Seam
 
-状态：**IN PROGRESS**
+状态：**CLOSED**。2026-10-01 审计发现的原生 Windows Gate 证据缺口已在 P5.6 补齐，含 chip 两侧 IME 与 atomic → text 焦点恢复；分版本操作记录见 P5 progress。
 
 P4.1 与 P4.2 Core 层已完成：
 
@@ -1076,22 +1076,26 @@ InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom
 atom-aware ReplaceInlineText contract + InlineTextReplaced mapping + exact inverse
 ```
 
-继续完成：
+P4.3–P4.9 已实现：
 
 ```text
 atom navigation/delete/copy（Runtime / GPUI）
 renderer registry
-block renderer registry
 host capability callbacks
 extension accessibility fallback
 extension + capability-service integration fixture
+atomic node selection / image contract / asset service / baseline Markdown codec
 ```
+
+`BlockRendererRegistry` 尚未交付，不能与已实现的 `InlineAtomRendererRegistry` 混记。2026-10-01 明确将通用 block renderer 扩展与 `LinkOpenService` 列入 **P7 Host Extension Contracts**（见 P7 验收项），不计作 P4/P5 已交付。现有内置 atomic renderer 与 image URL fallback 不等价于通用宿主接口。
 
 Gate：一个 demo atom 作为 one-caret-unit 完整操作，文本/atom seam 不污染 UTF-8 `TextOffset` contract，undo/redo 与 mapping 精确，且 Core 无宿主业务类型。
 
 ### P5 — Table
 
-完成：
+状态：**CLOSED（2026-10-01）**。P5.6、review correctness 修正、原生 IME 阻塞修复及独立 Gate 均已完成。
+
+已建立的能力：
 
 ```text
 structured table model
@@ -1101,11 +1105,13 @@ row / column operations
 cell selection
 ```
 
-Gate：表格中英文连续编辑 + undo/redo。
+Gate：表格中英文连续编辑 + undo/redo、所有行列位置映射、富 cell clipboard 无损、用户可操作的矩形选区与视觉列导航、fixture round-trip、多 editor 隔离、三平台 CI、独立 Windows 原生 IME 验收。上述项已闭合，证据和原生验收范围见 `docs/phases/p5-table/progress.md`。
 
 ### P6 — Performance / Long Document
 
-完成：
+状态：**未启动**。先建立长文档、复杂表格与多 editor 的可重复 benchmark/profile 基线，测量编辑延迟、布局/绘制耗时及内存；依据瓶颈决定缓存和 virtualization 的实施顺序，不能以缓存命中率替代 selection/IME/undo 正确性。
+
+阶段目标：
 
 ```text
 layout cache
@@ -1126,7 +1132,10 @@ frontend compatibility policy
 examples
 docs
 license / release automation
+Host Extension Contracts: BlockRendererRegistry / LinkOpenService
 ```
+
+P7 Host Extension Contracts 由 GPUI/host 层交付，不下沉 Core/Runtime：`BlockRendererRegistry` 按稳定 kind key 注册并对未知 kind 提供无损 fallback，验收自定义 atomic block 渲染、a11y 与多 editor 隔离；`LinkOpenService` 由宿主显式注入，验收文本 link 与 image URL fallback 调用、未注入时不私自联网/启动应用、URL 保留及多 editor 隔离。规划入口保留到该切片验收完成。
 
 ---
 

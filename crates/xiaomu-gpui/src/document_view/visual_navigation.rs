@@ -291,13 +291,17 @@ impl DocumentView {
         };
         let desired_x = match self.desired_x {
             Some((anchor, x)) if anchor == focus => x,
-            _ => current.read(cx).visual_caret_x(raw, focus.affinity())?,
+            _ => {
+                self.block_bounds(focus.node_id())?.left()
+                    + current.read(cx).visual_caret_x(raw, focus.affinity())?
+            }
         };
+        let local_x = desired_x - self.block_bounds(focus.node_id())?.left();
 
         if let Some((target_raw, affinity)) =
             current
                 .read(cx)
-                .visual_vertical_target(raw, focus.affinity(), desired_x, down)
+                .visual_vertical_target(raw, focus.affinity(), local_x, down)
         {
             let point = match &projection {
                 Some(projection) => Self::point_for_display_byte(projection, target_raw, affinity)?,
@@ -306,15 +310,13 @@ impl DocumentView {
             return Some((point, desired_x));
         }
 
-        let target_block = if down {
-            block.checked_add(1).filter(|index| *index < blocks.len())?
-        } else {
-            block.checked_sub(1)?
-        };
+        let target_node = self.vertical_neighbor(focus.node_id(), desired_x, down)?;
+        let target_block = navigation::block_index(blocks, target_node)?;
         let target_child = self.child_for_node(blocks[target_block].node)?;
+        let target_x = desired_x - self.block_bounds(target_node)?.left();
         let (target_raw, affinity) = target_child
             .read(cx)
-            .visual_edge_row_target(desired_x, !down)?;
+            .visual_edge_row_target(target_x, !down)?;
         // The neighbor's layout bytes are display space when it carries atoms.
         if let Some(target_projection) = self.atom_projection_for(blocks[target_block].node, cx) {
             let point = Self::point_for_display_byte(&target_projection, target_raw, affinity)?;
@@ -364,6 +366,9 @@ impl DocumentView {
         cx: &mut Context<Self>,
     ) {
         if self.focused_child_composing(window, cx) {
+            return;
+        }
+        if self.navigate_cell_range(&step, extend, window, cx) {
             return;
         }
         // A whole atomic block selection navigates across the unit sequence.

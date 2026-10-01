@@ -11,7 +11,6 @@ use xiaomu_core::text::{TextOffset, TextRange};
 use xiaomu_runtime::session::EditIntent;
 
 use crate::input::composition::{CompositionState, PreeditUpdate, resolve_preedit_update};
-use crate::input::utf16;
 
 use super::ParagraphView;
 
@@ -22,7 +21,8 @@ impl ParagraphView {
     /// must not synthesize `PlaceCaret` intents. This also preserves pending
     /// StoredMarks across an IME cancellation.
     pub(crate) fn cancel_composition(&mut self, cx: &mut Context<Self>) {
-        if self.composition.take().is_none() {
+        let rejected = std::mem::take(&mut self.rejected_composition);
+        if self.composition.take().is_none() && !rejected {
             return;
         }
         self.request_caret_scroll();
@@ -72,36 +72,53 @@ impl ParagraphView {
         new_selected_range: Option<std::ops::Range<usize>>,
         cx: &mut Context<Self>,
     ) {
-        let canonical = self.canonical_text();
-
+        if self.rejected_composition {
+            if new_text.is_empty() {
+                self.cancel_composition(cx);
+            }
+            return;
+        }
         if self.composition.is_none() {
             // An empty payload cannot start a composition; ignore it.
             if new_text.is_empty() {
                 return;
             }
-            let (start, end) = match range_utf16 {
-                Some(range) => (
-                    utf16::utf8_offset(&canonical, range.start),
-                    utf16::utf8_offset(&canonical, range.end),
-                ),
-                None => match self.ordered_range() {
-                    Some(range) => (range.start().as_usize(), range.end().as_usize()),
-                    None => return,
-                },
+            let Some((start, end)) = self.input_range_points(range_utf16) else {
+                return;
             };
-
             let Some(inline) = self.inline() else {
                 return;
             };
-            let (Ok(start), Ok(end)) = (inline.offset_at(start), inline.offset_at(end)) else {
+            // A native text range cannot replace a selected chip. Preserve
+            // the existing fail-closed contract rather than hiding its bytes.
+            let start_key = (start.text_offset(), start.atom_index());
+            let end_key = (end.text_offset(), end.atom_index());
+            let mut previous = None;
+            let mut ordinal = 0;
+            let crosses_atom = inline.atoms().iter().any(|atom| {
+                ordinal = if previous == Some(atom.text_offset()) {
+                    ordinal + 1
+                } else {
+                    0
+                };
+                previous = Some(atom.text_offset());
+                let key = (atom.text_offset(), ordinal);
+                key >= start_key && key < end_key
+            });
+            if crosses_atom {
+                self.rejected_composition = true;
+                eprintln!("xiaomu: IME range spans an inline atom; composition rejected");
                 return;
-            };
+            }
 
-            self.composition = Some(CompositionState::begin(
-                start.as_usize()..end.as_usize(),
-                new_text,
-                new_selected_range,
-            ));
+            self.composition = Some(
+                CompositionState::begin(
+                    start.text_offset().as_usize()..end.text_offset().as_usize(),
+                    new_text,
+                    new_selected_range,
+                )
+                .at_atom_gap(start.atom_index()),
+            );
         } else {
             match resolve_preedit_update(new_text) {
                 PreeditUpdate::Continue => {

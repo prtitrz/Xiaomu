@@ -34,6 +34,7 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.cell_drag_anchor = None;
         self.is_dragging = true;
         if let Some(hit) = self.hit_test(event.position, cx) {
             #[cfg(debug_assertions)]
@@ -101,6 +102,12 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(anchor) = self.cell_drag_anchor {
+            if let Some(cell) = self.cell_at_position(event.position) {
+                self.install_cell_range(anchor, cell, window, cx);
+            }
+            return;
+        }
         if !self.is_dragging {
             return;
         }
@@ -111,10 +118,11 @@ impl DocumentView {
 
     pub(crate) fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.is_dragging = false;
+        self.cell_drag_anchor = None;
     }
 
     /// Maps a window-space point to a validated caret point via the paint
-    /// registry: nearest block by vertical position, then two-dimensional
+    /// registry: nearest block by vertical and horizontal bounds, then
     /// hit-testing inside that block's wrapped text layout.
     ///
     /// Blocks carrying inline atoms shape their layout on renderer display
@@ -124,16 +132,35 @@ impl DocumentView {
     /// Plain blocks keep the canonical byte path. A click that landed strictly
     /// inside a renderer span also reports the chip for host activation.
     fn hit_test(&self, position: Point<Pixels>, cx: &App) -> Option<MouseHit> {
+        // Parent cells publish before their descendants, so the last
+        // containing cell is the innermost one for a nested table hit.
+        let hit_cell = self.cell_at_position(position);
+        let session = self.session.borrow();
         let registry = self.registry.borrow();
-        let mut nearest: Option<(NodeId, Pixels)> = None;
+        let mut nearest: Option<(NodeId, (Pixels, Pixels))> = None;
         for (node, bounds) in registry.iter() {
-            let distance = if position.y < bounds.top() {
+            if let Some(cell) = hit_cell
+                && !navigation::node_is_within(session.document(), *node, cell)
+            {
+                continue;
+            }
+            let vertical = if position.y < bounds.top() {
                 bounds.top() - position.y
             } else if position.y > bounds.bottom() {
                 position.y - bounds.bottom()
             } else {
                 Pixels::ZERO
             };
+            let horizontal = if position.x < bounds.left() {
+                bounds.left() - position.x
+            } else if position.x > bounds.right() {
+                position.x - bounds.right()
+            } else {
+                Pixels::ZERO
+            };
+            // Document blocks used to be a vertical stack. Cells share a
+            // vertical interval, so break ties by horizontal containment.
+            let distance = (vertical, horizontal);
             if nearest.is_none_or(|(_, best)| distance < best) {
                 nearest = Some((*node, distance));
             }
