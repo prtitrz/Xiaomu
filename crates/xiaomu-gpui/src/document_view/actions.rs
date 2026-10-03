@@ -438,11 +438,42 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.focused_child_composing(window, cx) {
+            return;
+        }
         let Some(content) = PlatformClipboard::new(&*cx).read_content() else {
             return;
         };
         let code_block = matches!(self.focused_node_kind(), Some(NodeKind::CodeBlock));
         match content {
+            PlatformClipboardContent::Image { format, bytes } => {
+                let selection = self.session.borrow().selection();
+                if code_block
+                    || !selection.is_collapsed()
+                    || !matches!(selection.focus(), super::DocumentPosition::Inline(_))
+                {
+                    eprintln!(
+                        "xiaomu: image paste requires a collapsed text caret outside code blocks"
+                    );
+                    return;
+                }
+                let Some(service) = &self.asset_service else {
+                    eprintln!("xiaomu: image paste requires a host asset service");
+                    return;
+                };
+                match service.import_image(format, &bytes) {
+                    Ok(image)
+                        if matches!(
+                            image.source(),
+                            xiaomu_core::document::ImageSource::AssetRef(_)
+                        ) =>
+                    {
+                        self.apply_intent(EditIntent::InsertImage { image }, window, cx);
+                    }
+                    Ok(_) => eprintln!("xiaomu: image import must return a host asset reference"),
+                    Err(error) => eprintln!("xiaomu: image import failed: {error:?}"),
+                }
+            }
             PlatformClipboardContent::Structured(slice) if code_block => {
                 // CodeBlock is a plain-code surface. Xiaomu-native rich
                 // structure is flattened to the same interoperable text the

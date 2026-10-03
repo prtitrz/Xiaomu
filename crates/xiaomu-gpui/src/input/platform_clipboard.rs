@@ -6,6 +6,7 @@
 //! text exactly.
 
 use gpui::App;
+use xiaomu_runtime::assets::AssetFormat;
 
 use xiaomu_runtime::clipboard::{ClipboardSlice, TextClipboard, decode_metadata, encode_metadata};
 
@@ -15,6 +16,8 @@ pub(crate) enum PlatformClipboardContent {
     Structured(ClipboardSlice),
     /// Foreign, stale, malformed, or ordinary plain text.
     Text(String),
+    /// Encoded pixels, imported by the host before any document edit.
+    Image { format: AssetFormat, bytes: Vec<u8> },
 }
 
 /// Clipboard adapter backed by the GPUI app clipboard.
@@ -45,13 +48,7 @@ impl<'a> PlatformClipboard<'a> {
     /// Reads structured Xiaomu content when valid, otherwise plain text.
     pub(crate) fn read_content(&self) -> Option<PlatformClipboardContent> {
         let item = self.app.read_from_clipboard()?;
-        let text = item.text()?;
-        if let Some(metadata) = item.metadata()
-            && let Some(slice) = decode_metadata(&text, metadata)
-        {
-            return Some(PlatformClipboardContent::Structured(slice));
-        }
-        Some(PlatformClipboardContent::Text(text))
+        decode_item(item)
     }
 }
 
@@ -63,5 +60,65 @@ impl TextClipboard for PlatformClipboard<'_> {
 
     fn read_text(&self) -> Option<String> {
         self.app.read_from_clipboard()?.text()
+    }
+}
+
+/// Valid structured content wins; supported pixels precede ordinary text.
+fn decode_item(item: gpui::ClipboardItem) -> Option<PlatformClipboardContent> {
+    let text = item.text();
+    if let Some(text) = &text
+        && let Some(metadata) = item.metadata()
+        && let Some(slice) = decode_metadata(text, metadata)
+    {
+        return Some(PlatformClipboardContent::Structured(slice));
+    }
+    for entry in item.into_entries() {
+        if let gpui::ClipboardEntry::Image(image) = entry {
+            let format = match image.format {
+                gpui::ImageFormat::Png => AssetFormat::Png,
+                gpui::ImageFormat::Jpeg => AssetFormat::Jpeg,
+                _ => continue,
+            };
+            return Some(PlatformClipboardContent::Image {
+                format,
+                bytes: image.bytes,
+            });
+        }
+    }
+    text.map(PlatformClipboardContent::Text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_only_clipboard_does_not_require_text() {
+        for (input, expected) in [
+            (gpui::ImageFormat::Png, AssetFormat::Png),
+            (gpui::ImageFormat::Jpeg, AssetFormat::Jpeg),
+        ] {
+            let item =
+                gpui::ClipboardItem::new_image(&gpui::Image::from_bytes(input, vec![1, 2, 3]));
+            let Some(PlatformClipboardContent::Image { format, bytes }) = decode_item(item) else {
+                panic!("image lost")
+            };
+            assert_eq!(format, expected);
+            assert_eq!(bytes, [1, 2, 3]);
+        }
+    }
+
+    #[test]
+    fn unsupported_image_is_not_reinterpreted_as_text() {
+        assert!(
+            decode_item(gpui::ClipboardItem::new_image(&gpui::Image::from_bytes(
+                gpui::ImageFormat::Svg,
+                vec![1]
+            )))
+            .is_none()
+        );
+        assert!(
+            matches!(decode_item(gpui::ClipboardItem::new_string("hello".into())), Some(PlatformClipboardContent::Text(text)) if text == "hello")
+        );
     }
 }
