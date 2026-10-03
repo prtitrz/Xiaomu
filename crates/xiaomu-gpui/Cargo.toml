@@ -13,3 +13,5 @@ xiaomu-runtime.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+# Exercise the pinned transitive XIM decoder with portable synthetic vectors.
+xim-ctext = "=0.3.0"

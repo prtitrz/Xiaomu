@@ -688,3 +688,8 @@ Harness writer 现统一写 fixture v5：`table` / `row` / `cell` 与 `end` 容�
 ## Linux stock-GPUI unmark semantics
 
 Linux `unmark_text` now preserves a nonempty, non-rejected overlay through the existing canonical composition commit path before stock GPUI dispatches its pointer event. Explicit empty cancellation and already-committed input remain no-ops on subsequent unmark. No input-owner protocol, pointer wait barrier or dependency patch is introduced; focus-out and non-Linux callback handling remain unchanged. See [scope, regressions and native evidence boundaries](linux-unmark-preservation.md).
+
+
+## Stock Linux XIM decoder source
+
+The workspace overrides only `xim-ctext` with an audited local copy of the official Zed Git revision `16f35a2c881b815a2b6cdfd6687988e84f8447d8` (genuine upstream version 0.3.0, not the registry 0.3.0 release). Its small patch preserves literal ASCII and charset-return suffixes and rejects high-bit conversion overflow. The original revision and released 0.4.1 were rejected after reproducible ASCII-prefix regressions. GPUI and `zed-xim` stay stock registry packages; unknown Git sources remain denied, and a provenance/patch-reversal guard verifies the vendor. Downstream hosts must use this audited copy and repeat the root-only Cargo patch; dependency manifests cannot impose it. See [dependency rationale, integration instructions and native limits](linux-xim-decoder.md).
