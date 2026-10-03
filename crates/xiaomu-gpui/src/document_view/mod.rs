@@ -366,13 +366,18 @@ impl DocumentView {
     pub(crate) fn select_atomic_block(
         &mut self,
         node: NodeId,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let outcome = self.session.borrow_mut().set_atomic_selection(node);
         match outcome {
-            Ok(xiaomu_runtime::session::SessionOutcome::NoChange) => {}
-            Ok(_) => cx.notify(),
+            Ok(_) => {
+                // Canonical node selection alone does not own native keyboard
+                // actions. Also reclaim focus when a repeated click returns
+                // NoChange after the host or another control took focus away.
+                self.route_focus(window, cx);
+                cx.notify();
+            }
             Err(error) => eprintln!("xiaomu: selection rejected: {error}"),
         }
     }
