@@ -181,3 +181,41 @@ fn jpeg_round_trips_and_oversized_dimensions_are_rejected() {
         Err(AssetError::InvalidImage)
     );
 }
+
+#[test]
+fn shared_asset_reference_survives_undo_of_one_of_two_nodes() {
+    let workspace = Workspace::new();
+    let path = workspace.document();
+    let host = FixtureAssets::for_document(&path);
+    let original = demo_fixture();
+    let mut session = DocumentSession::new(
+        original.clone(),
+        DocumentSelection::collapsed(caret_at_first_block(&original).focus()),
+    )
+    .unwrap();
+    let bytes = png();
+    let attrs = host.import_image(AssetFormat::Png, &bytes).unwrap();
+    for _ in 0..2 {
+        session
+            .apply_intent(&EditIntent::InsertImage {
+                image: attrs.clone(),
+            })
+            .unwrap();
+    }
+    let both = session.document().clone();
+    session.undo().unwrap();
+    let mut store = FixtureStore::new(path.clone());
+    store.save(session.document()).unwrap();
+    let restored = store.load().unwrap().unwrap();
+    assert!(canonical_semantics_equal(session.document(), &restored));
+    assert_eq!(
+        resolve(&FixtureAssets::for_document(&path), &attrs)
+            .unwrap()
+            .bytes(),
+        bytes
+    );
+    session.redo().unwrap();
+    assert!(canonical_semantics_equal(session.document(), &both));
+    assert_eq!(resolve(&host, &attrs).unwrap().bytes(), bytes);
+    assert_eq!(std::fs::read_dir(&host.directory).unwrap().count(), 1);
+}
