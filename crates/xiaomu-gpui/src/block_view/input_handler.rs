@@ -73,8 +73,26 @@ impl EntityInputHandler for ParagraphView {
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        // macOS sends unmarkText both after a commit (already idle: no-op)
-        // and as a pure cancellation (still composing).
+        // Stock GPUI's Linux mouse path unmarks the old input handler before
+        // dispatching MouseDown. Unlike Zed's in-buffer preedit, our overlay
+        // is not canonical yet: removing its marker must retain the text the
+        // application received, not silently discard it. Explicit empty
+        // callbacks have already cancelled it; result callbacks already
+        // committed it. Neither can be committed a second time here.
+        #[cfg(target_os = "linux")]
+        if !self.rejected_composition
+            && let Some(text) = self
+                .composition
+                .as_ref()
+                .map(|state| state.preedit())
+                .filter(|text| !text.is_empty())
+                .map(str::to_owned)
+        {
+            self.commit_composition(&text, cx);
+            return;
+        }
+        // Preserve existing handling elsewhere pending platform-specific
+        // native evidence. Focus-loss cancellation is a separate path.
         self.cancel_if_composing(cx);
     }
 

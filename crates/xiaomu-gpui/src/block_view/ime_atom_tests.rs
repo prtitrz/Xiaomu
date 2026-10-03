@@ -310,7 +310,9 @@ fn long_unicode_preedit_wraps_with_chips_and_candidate_geometry(cx: &mut TestApp
                 .bounds_for_range(1 + units..1 + units, bounds, window, cx)
                 .unwrap();
             assert_eq!(actual.origin, bounds.origin + expected);
-            view.unmark_text(window, cx);
+            // This geometry test explicitly cancels; a bare Linux unmark
+            // removes marking while preserving nonempty received preedit.
+            view.replace_and_mark_text_in_range(None, "", None, window, cx);
             assert_eq!(view.layout_content().0, "A@Ann🙂中Z");
         })
         .unwrap();

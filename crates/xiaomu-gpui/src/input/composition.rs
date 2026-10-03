@@ -7,13 +7,16 @@
 //! canonical suffix.
 //!
 //! Platform callback mapping for the pinned GPUI 0.2.2 (verified against the
-//! crates.io sources, `platform/mac/window.rs` and
-//! `platform/windows/events.rs`):
+//! crates.io sources, `platform/linux/{x11,wayland}/client.rs`,
+//! `platform/mac/window.rs` and `platform/windows/events.rs`):
 //!
 //! ```text
 //! macOS   setMarkedText(text)  → begin_or_update; empty text = cancel
 //! macOS   insertText           → commit (non-empty) / cancel (empty)
-//! macOS   unmarkText           → cancel if still composing, else no-op
+//! macOS   unmarkText           → existing cancel policy; native behavior not
+//!                                generalized from the Linux mouse path
+//! Linux   unmarkText           → retain nonempty overlay via one commit;
+//!                                already committed/cancelled/rejected = no write
 //! Windows GCS_COMPSTR          → begin_or_update (caret range inside preedit)
 //! Windows GCS_COMPSTR ""       → cancel (composition ended without a result,
 //!                                e.g. Esc on Microsoft Pinyin)
