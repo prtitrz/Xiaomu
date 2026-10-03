@@ -4,7 +4,7 @@
 //! never represented by empty text runs and never cross codec/persistence
 //! boundaries.
 
-use xiaomu_core::document::{InlineContent, Mark, MarkSet};
+use xiaomu_core::document::{InlineContent, Mark, MarkKind, MarkSet};
 
 use super::{DocumentSession, SessionError, SessionOutcome};
 
@@ -54,6 +54,52 @@ impl DocumentSession {
         Ok(SessionOutcome::NoChange)
     }
 
+    pub(super) fn set_stored_mark(
+        &mut self,
+        inline: &InlineContent,
+        mark: &Mark,
+    ) -> Result<SessionOutcome, SessionError> {
+        self.replace_stored_mark(inline, mark.kind(), Some(mark))
+    }
+
+    pub(super) fn remove_stored_mark(
+        &mut self,
+        inline: &InlineContent,
+        kind: MarkKind,
+    ) -> Result<SessionOutcome, SessionError> {
+        self.replace_stored_mark(inline, kind, None)
+    }
+
+    fn replace_stored_mark(
+        &mut self,
+        inline: &InlineContent,
+        kind: MarkKind,
+        replacement: Option<&Mark>,
+    ) -> Result<SessionOutcome, SessionError> {
+        let (_, focus) = self
+            .selection
+            .as_same_node_inline()
+            .filter(|_| self.selection.is_collapsed())
+            .ok_or(SessionError::SelectionInvalid)?;
+        let base = self
+            .stored_marks
+            .clone()
+            .unwrap_or_else(|| inherited_marks_at(inline, focus.text_offset().as_usize()));
+        let current = base.as_slice().iter().find(|mark| mark.kind() == kind);
+        if current == replacement {
+            return Ok(SessionOutcome::NoChange);
+        }
+        let next = base
+            .as_slice()
+            .iter()
+            .filter(|mark| mark.kind() != kind)
+            .cloned()
+            .chain(replacement.cloned());
+        self.stored_marks = Some(MarkSet::new(next).map_err(SessionError::Core)?);
+        self.history.break_group();
+        Ok(SessionOutcome::NoChange)
+    }
+
     pub(super) fn clear_stored_marks(&mut self) {
         self.stored_marks = None;
     }
@@ -79,7 +125,7 @@ pub(super) fn inherited_marks_at(inline: &InlineContent, offset: usize) -> MarkS
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xiaomu_core::document::{MarkKind, TextRun};
+    use xiaomu_core::document::TextRun;
 
     #[test]
     fn boundary_inheritance_prefers_left_run() {

@@ -24,6 +24,7 @@ mod history;
 mod image;
 mod intent;
 mod listener;
+mod marks;
 mod outcome;
 mod paste;
 mod paste_fragment;

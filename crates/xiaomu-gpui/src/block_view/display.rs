@@ -33,6 +33,7 @@ fn project_atom_display_content(
             underline: false,
             strike: false,
             code: false,
+            link: false,
         });
         canonical_cursor = anchor;
     }
@@ -80,17 +81,19 @@ fn push_styled_text(
             underline: style.2,
             strike: style.3,
             code: style.4,
+            link: style.5,
         });
     }
 }
 
-fn style_for_run(marks: &xiaomu_core::document::MarkSet) -> (bool, bool, bool, bool, bool) {
+fn style_for_run(marks: &xiaomu_core::document::MarkSet) -> (bool, bool, bool, bool, bool, bool) {
     (
         marks.contains(MarkKind::Bold),
         marks.contains(MarkKind::Italic),
         marks.contains(MarkKind::Underline),
         marks.contains(MarkKind::Strike),
         marks.contains(MarkKind::Code),
+        marks.contains(MarkKind::Link),
     )
 }
 
@@ -126,6 +129,7 @@ fn splice_preedit(
         underline: true,
         strike: false,
         code: false,
+        link: false,
     });
     for segment in &segments {
         let start = segment.start.max(range.end);

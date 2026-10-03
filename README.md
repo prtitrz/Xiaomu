@@ -88,7 +88,7 @@ Stock Linux input uses a narrowly patched, explicitly vendored `xim-ctext` decod
 
 ## Development
 
-Structured clipboard compatibility: valid v4/v5/v6 payloads remain supported; explicit null attributes use conditional v7. Decoding now rejects unknown structural wire fields and duplicate JSON keys rather than silently ignoring or overwriting them, including in older envelopes. Canonical attribute/object map keys remain extensible and preserved. Known image string fields reject present non-string values instead of treating them as absent. See [ADR 0006](docs/adr/0006-nullable-node-attrs.md).
+Structured clipboard compatibility: valid v4/v5/v6 payloads remain supported; explicit null node attributes use conditional v7. Exact five-field link attributes use conditional v8 when the classic href/title form is insufficient; ordinary links keep older versions. Decoding rejects unknown structural wire fields, wrong types and duplicate JSON keys rather than silently dropping data. Canonical attribute/object map keys remain extensible and preserved. See [null attributes](docs/adr/0006-nullable-node-attrs.md) and [exact link attributes](docs/adr/0007-exact-link-attributes.md).
 
 Engineering rules live in [docs/engineering-rules.md](docs/engineering-rules.md). Current architecture facts live in [docs/architecture.md](docs/architecture.md). Contribution workflow is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 

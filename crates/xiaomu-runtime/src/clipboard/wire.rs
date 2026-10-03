@@ -8,12 +8,13 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+mod marks;
 mod strict_json;
+use marks::WireRun;
 
 use serde::{Deserialize, Serialize};
 use xiaomu_core::document::{
-    AtomKind, AttrValue, HeadingLevel, InlineAtomContent, LinkMark, Mark, MarkSet, NodeAttrs,
-    NodeKind, TextRun,
+    AtomKind, AttrValue, HeadingLevel, InlineAtomContent, NodeAttrs, NodeKind,
 };
 use xiaomu_core::text::TextBuffer;
 
@@ -38,6 +39,9 @@ const VERSION_TABLE_ROW_ATTRS: u32 = 6;
 // Explicit null is a new tagged attr variant, including in nested values.
 // Keep older envelopes for null-free fragments; older readers reject v7.
 const VERSION_NULL_ATTRS: u32 = 7;
+// Exact five-field link attributes need a new mark variant, not an extension
+// to the old Link DTO that an older reader could silently truncate.
+const VERSION_LINK_ATTRIBUTES: u32 = 8;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -81,7 +85,9 @@ impl std::error::Error for ClipboardMetadataError {}
 ///
 /// The plain-text fallback is deliberately not duplicated in the metadata;
 /// callers put [`ClipboardSlice::plain_text`] in the platform text flavor.
-/// Fragments containing explicit null attributes encode as v7. Otherwise,
+/// Links outside the classic href/title form encode as v8, preserving all
+/// five fields and their missing/null/string distinctions. Otherwise,
+/// fragments containing explicit null node attributes encode as v7;
 /// tables with nonempty row attributes encode as v6; other tables stay at
 /// v5 and non-table fragments at v4. Older readers fall back to plain text
 /// only for payloads whose semantics they cannot preserve.
@@ -91,7 +97,9 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
         .iter()
         .map(WireNode::from_node)
         .collect::<Result<Vec<_>, _>>()?;
-    let version = if roots.iter().any(WireNode::carries_null) {
+    let version = if roots.iter().any(WireNode::carries_link_attributes) {
+        VERSION_LINK_ATTRIBUTES
+    } else if roots.iter().any(WireNode::carries_null) {
         VERSION_NULL_ATTRS
     } else if slice.roots().iter().any(WireNode::carries_row_attrs) {
         VERSION_TABLE_ROW_ATTRS
@@ -114,7 +122,8 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
 /// values, invalid fragment trees, and stale metadata whose computed fallback
 /// differs from the platform text all return `None`. The caller should then
 /// paste the supplied plain text normally. An older envelope carrying a
-/// newer feature (v4 tables, v5 row attributes, or pre-v7 null attributes)
+/// newer feature (v4 tables, v5 row attributes, pre-v7 null attributes, or
+/// pre-v8 extended link marks)
 /// is also rejected. Unknown attribute variants reject the entire fragment
 /// rather than silently dropping values. Historical v1-v3 envelopes remain
 /// unsupported, as before the null-attribute extension.
@@ -127,8 +136,17 @@ pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlic
     if envelope.format != FORMAT
         || !matches!(
             envelope.version,
-            VERSION | VERSION_TABLE | VERSION_TABLE_ROW_ATTRS | VERSION_NULL_ATTRS
+            VERSION
+                | VERSION_TABLE
+                | VERSION_TABLE_ROW_ATTRS
+                | VERSION_NULL_ATTRS
+                | VERSION_LINK_ATTRIBUTES
         )
+    {
+        return None;
+    }
+    if envelope.version < VERSION_LINK_ATTRIBUTES
+        && envelope.roots.iter().any(WireNode::carries_link_attributes)
     {
         return None;
     }
@@ -174,6 +192,19 @@ struct WireNode {
 }
 
 impl WireNode {
+    fn carries_link_attributes(&self) -> bool {
+        match &self.content {
+            WireContent::Inline { runs, .. } => runs.iter().any(WireRun::carries_link_attributes),
+            WireContent::Children { children } => {
+                children.iter().any(Self::carries_link_attributes)
+            }
+            WireContent::Table { rows, .. } => {
+                rows.iter().flatten().any(Self::carries_link_attributes)
+            }
+            WireContent::Atomic => false,
+        }
+    }
+
     fn carries_null(&self) -> bool {
         if self.attrs.values().any(WireAttr::carries_null) {
             return true;
@@ -539,80 +570,5 @@ impl WireAttr {
                     .collect::<Result<_, ClipboardMetadataError>>()?,
             )),
         }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WireRun {
-    text: String,
-    marks: Vec<WireMark>,
-}
-
-impl WireRun {
-    fn from_run(run: &TextRun) -> Result<Self, ClipboardMetadataError> {
-        Ok(Self {
-            text: run.text().as_str().to_owned(),
-            marks: run
-                .marks()
-                .as_slice()
-                .iter()
-                .map(WireMark::from_mark)
-                .collect::<Result<_, _>>()?,
-        })
-    }
-
-    fn into_run(self) -> Result<TextRun, ClipboardMetadataError> {
-        let marks = self
-            .marks
-            .into_iter()
-            .map(WireMark::into_mark)
-            .collect::<Result<Vec<_>, _>>()?;
-        TextRun::new(
-            self.text,
-            MarkSet::new(marks).map_err(|_| ClipboardMetadataError::invalid())?,
-        )
-        .map_err(|_| ClipboardMetadataError::invalid())
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-enum WireMark {
-    // Empty struct variants preserve the wire shape while making serde
-    // enforce unknown-field rejection for internally tagged unit-like marks.
-    Bold {},
-    Italic {},
-    Code {},
-    Underline {},
-    Strike {},
-    Link { href: String, title: Option<String> },
-}
-
-impl WireMark {
-    fn from_mark(mark: &Mark) -> Result<Self, ClipboardMetadataError> {
-        match mark {
-            Mark::Bold => Ok(Self::Bold {}),
-            Mark::Italic => Ok(Self::Italic {}),
-            Mark::Code => Ok(Self::Code {}),
-            Mark::Underline => Ok(Self::Underline {}),
-            Mark::Strike => Ok(Self::Strike {}),
-            Mark::Link(link) => Ok(Self::Link {
-                href: link.href().to_owned(),
-                title: link.title().map(str::to_owned),
-            }),
-            _ => Err(ClipboardMetadataError::unsupported()),
-        }
-    }
-
-    fn into_mark(self) -> Result<Mark, ClipboardMetadataError> {
-        Ok(match self {
-            Self::Bold {} => Mark::Bold,
-            Self::Italic {} => Mark::Italic,
-            Self::Code {} => Mark::Code,
-            Self::Underline {} => Mark::Underline,
-            Self::Strike {} => Mark::Strike,
-            Self::Link { href, title } => Mark::Link(LinkMark::new(href, title)),
-        })
     }
 }

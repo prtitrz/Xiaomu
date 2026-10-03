@@ -160,7 +160,7 @@ impl DocumentSession {
     /// Applies one typed editing intent after optional policy preflight.
     ///
     /// No-op intents do not advance the revision, write history or notify
-    /// document listeners. Collapsed mark toggles change only stored marks.
+    /// document listeners. Collapsed mark intents change only stored marks.
     /// On error, the document, selection, stored marks and history grouping
     /// remain unchanged and no listener is notified.
     pub fn apply_intent(&mut self, intent: &EditIntent) -> Result<SessionOutcome, SessionError> {

@@ -192,6 +192,27 @@ pub enum EditIntent {
         /// whole selection is removed instead.
         mark: Mark,
     },
+    /// Set one exact mark, replacing any mark of the same semantic kind.
+    ///
+    /// A non-collapsed single-node text selection changes canonical marks in
+    /// one undo unit. A collapsed inline caret updates Runtime StoredMarks
+    /// using the explicit marks or surrounding-run inheritance. Other mark
+    /// kinds are preserved, including when setting inline code. Setting the
+    /// already-effective value is a no-op, preserving typing history grouping.
+    SetMark {
+        /// Exact mark value, including all attributes for an attributed mark.
+        mark: Mark,
+    },
+    /// Remove one mark kind from the selection or pending typing marks.
+    ///
+    /// Uses the same selection and history contract as [`EditIntent::SetMark`].
+    /// At a collapsed caret, removing the last effective mark leaves explicit
+    /// empty StoredMarks so later typing does not re-inherit that mark.
+    /// An already-absent kind is a no-op, preserving typing history grouping.
+    RemoveMark {
+        /// Semantic mark kind to remove, irrespective of its attributes.
+        kind: MarkKind,
+    },
     /// Split the focused inline block at the caret.
     ///
     /// A non-collapsed selection is deleted first in the same transaction.
@@ -527,39 +548,6 @@ pub(crate) fn plan_insert_text(
     ))
 }
 
-/// Builds the plan for toggling one mark over a non-collapsed selection.
-pub(crate) fn plan_toggle_mark(
-    inline: &InlineContent,
-    selection: TextSelection,
-    mark: &Mark,
-) -> Result<PlannedAction, SessionError> {
-    if selection.is_collapsed() {
-        return Ok(PlannedAction::NoChange);
-    }
-
-    let node = selection.focus().node_id();
-    let range = ordered_range(selection)?;
-    let step = if range_fully_marked(inline, range, mark.kind()) {
-        TransactionStep::RemoveMark {
-            node,
-            range,
-            mark_kind: mark.kind(),
-        }
-    } else {
-        TransactionStep::AddMark {
-            node,
-            range,
-            mark: mark.clone(),
-        }
-    };
-
-    Ok(PlannedAction::Commit(EditPlan::new(
-        edit_transaction(step),
-        SelectionUpdate::MapExisting,
-        None,
-    )))
-}
-
 /// Wraps a raw transaction with the map-existing selection policy.
 pub(crate) fn map_existing_plan(transaction: Transaction) -> EditPlan {
     EditPlan::new(transaction, SelectionUpdate::MapExisting, None)
@@ -628,26 +616,6 @@ pub(crate) fn deletion_plan(node: NodeId, range: TextRange) -> EditPlan {
             inserted_len: 0,
         }),
     )
-}
-
-fn range_fully_marked(inline: &InlineContent, range: TextRange, kind: MarkKind) -> bool {
-    let start = range.start().as_usize();
-    let end = range.end().as_usize();
-
-    let mut cursor = 0usize;
-    for run in inline.runs() {
-        let run_start = cursor;
-        let run_end = run_start + run.len_bytes();
-        cursor = run_end;
-
-        let overlap_start = start.max(run_start);
-        let overlap_end = end.min(run_end);
-        if overlap_start < overlap_end && !run.marks().contains(kind) {
-            return false;
-        }
-    }
-
-    true
 }
 
 #[cfg(test)]

@@ -12,14 +12,21 @@ pub(crate) fn encode_marks(marks: &MarkSet) -> Result<String, PersistenceError> 
             Mark::Code => "code".to_owned(),
             Mark::Underline => "underline".to_owned(),
             Mark::Strike => "strike".to_owned(),
-            Mark::Link(link) => match link.title() {
-                Some(title) => format!(
-                    "link:{}:{}",
-                    escape_mark_field(link.href()),
-                    escape_mark_field(title)
-                ),
-                None => format!("link:{}", escape_mark_field(link.href())),
-            },
+            Mark::Link(link) => {
+                let (href, title) = link.classic_parts().ok_or_else(|| {
+                    PersistenceError(
+                        "fixture format cannot losslessly encode extended link attributes".into(),
+                    )
+                })?;
+                match title {
+                    Some(title) => format!(
+                        "link:{}:{}",
+                        escape_mark_field(href),
+                        escape_mark_field(title)
+                    ),
+                    None => format!("link:{}", escape_mark_field(href)),
+                }
+            }
             _ => {
                 return Err(PersistenceError(
                     "fixture format does not encode this mark".to_owned(),
@@ -144,4 +151,36 @@ fn split_escaped(text: &str, separator: char) -> Vec<String> {
     }
     fields.push(current);
     fields
+}
+
+#[cfg(test)]
+mod link_attributes_tests {
+    use super::*;
+    use xiaomu_core::document::{LinkAttributes, StringAttribute};
+
+    #[test]
+    fn classic_links_round_trip_but_extended_presence_is_never_dropped() {
+        let classic = MarkSet::new([Mark::Link(LinkMark::new(
+            "https://例子.test/a,b",
+            Some("题:名".into()),
+        ))])
+        .unwrap();
+        assert_eq!(
+            parse_marks(&encode_marks(&classic).unwrap()).unwrap(),
+            classic
+        );
+        for attrs in [
+            LinkAttributes::default(),
+            LinkAttributes::default().with_href(StringAttribute::Null),
+            LinkAttributes::default()
+                .with_href(StringAttribute::Value("https://example.test".into()))
+                .with_title(StringAttribute::Null),
+            LinkAttributes::default()
+                .with_href(StringAttribute::Value("https://example.test".into()))
+                .with_target(StringAttribute::Value("_blank".into())),
+        ] {
+            let marks = MarkSet::new([Mark::Link(LinkMark::from_attributes(attrs))]).unwrap();
+            assert!(encode_marks(&marks).is_err());
+        }
+    }
 }

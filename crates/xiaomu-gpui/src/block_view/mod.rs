@@ -130,6 +130,7 @@ pub(crate) struct DisplaySegment {
     pub(super) underline: bool,
     pub(super) strike: bool,
     pub(super) code: bool,
+    pub(super) link: bool,
 }
 
 fn project_display_content(
@@ -156,6 +157,7 @@ fn project_display_content(
             marks.contains(xiaomu_core::document::MarkKind::Underline),
             marks.contains(xiaomu_core::document::MarkKind::Strike),
             marks.contains(xiaomu_core::document::MarkKind::Code),
+            marks.contains(xiaomu_core::document::MarkKind::Link),
         );
         let mut push_piece = |start: usize, end: usize, display_start: usize| {
             if start < end {
@@ -167,6 +169,7 @@ fn project_display_content(
                     underline: style.2,
                     strike: style.3,
                     code: style.4,
+                    link: style.5,
                 });
             }
         };
@@ -188,6 +191,7 @@ fn project_display_content(
             underline: true,
             strike: false,
             code: false,
+            link: false,
         });
     }
 

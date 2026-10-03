@@ -2,8 +2,9 @@
 //!
 //! The writer is total over the built-in semantics it supports and refuses
 //! everything else. It never silently drops content: unknown node kinds,
-//! inline atoms, unknown attributes, host asset images, and whitespace that
-//! cannot survive a round-trip all fail export.
+//! inline atoms, unknown attributes, extended or nullable link attributes,
+//! host asset images, and whitespace that cannot survive a round-trip all
+//! fail export.
 
 use xiaomu_core::document::{
     IMAGE_ATTR_ALT, IMAGE_ATTR_ASSET, IMAGE_ATTR_HEIGHT, IMAGE_ATTR_SRC, IMAGE_ATTR_TITLE,
@@ -368,7 +369,7 @@ fn render_run(run: &TextRun) -> Result<Vec<String>> {
         let fence = code_span_fence(text);
         let mut piece = format!("{fence}{text}{fence}");
         if let Some(link) = link_mark(marks) {
-            piece = wrap_link(&piece, &link);
+            piece = wrap_link(&piece, &link)?;
         }
         return Ok(vec![piece]);
     }
@@ -384,21 +385,26 @@ fn render_run(run: &TextRun) -> Result<Vec<String>> {
         piece = format!("**{piece}**");
     }
     if let Some(link) = link_mark(marks) {
-        piece = wrap_link(&piece, &link);
+        piece = wrap_link(&piece, &link)?;
     }
     Ok(piece.split('\n').map(str::to_owned).collect())
 }
 
-fn wrap_link(inner: &str, link: &LinkMark) -> String {
+fn wrap_link(inner: &str, link: &LinkMark) -> Result<String> {
+    let (href, title) =
+        link.classic_parts()
+            .ok_or_else(|| MarkdownCodecError::UnsupportedMark {
+                mark: "Link attributes".to_owned(),
+            })?;
     let mut out = format!("[{inner}](");
-    out.push_str(&escape_destination(link.href()));
-    if let Some(title) = link.title() {
+    out.push_str(&escape_destination(href));
+    if let Some(title) = title {
         out.push_str(" \"");
         out.push_str(&escape_title(title));
         out.push('"');
     }
     out.push(')');
-    out
+    Ok(out)
 }
 
 fn link_mark(marks: &xiaomu_core::document::MarkSet) -> Option<LinkMark> {
@@ -428,6 +434,17 @@ fn inline_text(document: &XiaomuDocument, node: &Node) -> Result<String> {
             .map(|atom| describe_kind(atom.kind()))
             .unwrap_or_else(|| "InlineAtom".to_owned());
         return Err(MarkdownCodecError::UnsupportedNodeKind { kind });
+    }
+    // Heading export currently writes plain text. Never let that path strip
+    // a link or bypass the attribute-preservation checks in `wrap_link`.
+    if inline
+        .runs()
+        .iter()
+        .any(|run| run.marks().contains(MarkKind::Link))
+    {
+        return Err(MarkdownCodecError::UnsupportedMark {
+            mark: "Heading + Link".to_owned(),
+        });
     }
     Ok(inline
         .runs()
