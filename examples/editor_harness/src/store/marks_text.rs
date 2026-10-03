@@ -27,6 +27,11 @@ pub(crate) fn encode_marks(marks: &MarkSet) -> Result<String, PersistenceError> 
                     None => format!("link:{}", escape_mark_field(href)),
                 }
             }
+            Mark::TextStyle(_) => {
+                return Err(PersistenceError(
+                    "fixture format cannot losslessly encode TextStyle marks".to_owned(),
+                ));
+            }
             _ => {
                 return Err(PersistenceError(
                     "fixture format does not encode this mark".to_owned(),
@@ -181,6 +186,51 @@ mod link_attributes_tests {
         ] {
             let marks = MarkSet::new([Mark::Link(LinkMark::from_attributes(attrs))]).unwrap();
             assert!(encode_marks(&marks).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod text_style_tests {
+    use super::*;
+    use xiaomu_core::document::{StringAttribute, TextStyleAttributes, TextStyleMark};
+
+    #[test]
+    fn every_text_style_presence_state_is_explicitly_refused() {
+        let states = [
+            StringAttribute::Missing,
+            StringAttribute::Null,
+            StringAttribute::Value(String::new()),
+            StringAttribute::Value("树 🌲 e\u{301}:,\\".to_owned()),
+        ];
+        for color in &states {
+            for font_family in &states {
+                for font_size in &states {
+                    let style = Mark::TextStyle(TextStyleMark::from_attributes(
+                        TextStyleAttributes::default()
+                            .with_color(color.clone())
+                            .with_font_family(font_family.clone())
+                            .with_font_size(font_size.clone()),
+                    ));
+                    for other_marks in [vec![], vec![Mark::Code], vec![Mark::Bold]] {
+                        let marks =
+                            MarkSet::new(other_marks.into_iter().chain([style.clone()])).unwrap();
+                        let before = marks.clone();
+                        assert_eq!(
+                            encode_marks(&marks).unwrap_err().0,
+                            "fixture format cannot losslessly encode TextStyle marks"
+                        );
+                        assert_eq!(marks, before);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn text_style_does_not_expand_the_fixture_parser() {
+        for token in ["textStyle", "text_style", "textStyle:red:Serif:12px"] {
+            assert_eq!(parse_marks(token), Err(format!("unknown mark: {token}")));
         }
     }
 }

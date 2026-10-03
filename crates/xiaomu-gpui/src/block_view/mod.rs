@@ -20,9 +20,13 @@ mod input_handler;
 mod layout;
 #[cfg(test)]
 mod policy_input_tests;
+mod projection;
 mod scroll;
 #[cfg(test)]
 mod tests;
+mod text_style;
+#[cfg(test)]
+mod text_style_input_tests;
 #[cfg(test)]
 mod unmark_tests;
 
@@ -117,93 +121,7 @@ actions!(
     ]
 );
 
-/// One styled span of the displayed (possibly virtual) text.
-///
-/// Byte offsets are relative to the displayed text so the element can shape
-/// it without knowing about composition internals.
-#[derive(Clone)]
-pub(crate) struct DisplaySegment {
-    pub(super) start: usize,
-    pub(super) text: String,
-    pub(super) bold: bool,
-    pub(super) italic: bool,
-    pub(super) underline: bool,
-    pub(super) strike: bool,
-    pub(super) code: bool,
-    pub(super) link: bool,
-}
-
-fn project_display_content(
-    inline: &InlineContent,
-    composition: Option<(std::ops::Range<usize>, &str)>,
-) -> (String, Vec<DisplaySegment>) {
-    let (base_start, base_end, preedit) = composition
-        .as_ref()
-        .map(|(range, text)| (range.start, range.end, *text))
-        .unwrap_or((usize::MAX, usize::MAX, ""));
-    let replaced_len = base_end.saturating_sub(base_start);
-
-    let mut segments = Vec::new();
-    let mut cursor = 0usize;
-    for run in inline.runs() {
-        let run_start = cursor;
-        let run_end = run_start + run.len_bytes();
-        cursor = run_end;
-
-        let marks = run.marks();
-        let style = (
-            marks.contains(xiaomu_core::document::MarkKind::Bold),
-            marks.contains(xiaomu_core::document::MarkKind::Italic),
-            marks.contains(xiaomu_core::document::MarkKind::Underline),
-            marks.contains(xiaomu_core::document::MarkKind::Strike),
-            marks.contains(xiaomu_core::document::MarkKind::Code),
-            marks.contains(xiaomu_core::document::MarkKind::Link),
-        );
-        let mut push_piece = |start: usize, end: usize, display_start: usize| {
-            if start < end {
-                segments.push(DisplaySegment {
-                    start: display_start,
-                    text: run.text().as_str()[start - run_start..end - run_start].to_owned(),
-                    bold: style.0,
-                    italic: style.1,
-                    underline: style.2,
-                    strike: style.3,
-                    code: style.4,
-                    link: style.5,
-                });
-            }
-        };
-
-        let prefix_end = run_end.min(base_start);
-        push_piece(run_start, prefix_end, run_start);
-
-        let suffix_start = run_start.max(base_end);
-        let suffix_display_start = suffix_start.saturating_sub(replaced_len) + preedit.len();
-        push_piece(suffix_start, run_end, suffix_display_start);
-    }
-
-    if let Some((range, text)) = composition {
-        segments.push(DisplaySegment {
-            start: range.start,
-            text: text.to_owned(),
-            bold: false,
-            italic: false,
-            underline: true,
-            strike: false,
-            code: false,
-            link: false,
-        });
-    }
-
-    segments.sort_by_key(|segment| segment.start);
-    let mut text = String::new();
-    for segment in &mut segments {
-        segment.start = text.len();
-        text.push_str(&segment.text);
-    }
-
-    (text, segments)
-}
+use projection::{DisplaySegment, project_display_content};
 
 /// How much of this block's text the document selection covers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -446,6 +364,24 @@ impl ParagraphView {
         }
     }
 
+    /// Ask the same Runtime resolver that models committed insertion. Never
+    /// cache this: a collapsed SetMark can change StoredMarks without an epoch.
+    fn preedit_marks(&self) -> xiaomu_core::document::MarkSet {
+        let Some(state) = &self.composition else {
+            return xiaomu_core::document::MarkSet::empty();
+        };
+        let Some(offset) = self
+            .inline()
+            .and_then(|inline| inline.offset_at(state.base_range().start).ok())
+        else {
+            return xiaomu_core::document::MarkSet::empty();
+        };
+        self.session
+            .borrow()
+            .effective_input_marks(self.node, offset)
+            .unwrap_or_else(|_| xiaomu_core::document::MarkSet::empty())
+    }
+
     /// Builds the displayed text plus its styled segments.
     ///
     /// Without an active composition this is the canonical content itself;
@@ -456,10 +392,11 @@ impl ParagraphView {
         let Some(inline) = self.inline() else {
             return (String::new(), Vec::new());
         };
+        let marks = self.preedit_marks();
         let composition = self
             .composition
             .as_ref()
-            .map(|state| (state.base_range(), state.preedit()));
+            .map(|state| (state.base_range(), state.preedit(), &marks));
         project_display_content(&inline, composition)
     }
 }

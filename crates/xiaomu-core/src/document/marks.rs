@@ -1,6 +1,6 @@
 //! Canonical inline marks and normalized mark sets.
 
-use super::LinkMark;
+use super::{LinkMark, TextStyleMark};
 use crate::{Error, Result};
 
 /// Semantic identity of a mark independent of its attributes.
@@ -18,6 +18,8 @@ pub enum MarkKind {
     Strike,
     /// Hyperlink.
     Link,
+    /// Inline color, font family and font size with exact attributes.
+    TextStyle,
 }
 
 /// Canonical inline formatting mark.
@@ -36,6 +38,8 @@ pub enum Mark {
     Strike,
     /// Hyperlink with preserved attributes.
     Link(LinkMark),
+    /// Text styling with preserved attributes, independent of rendering support.
+    TextStyle(TextStyleMark),
 }
 
 impl Mark {
@@ -50,6 +54,7 @@ impl Mark {
             Self::Underline => MarkKind::Underline,
             Self::Strike => MarkKind::Strike,
             Self::Link(_) => MarkKind::Link,
+            Self::TextStyle(_) => MarkKind::TextStyle,
         }
     }
 }

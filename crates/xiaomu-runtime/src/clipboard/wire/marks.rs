@@ -1,7 +1,10 @@
-//! Strict mark DTOs, including conditional v8 exact link attributes.
+//! Strict mark DTOs with conditional exact link and text-style attributes.
 
 use serde::{Deserialize, Serialize};
-use xiaomu_core::document::{LinkAttributes, LinkMark, Mark, MarkSet, StringAttribute, TextRun};
+use xiaomu_core::document::{
+    LinkAttributes, LinkMark, Mark, MarkSet, StringAttribute, TextRun, TextStyleAttributes,
+    TextStyleMark,
+};
 
 use super::ClipboardMetadataError;
 
@@ -13,6 +16,12 @@ pub(super) struct WireRun {
 }
 
 impl WireRun {
+    pub(super) fn carries_text_style(&self) -> bool {
+        self.marks
+            .iter()
+            .any(|mark| matches!(mark, WireMark::TextStyle { .. }))
+    }
+
     pub(super) fn carries_link_attributes(&self) -> bool {
         self.marks
             .iter()
@@ -57,6 +66,7 @@ enum WireMark {
     // interpretation remains unchanged; only v8's new variant is exact.
     Link { href: String, title: Option<String> },
     LinkAttributes { attrs: WireLinkAttributes },
+    TextStyle { attrs: WireTextStyleAttributes },
 }
 
 impl WireMark {
@@ -76,6 +86,9 @@ impl WireMark {
                     attrs: WireLinkAttributes::from_attributes(link.attributes()),
                 },
             },
+            Mark::TextStyle(style) => Self::TextStyle {
+                attrs: WireTextStyleAttributes::from_attributes(style.attributes()),
+            },
             _ => return Err(ClipboardMetadataError::unsupported()),
         })
     }
@@ -91,7 +104,36 @@ impl WireMark {
             Self::LinkAttributes { attrs } => {
                 Mark::Link(LinkMark::from_attributes(attrs.into_attributes()))
             }
+            Self::TextStyle { attrs } => {
+                Mark::TextStyle(TextStyleMark::from_attributes(attrs.into_attributes()))
+            }
         })
+    }
+}
+
+/// All three exact slots are required, even if their values are Missing.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireTextStyleAttributes {
+    color: WireStringAttribute,
+    font_family: WireStringAttribute,
+    font_size: WireStringAttribute,
+}
+
+impl WireTextStyleAttributes {
+    fn from_attributes(attrs: &TextStyleAttributes) -> Self {
+        Self {
+            color: WireStringAttribute::from_attribute(attrs.color()),
+            font_family: WireStringAttribute::from_attribute(attrs.font_family()),
+            font_size: WireStringAttribute::from_attribute(attrs.font_size()),
+        }
+    }
+
+    fn into_attributes(self) -> TextStyleAttributes {
+        TextStyleAttributes::default()
+            .with_color(self.color.into_attribute())
+            .with_font_family(self.font_family.into_attribute())
+            .with_font_size(self.font_size.into_attribute())
     }
 }
 

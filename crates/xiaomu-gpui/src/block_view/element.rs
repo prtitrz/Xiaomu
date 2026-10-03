@@ -9,16 +9,16 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui::{
-    App, AvailableSpace, Bounds, Element, ElementId, ElementInputHandler, Entity, FontStyle,
-    FontWeight, GlobalElementId, IntoElement, LayoutId, PaintQuad, Pixels, SharedString, Size,
-    StrikethroughStyle, Style, TextAlign, TextRun, UnderlineStyle, Window, fill, point, px,
-    relative, rgba, size,
+    App, AvailableSpace, Bounds, Element, ElementId, ElementInputHandler, Entity, GlobalElementId,
+    IntoElement, LayoutId, PaintQuad, Pixels, SharedString, Size, Style, TextAlign, Window, fill,
+    point, px, relative, rgba, size,
 };
 use xiaomu_core::selection::CursorAffinity;
 
 use super::layout::BlockTextLayout;
+use super::text_style::{FontCatalog, text_runs};
 use super::{ParagraphView, SelectionProjection};
-use crate::document_view::cache_key::LayoutCacheKey;
+use crate::document_view::cache_key::{LayoutCacheKey, style_fingerprint};
 
 #[cfg(test)]
 #[path = "link_style_tests.rs"]
@@ -34,7 +34,7 @@ pub struct ParagraphElement {
 
 /// Measured block layout shared between GPUI's layout and prepaint phases.
 #[derive(Clone, Default)]
-pub struct RequestLayoutState(Rc<RefCell<Option<BlockTextLayout>>>);
+pub struct RequestLayoutState(Rc<RefCell<Option<BlockTextLayout>>>, u64);
 
 /// Layout results computed during prepaint and consumed during paint.
 ///
@@ -88,13 +88,16 @@ impl Element for ParagraphElement {
         let font_size = text_style.font_size.to_pixels(window.rem_size());
         let color = text_style.color;
         let line_height = window.line_height();
-        let runs = text_runs(&segments, font, color);
+        let fonts = FontCatalog::from_system(window.text_system());
+        let runs = text_runs(&segments, font.clone(), color, &fonts);
+        let fingerprint =
+            style_fingerprint(&display_text, &font, color, font_size, line_height, &runs);
         let text = SharedString::new(display_text.as_ref());
 
         let mut style = Style::default();
         style.size.width = relative(1.0).into();
 
-        let state = RequestLayoutState::default();
+        let state = RequestLayoutState(Rc::new(RefCell::new(None)), fingerprint);
         let measured_state = state.clone();
         let layout_id = window.request_measured_layout(
             style,
@@ -104,8 +107,9 @@ impl Element for ParagraphElement {
                     _ => None,
                 });
 
-                let cache_key =
-                    wrap_width.map(|width| LayoutCacheKey::new(node, epoch, f32::from(width)));
+                let cache_key = wrap_width.map(|width| {
+                    LayoutCacheKey::new(node, epoch, f32::from(width)).with_style(fingerprint)
+                });
                 // None is not a cache identity: intrinsic width probes have
                 // no key, and a painted preedit deliberately has no key too.
                 // Treating None == None as a hit resurrects cancelled preedit.
@@ -152,6 +156,7 @@ impl Element for ParagraphElement {
         let composing = view.is_composing();
         let cache_key = (!composing).then(|| {
             LayoutCacheKey::new(view.node(), view.epoch.get(), f32::from(bounds.size.width))
+                .with_style(request_layout.1)
         });
         let layout = request_layout
             .0
@@ -313,46 +318,4 @@ fn measured_size(layout: &BlockTextLayout, wrap_width: Option<Pixels>) -> Size<P
         measured.width = width;
     }
     measured
-}
-
-fn text_runs(
-    segments: &[super::DisplaySegment],
-    font: gpui::Font,
-    color: gpui::Hsla,
-) -> Vec<TextRun> {
-    segments
-        .iter()
-        .map(|segment| {
-            let mut run_font = font.clone();
-            if segment.bold {
-                run_font.weight = FontWeight::BOLD;
-            }
-            if segment.italic {
-                run_font.style = FontStyle::Italic;
-            }
-            // Only the preedit segment carries an explicit underline;
-            // canonical segments keep their own mark styling.
-            let run_color = if segment.link {
-                rgba(0x2563ebff).into()
-            } else {
-                color
-            };
-            let underline = (segment.underline || segment.link).then_some(UnderlineStyle {
-                color: Some(run_color),
-                thickness: px(1.0),
-                wavy: false,
-            });
-            TextRun {
-                len: segment.text.len(),
-                font: run_font,
-                color: run_color,
-                background_color: segment.code.then_some(rgba(0x00000012).into()),
-                underline,
-                strikethrough: segment.strike.then_some(StrikethroughStyle {
-                    color: Some(run_color),
-                    thickness: px(1.0),
-                }),
-            }
-        })
-        .collect()
 }

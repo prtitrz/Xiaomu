@@ -42,6 +42,8 @@ const VERSION_NULL_ATTRS: u32 = 7;
 // Exact five-field link attributes need a new mark variant, not an extension
 // to the old Link DTO that an older reader could silently truncate.
 const VERSION_LINK_ATTRIBUTES: u32 = 8;
+// TextStyle is a new semantic mark even when all three fields are missing.
+const VERSION_TEXT_STYLE: u32 = 9;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -85,7 +87,9 @@ impl std::error::Error for ClipboardMetadataError {}
 ///
 /// The plain-text fallback is deliberately not duplicated in the metadata;
 /// callers put [`ClipboardSlice::plain_text`] in the platform text flavor.
-/// Links outside the classic href/title form encode as v8, preserving all
+/// Text-style marks encode as v9, preserving all three missing/null/string
+/// attributes without interpreting CSS. Otherwise, links outside the classic
+/// href/title form encode as v8, preserving all
 /// five fields and their missing/null/string distinctions. Otherwise,
 /// fragments containing explicit null node attributes encode as v7;
 /// tables with nonempty row attributes encode as v6; other tables stay at
@@ -97,7 +101,9 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
         .iter()
         .map(WireNode::from_node)
         .collect::<Result<Vec<_>, _>>()?;
-    let version = if roots.iter().any(WireNode::carries_link_attributes) {
+    let version = if roots.iter().any(WireNode::carries_text_style) {
+        VERSION_TEXT_STYLE
+    } else if roots.iter().any(WireNode::carries_link_attributes) {
         VERSION_LINK_ATTRIBUTES
     } else if roots.iter().any(WireNode::carries_null) {
         VERSION_NULL_ATTRS
@@ -123,7 +129,7 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
 /// differs from the platform text all return `None`. The caller should then
 /// paste the supplied plain text normally. An older envelope carrying a
 /// newer feature (v4 tables, v5 row attributes, pre-v7 null attributes, or
-/// pre-v8 extended link marks)
+/// pre-v8 extended link marks, or pre-v9 text-style marks)
 /// is also rejected. Unknown attribute variants reject the entire fragment
 /// rather than silently dropping values. Historical v1-v3 envelopes remain
 /// unsupported, as before the null-attribute extension.
@@ -141,7 +147,13 @@ pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlic
                 | VERSION_TABLE_ROW_ATTRS
                 | VERSION_NULL_ATTRS
                 | VERSION_LINK_ATTRIBUTES
+                | VERSION_TEXT_STYLE
         )
+    {
+        return None;
+    }
+    if envelope.version < VERSION_TEXT_STYLE
+        && envelope.roots.iter().any(WireNode::carries_text_style)
     {
         return None;
     }
@@ -192,6 +204,15 @@ struct WireNode {
 }
 
 impl WireNode {
+    fn carries_text_style(&self) -> bool {
+        match &self.content {
+            WireContent::Inline { runs, .. } => runs.iter().any(WireRun::carries_text_style),
+            WireContent::Children { children } => children.iter().any(Self::carries_text_style),
+            WireContent::Table { rows, .. } => rows.iter().flatten().any(Self::carries_text_style),
+            WireContent::Atomic => false,
+        }
+    }
+
     fn carries_link_attributes(&self) -> bool {
         match &self.content {
             WireContent::Inline { runs, .. } => runs.iter().any(WireRun::carries_link_attributes),

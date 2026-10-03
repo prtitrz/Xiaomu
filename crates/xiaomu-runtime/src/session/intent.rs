@@ -13,13 +13,14 @@ use crate::clipboard::ClipboardSlice;
 
 use super::SessionError;
 
-const MARK_KINDS: [MarkKind; 6] = [
+pub(super) const MARK_KINDS: [MarkKind; 7] = [
     MarkKind::Bold,
     MarkKind::Italic,
     MarkKind::Code,
     MarkKind::Underline,
     MarkKind::Strike,
     MarkKind::Link,
+    MarkKind::TextStyle,
 ];
 
 /// One caret movement direction over the paragraph's logical text.

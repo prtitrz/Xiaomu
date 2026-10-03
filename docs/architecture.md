@@ -102,6 +102,8 @@ XiaomuDocument
 
 `LinkMark` 以 typed `LinkAttributes` 保存 href / target / rel / class / title，每字段使用 `StringAttribute::Missing / Null / Value(String)`，空字符串不等同于缺失或 null。旧 `new(href,title)` 保留经典含义，`from_attributes` / `attributes` 提供精确保真；`href()` 返回 `Option<&str>`，不以空字符串伪装缺失。`classic_parts()` 只在旧 href/title 两字段无损时返回投影。所有字段参与 mark equality、same-kind conflict 和普通 transaction/inverse；Core 不推断宿主默认值、不执行 URI。详见 [ADR 0007](adr/0007-exact-link-attributes.md)。
 
+`TextStyleMark` 以 typed `TextStyleAttributes` 保存 color / font_family / font_size，复用三态 `StringAttribute`。全 Missing、全 Null、空串或未识别字符串均精确保留；mark 的存在也不因“视觉为空”自动消失。所有字段参与 equality、same-kind conflict、run normalization 和 transaction/inverse；Core 不解析 CSS、不填宿主默认、不施加 Code 排他规则。布局是否支持某个值是独立 frontend/host capability，不能通过替换 canonical 字符串伪装支持。Markdown 普通段落、Code/Heading 及旧 harness fixture 均拒绝 TextStyle，避免静默丢失。详见 [ADR 0008](adr/0008-exact-text-style.md)。
+
 `InlineContent` 在构造时规范化相邻且 `MarkSet` 相同的 `TextRun`。`NodeAttrs` 使用确定性 key 顺序并 preservation-first 保存未知属性值。`AttrValue::Null` 是显式空值，支持 list/object 内递归保留；`get(key) == Some(&AttrValue::Null)` 与缺失 key 的 `None` 不同，不表示删除属性。它不放宽 image 等 typed attrs 校验，也不引入浮点值；canonical document version 仍为 v1。见 [ADR 0006](adr/0006-nullable-node-attrs.md)。
 
 ADR 0004 固化了当前 line-break contract：LF `\n`（U+000A）是晓木唯一赋予 line-break 语义的 inline scalar。Paragraph / Heading 等普通富文本 inline node 中 LF 表示 HardBreak；CodeBlock 中 LF 表示代码 newline；soft-wrap 不产生 canonical byte。LF 继续使用普通 UTF-8 `TextOffset`，因此无需 HardBreak 专用 Core content variant 或 position system。Core 原始 construction 当前仍容忍 CR 作为普通 scalar；平台 adapter / codec 表达 line break 时负责 `CRLF / CR → LF` 规范化。
@@ -251,6 +253,8 @@ JoinNodes          → 删除追加文本 + RestoreSubtree
 宿主工具栏可调用 `DocumentView::apply_edit_intent` 复用内建编辑 action 的同一入口：composition guard、session policy、render epoch、child 同步、焦点和 caret scroll 均沿原路径执行，不直接绕过前端对共享 session 操作。该 seam 只公开已有行为，不新增输入协议。
 
 `prepare_intent(SessionContext, &EditIntent)` 在任何 selection / StoredMarks / history mutation 前运行，包括 `PasteSlice` 和 cell-range convergence。只读 context 提供 document、selection、explicit stored marks，以及复用 Runtime 周围 run 继承语义的 `effective_typing_marks`。宿主返回 Continue、完全保留状态的 NoChange、collapsed inline caret 的显式 StoredMarks（区分 None / Some(empty)），或一个 `EditPlan`。宿主可用 `EditPlan::new` / `PrimaryEdit::new` 描述替代 transaction 与 selection policy，一次成功接管只产生一个 isolated Undo 单元，无需可变 session 或递归 `apply_intent`。
+
+前端可用 `DocumentSession::effective_input_marks(node, replacement_start)` 只读查询默认 replacement 的 marks：当前 inline focus 必须属于该节点，offset 须合法；stored marks 优先，否则在替换起点复用同一周围 run 继承规则。它不执行 intent/policy、不改变 session，可供 IME preedit 样式投影；host policy 自行替换计划的特殊行为不由该查询模拟。Cell range 与非 inline focus 明确拒绝。
 
 `EditPlan::with_stored_marks` 可指定成功事务后的 typing marks，供 split 到空块等无法从 canonical run 继承的场景使用。最终 selection 必须是 collapsed inline caret；合法性与 candidate 在同一发布前阶段检查，通过后 marks 与 document / selection 一起安装。失败不能先发布文档再报错。
 
@@ -428,6 +432,8 @@ DocumentSelection
 `plain_text` 始终存在，普通片段用 `\n` 表达 inline block boundary；表格矩形使用 TSV，cell 内 block 边界与 tab/CR/LF 扁平化为空格。Runtime metadata 使用私有 serde wire DTO，不给 Core 增加 serde 依赖；不含 Null 时，非表片段写 `xiaomu.clipboard` v4，普通表写 v5，含非空 row attrs 的表写 v6。任一 node、atom、row attrs（包括嵌套 list/object）含 Null 时写 v7，使用 `{"type":"null"}`。decode 保持 v4–v6 兼容，拒绝旧信封中的 Null 和未知 attr variant，重建临时 document 校验 fragment tree；foreign、malformed、unknown-version、旧信封带新特性或与系统文本不一致的 stale metadata 均由 frontend 回退到 plain text。
 
 完整 link attrs 在无法由经典 href/title 保真时按需写 clipboard v8 的 `link_attributes` variant；五字段显式 tagged missing/null/string，保留缺失、null、空串和 Unicode。普通 links 继续使用旧 variant 与 v4–v7 feature 选择；v8 可混合经典 links、node Null、table/row attrs。递归检查覆盖 container 与 table 内所有 runs，pre-v8 信封携带新 variant 拒绝；未知字段、缺少必要状态字段、重复键和错误类型同样 fail closed。历史 v1–v3 仍不支持，v4–v7 旧 Link 的 title null/missing 含义不变。
+
+任一 run 携带 TextStyle 时才写 v9 的 `text_style` variant；三个 attrs 字段显式使用同一 tagged missing/null/string wire，含全 Missing 的 mark 也需要 v9。v9 可混合旧 Link、新 Link attrs、table/row/null；无 TextStyle 的文档继续沿 v4–v8 最低必要版本编码，旧语义不变。Pre-v9 携带 TextStyle、future/duplicate/未知字段/错误类型均拒绝。Runtime 普通输入、paste 与跨段 atom suffix 精确重建共享完整 mark-kind 表，确保目的 run 的 TextStyle 不泄漏到原本无样式的插入内容。
 
 cross-block Delete / Cut 由 Runtime 统一编排。Delete 保留首个 inline block identity 与未选 prefix，把末 block 未选 suffix 接到 seam，删除覆盖的中间 leaves，并清理因本次操作而变空的 container；Cut 的 clipboard projection 是只读步骤，文档侧仍只提交一次 Delete history change。
 
