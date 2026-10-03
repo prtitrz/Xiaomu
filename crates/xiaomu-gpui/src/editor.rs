@@ -226,9 +226,7 @@ pub fn run_editor_instance(
     Application::new().run(move |cx: &mut App| {
         // Quit when the last window closes so the harness terminates cleanly.
         cx.on_window_closed(|cx| {
-            if cx.windows().is_empty() {
-                cx.quit();
-            }
+            after_last_window_closed(cx, |cx| cx.quit());
         })
         .detach();
 
@@ -262,6 +260,24 @@ pub fn run_editor_instance(
     Ok(())
 }
 
+/// Queue outside the native close callback: X11 holds its client RefCell
+/// while delivering it, so synchronous quit would reborrow that client.
+/// `defer` is not enough: it can flush before the platform callback returns.
+fn after_last_window_closed(cx: &App, action: impl FnOnce(&mut App) + 'static) {
+    if !cx.windows().is_empty() {
+        return;
+    }
+    cx.spawn(async move |cx| {
+        let _ = cx.update(|cx| {
+            // A host may have opened another window before this task runs.
+            if cx.windows().is_empty() {
+                action(cx);
+            }
+        });
+    })
+    .detach();
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
@@ -272,6 +288,23 @@ mod tests {
     };
     use xiaomu_core::selection::{CursorAffinity, TextPoint};
     use xiaomu_runtime::session::{EditIntent, SessionOutcome};
+
+    #[gpui::test]
+    fn final_window_action_runs_after_native_callback_borrow_is_released(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let platform_state = Rc::new(RefCell::new(false));
+        let callback_borrow = platform_state.borrow_mut();
+        let state = platform_state.clone();
+        cx.update(|cx| after_last_window_closed(cx, move |_| *state.borrow_mut() = true));
+        assert!(
+            !*callback_borrow,
+            "quit must not run inside the close callback"
+        );
+        drop(callback_borrow);
+        cx.background_executor.run_until_parked();
+        assert!(*platform_state.borrow());
+    }
 
     struct CountListener(Rc<Cell<u32>>);
 
