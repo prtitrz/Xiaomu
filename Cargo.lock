@@ -6933,6 +6933,9 @@ version = "0.1.0"
 dependencies = [
  "cssparser",
  "gpui",
+ "unicode-linebreak",
+ "unicode-script",
+ "unicode-segmentation",
  "xiaomu-core",
  "xiaomu-runtime",
  "xim-ctext",
