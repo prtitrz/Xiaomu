@@ -639,7 +639,11 @@ Image 走 typed canonical 语义（`crates/xiaomu-core/src/document/image.rs`）
 
 Clipboard wire v4 携带 atomic 载荷（`ClipboardNodeContent::Atomic`、`WireContent::Atomic`、`WireKind::HorizontalRule/Image`）；collapsed atomic selection 投影为单 atomic root 的 ClipboardSlice，粘贴为聚焦块后的兄弟块；mixed inline/atomic 层级粘贴 fail closed（`SessionError::ClipboardAtomicUnsupported`）。plain-text fallback 语义化：image copy 在 plain text 中携带 ExternalUrl。
 
-**外部图片导入边界（2026-10-01）：** 上述 structured clipboard 保存的是图片节点语义/引用，不是系统图片字节。`crates/xiaomu-gpui/src/input/platform_clipboard.rs` 当前仅返回 `Structured` 或 `Text`，读取首先要求 `ClipboardItem::text()` 存在，尚无截图/位图或图片文件导入分支。`AssetService` 只提供 resolve，不提供 import/store；`examples/editor_harness/src/main.rs` 仍配置 `asset_service: None`。因此测试窗口尚不能通过 Ctrl+V 导入外部截图，示例 Image 占位也不能作为实际资产导入、显示及保存重开的证据。待排期范围见 [planning 交付边界](planning.md#delivery-boundaries)。
+**外部图片导入边界（2026-10-03 实验分支）：** 平台剪贴板现在优先有效 Xiaomu structured metadata，然后 PNG/JPEG encoded pixels，最后普通文本。图片只在非 CodeBlock 的 collapsed inline caret 导入；非空选区、atomic/cell range 和 composition 期间拒绝，保持原文档与历史。`AssetService::import_image` 为默认拒绝的可选同步能力；宿主验证和持久化后返回 `ImageAttrs(AssetRef)`，再发出单一 `InsertImage` history entry。宿主实现应限制尺寸/耗时；没有异步导入或外部文件读取。图片节点仍仅携带引用，不能假设跨宿主复制引用等于复制字节。
+
+官方 harness 使用 `<store-path>.assets/` append-only sidecar，先 decode 验证 PNG/JPEG（≤16 MiB、各维≤4096、decoder allocation≤128 MiB），再同目录临时文件完整写入/sync/rename，最后插入节点。fixture snapshot 同样使用临时文件替换；这不是生产格式、通用 GC 或跨文件事务承诺。Undo 不删资产，Redo 可继续 resolve；保存撤销后的快照不会从 sidecar 扫描复活节点；重开用新 service 从相同 sidecar 读取实际 bytes。移走资产仅产生失败占位，不修改节点。`image_block` 丢弃不同旧 source resolve 并检查返回 asset identity，避免晚到回调污染当前纹理。
+
+自动化覆盖见 `tests/image_paste.rs`、harness `assets/tests.rs` 和 `image_block/tests.rs`。真实 Linux/Windows/macOS 剪贴板与纹理显示需分别原生验收，不从自动化通过推断。详见 [图片实验验收](image-import-experiment.md)。
 
 ## P4.9 Markdown Baseline Codec 事实
 

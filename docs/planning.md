@@ -988,12 +988,12 @@ Core 尽早加入随机 transaction sequence + inverse replay + mapping invarian
 | --- | --- | --- |
 | 文本、格式与结构编辑 | 原生输入/IME、基础格式快捷键、跨块选区与 history、列表、代码块、HardBreak | 完整工具栏、菜单等产品 UI 不由阶段 CLOSED 自动承诺 |
 | 图片节点与显示 | `InsertImage`、typed image attrs、atomic selection/delete/undo、注入 `AssetService` 后的图片渲染 | harness 尚未注入真实资产服务，示例图片仍为占位；宿主资产导入/存储示例待排期 |
-| 图片复制粘贴 | 已有 Image 节点通过 Xiaomu structured clipboard 保留图片语义和引用；资产仍由宿主管理 | 系统截图/外部图片位图 Ctrl+V **未实现、待排期**；不会自动复制资产字节 |
+| 图片复制粘贴 | 已有 Image 节点通过 Xiaomu structured clipboard 保留图片语义和引用；资产仍由宿主管理 | 实验分支已接 PNG/JPEG Ctrl+V 与可选 host import；harness 持久化真实字节，原生验收另记；跨宿主 structured copy 不会自动复制资产字节 |
 | 图片文件与后续操作 | 复用 image / asset contract 的基础具备 | 文件选择、文件拖入、交互式缩放/裁剪均未交付；不与第一版截图粘贴捆绑 |
 | 链接 | canonical Link mark、structured clipboard 与 baseline Markdown 保留链接语义 | 链接添加/编辑 UI 待排期；宿主打开回调 `LinkOpenService` 已列入 P7 |
 | 表格 | P5 范围内的 cell 编辑、导航、行列操作、矩形选区与 clipboard | 长文档/复杂表格性能基线由 P6 建立，不据正确性 Gate 宣称性能已达标 |
 
-**当前正式顺序仍是 P5 → P6 → P7。** 新发现的外部图片粘贴缺口不算作 P4 已交付，也不自动推迟到 P7；需单独确认优先级。建议在大规模性能优化前安排一个窄的“图片导入可用闭环”切片，是否放在 P6 前实施仍待确认，本次文档整理不改变阶段编号或启动实现。
+**当前正式顺序仍是 P5 → P6 → P7。** 新发现的外部图片粘贴缺口不算作 P4 已交付，也不自动推迟到 P7；需单独确认优先级。建议在大规模性能优化前安排一个窄的“图片导入可用闭环”切片，2026-10-03 已授权在独立实验分支先实施此切片，再评估宿主接入；不改变 P0–P5 历史 Gate 或宣称 P6 已启动。实验范围与证据见 [图片实验验收](image-import-experiment.md)。
 
 该切片至少需要在启动时明确并验收：
 

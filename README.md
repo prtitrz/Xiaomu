@@ -80,7 +80,7 @@ docs/
 
 P0–P5 have delivered the core editing model, native input, structured content and tables within their recorded acceptance scope. The current next phase is P6: establish reproducible long-document, table and multi-editor performance baselines before choosing optimizations.
 
-The [top-level plan](docs/planning.md) is the single execution roadmap. Historical gap reviews are audit records, not a second work queue. Image nodes, rendering hooks and internal structured copy/paste exist, but external screenshot/image paste and a host asset-import workflow are not yet implemented; see [delivery boundaries and unscheduled editing work](docs/planning.md#delivery-boundaries).
+The [top-level plan](docs/planning.md) is the single execution roadmap. Historical gap reviews are audit records, not a second work queue. The experimental image-import slice adds PNG/JPEG clipboard pixels through a host import service, with durable sidecar assets in the harness and Undo/Redo/save/reopen tests. Native platform acceptance remains separate; see [delivery boundaries and unscheduled editing work](docs/planning.md#delivery-boundaries).
 
 ## Development
 
