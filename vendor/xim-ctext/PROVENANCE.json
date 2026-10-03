@@ -1,0 +1,29 @@
+{
+  "repository": "https://github.com/zed-industries/xim-rs.git",
+  "revision": "16f35a2c881b815a2b6cdfd6687988e84f8447d8",
+  "upstream_crate_path": "xim-ctext",
+  "upstream_declared_version": "0.3.0",
+  "not_registry_release": true,
+  "license_source": "LICENSE at repository root",
+  "upstream_sha256": {
+    "Cargo.toml": "78682d1e7321a5c0301ee975ed74e4c3ea6a3568dedf00e4df7c670e0d4b1423",
+    "README.md": "fa121baa984ec1f1ea4472dbb4d57a7b4e5f6513100cbc9df2aaa1c54c0e4175",
+    "src/lib.rs": "23d72e0982fc886b9104ea4cc1d14822337d87cb33a4043b53e963b3eac72cd1",
+    "src/main.rs": "d4ee34ae260fae894dc8672cc38f8d2dea22e57d62907c92f974769793e28257",
+    "LICENSE": "efa1224931b98468f5005f77285457f8d2eab0a77a15941aa10abbab1ae9a74e"
+  },
+  "vendored_sha256": {
+    "Cargo.toml": "78682d1e7321a5c0301ee975ed74e4c3ea6a3568dedf00e4df7c670e0d4b1423",
+    "README.md": "fa121baa984ec1f1ea4472dbb4d57a7b4e5f6513100cbc9df2aaa1c54c0e4175",
+    "src/lib.rs": "1a1a1747d324d613048be87c9944755a692f6eb295754d9b9cd3d22f532b37a1",
+    "src/main.rs": "d4ee34ae260fae894dc8672cc38f8d2dea22e57d62907c92f974769793e28257",
+    "LICENSE": "efa1224931b98468f5005f77285457f8d2eab0a77a15941aa10abbab1ae9a74e"
+  },
+  "local_patch_sha256": "e5f2baf6ffe6dbcfa680db5e0e1c9a3fc496d5c281b41cb1d697f1a76d16e8bb",
+  "backport": {
+    "package": "xim-ctext",
+    "version": "0.4.1",
+    "source": "https://crates.io/crates/xim-ctext/0.4.1",
+    "scope": "ESC ( B / ESC ( J branches only"
+  }
+}
