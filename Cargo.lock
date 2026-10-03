@@ -6830,6 +6830,7 @@ dependencies = [
  "gpui",
  "xiaomu-core",
  "xiaomu-runtime",
+ "xim-ctext",
 ]
 
 [[package]]
@@ -6851,8 +6852,6 @@ dependencies = [
 [[package]]
 name = "xim-ctext"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ac61a7062c40f3c37b6e82eeeef835d5cc7824b632a72784a89b3963c33284c"
 dependencies = [
  "encoding_rs",
 ]

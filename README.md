@@ -82,6 +82,10 @@ P0–P5 have delivered the core editing model, native input, structured content 
 
 The [top-level plan](docs/planning.md) is the single execution roadmap. Historical gap reviews are audit records, not a second work queue. The experimental image-import slice adds PNG/JPEG clipboard pixels through a host import service, with durable sidecar assets in the harness and Undo/Redo/save/reopen tests. Native platform acceptance remains separate; see [delivery boundaries and unscheduled editing work](docs/planning.md#delivery-boundaries).
 
+## Linux embedding note
+
+Stock Linux input uses a narrowly patched, explicitly vendored `xim-ctext` decoder based on an identified official Git revision. Embedding applications must use that audited copy and repeat the root Cargo override; it is not inherited from Xiaomu as a dependency. See [the decoder and native-test boundaries](docs/linux-xim-decoder.md). This does not replace GPUI or add a custom input-owner/wait protocol.
+
 ## Development
 
 Engineering rules live in [docs/engineering-rules.md](docs/engineering-rules.md). Current architecture facts live in [docs/architecture.md](docs/architecture.md). Contribution workflow is documented in [CONTRIBUTING.md](CONTRIBUTING.md).

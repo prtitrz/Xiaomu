@@ -20,8 +20,11 @@ Before opening a pull request, run:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
+cargo test --locked --manifest-path vendor/xim-ctext/Cargo.toml
 python tools/check_source_size.py
 python tools/check_dependency_boundaries.py
+python tools/check_xim_decoder_source.py
+cargo deny check bans licenses sources
 ```
 
 Dependency policy is checked in CI with `cargo-deny`.

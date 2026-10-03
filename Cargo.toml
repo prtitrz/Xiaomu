@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["vendor/xim-ctext"]
 members = [
   "crates/xiaomu-core",
   "crates/xiaomu-runtime",
@@ -26,3 +27,9 @@ serde_json = "1"
 xiaomu-core = { version = "0.1.0", path = "crates/xiaomu-core" }
 xiaomu-runtime = { version = "0.1.0", path = "crates/xiaomu-runtime" }
 xiaomu-gpui = { version = "0.1.0", path = "crates/xiaomu-gpui" }
+
+# Narrow decoder repair based on official Git 16f35a2's genuine version 0.3.0.
+# See vendor/xim-ctext/PROVENANCE.json and its auditable local patch.
+# GPUI and zed-xim remain stock registry packages. Hosts must repeat this root patch.
+[patch.crates-io]
+xim-ctext = { path = "vendor/xim-ctext" }

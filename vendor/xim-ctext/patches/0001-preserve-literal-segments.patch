@@ -1,0 +1,55 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -120,9 +120,12 @@
+ }
+ 
+ pub fn compound_text_to_utf8(bytes: &[u8]) -> Result<String, DecodeError> {
+-    let split: Vec<&[u8]> = bytes.split(|&b| b == 0x1b).collect();
+-
+-    let mut result = String::new();
++    let mut split = bytes.split(|&b| b == 0x1b);
++
++    // The first chunk was not introduced by ESC. Interpret it literally in
++    // the default charset, even if it starts with "%G", "%@", or "$(".
++    let prefix = split.next().unwrap_or_default();
++    let mut result = encoding_rs::mem::decode_latin1(prefix).into_owned();
+ 
+     for chunk in split {
+         let mut iter = chunk.iter();
+@@ -136,7 +139,14 @@
+                 };
+             }
+             // UTF-8 End
+-            (Some(0x25), Some(0x40)) => {}
++            (Some(0x25), Some(0x40)) => {
++                result.push_str(&encoding_rs::mem::decode_latin1(iter.as_slice()));
++            }
++            // Return to ASCII / JIS X 0201 Roman. Backported from the
++            // published upstream 0.4.1 decoder; only escaped chunks reach here.
++            (Some(0x28), Some(0x42)) | (Some(0x28), Some(0x4a)) => {
++                result.push_str(&encoding_rs::mem::decode_latin1(iter.as_slice()));
++            }
+             // 94N
+             (Some(0x24), Some(0x28)) => match iter.next() {
+                 // JP
+@@ -152,14 +162,18 @@
+ 
+                 // CN (GB2312)
+                 Some(0x41) => {
+-                    let left: Vec<u8> = iter.map(|&b| b + 0x80).collect();
++                    let left: Vec<u8> = iter
++                        .map(|&b| b.checked_add(0x80).ok_or(DecodeError::InvalidEncoding))
++                        .collect::<Result<_, _>>()?;
+                     let (out, _) = encoding_rs::GBK.decode_without_bom_handling(&left);
+                     result.push_str(&out);
+                 }
+ 
+                 // KR (KS C 5601)
+                 Some(0x43) => {
+-                    let left: Vec<u8> = iter.map(|&b| b + 0x80).collect();
++                    let left: Vec<u8> = iter
++                        .map(|&b| b.checked_add(0x80).ok_or(DecodeError::InvalidEncoding))
++                        .collect::<Result<_, _>>()?;
+                     let (out, _) = encoding_rs::EUC_KR.decode_with_bom_removal(&left);
+                     result.push_str(&out);
+                 }

@@ -19,6 +19,7 @@ jobs:
           python-version: "3.12"
       - run: python tools/check_source_size.py
       - run: python tools/check_dependency_boundaries.py
+      - run: python tools/check_xim_decoder_source.py
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check bans licenses sources
@@ -57,13 +58,15 @@ jobs:
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all -- --check
-      # Clippy is not OS-specific for this workspace (no cfg(windows)/cfg(unix)
-      # in our crates). Tests still compile and run on every platform, so
-      # Windows/macOS catch compile errors and runtime failures.
+      # Run Clippy once on Linux; tests still compile/run every platform,
+      # including the platform-scoped native-unmark behavior.
       - name: Clippy
         if: matrix.os == 'ubuntu-latest'
         run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --all-targets
+      - name: Test original decoder suite
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --locked --manifest-path vendor/xim-ctext/Cargo.toml
 
   ci-success:
     name: CI Success
