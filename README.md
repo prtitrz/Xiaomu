@@ -4,7 +4,7 @@
 
 晓木是一个面向 Rust 原生应用的结构化富文本 / Block Editor engine。项目将文档语义、编辑事务、运行时编排与具体 UI 框架分层，首个原生前端基于 GPUI。
 
-> Status: early architecture / bootstrap stage.
+> Status (2026-10-01): P0–P5 closed; P6 performance work has not started. Xiaomu remains an early-stage library, not a finished writing application. See the [documentation index](docs/README.md) and [delivery boundaries](docs/planning.md#delivery-boundaries).
 
 ## Goals
 
@@ -70,6 +70,7 @@ crates/
 examples/
   editor_harness/         standalone integration harness
 docs/
+  README.md               documentation index and reading order
   planning.md             top-level architecture and roadmap
   architecture.md         architecture that is currently true
   engineering-rules.md    repository engineering constraints
@@ -77,9 +78,9 @@ docs/
 
 ## Roadmap
 
-The first hard gates are Unicode/IME correctness, transaction semantics, position mapping, multi-block editing and history. Tables, richer extensions and performance work follow only after those foundations are stable.
+P0–P5 have delivered the core editing model, native input, structured content and tables within their recorded acceptance scope. The current next phase is P6: establish reproducible long-document, table and multi-editor performance baselines before choosing optimizations.
 
-See [docs/planning.md](docs/planning.md).
+The [top-level plan](docs/planning.md) is the single execution roadmap. Historical gap reviews are audit records, not a second work queue. Image nodes, rendering hooks and internal structured copy/paste exist, but external screenshot/image paste and a host asset-import workflow are not yet implemented; see [delivery boundaries and unscheduled editing work](docs/planning.md#delivery-boundaries).
 
 ## Development
 

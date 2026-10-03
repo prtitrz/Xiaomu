@@ -1,5 +1,7 @@
 # P4A Inline Atom / Extension Seam 设计
 
+> 状态：**CLOSED**。本文保留阶段设计契约；实现与验收见 [overview](overview.md) / [progress](progress.md)，当前路线以 [planning](../../planning.md) 为准。
+
 ## 1. 目标
 
 P4A 用一个真正的 inline atom 验证晓木的 mixed-inline coordinate 与 extension boundary 是否成立。

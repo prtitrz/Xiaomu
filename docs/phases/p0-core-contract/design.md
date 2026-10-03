@@ -1,6 +1,6 @@
 # P0 Core Contract 设计
 
-状态：进行中
+状态：**CLOSED**。本文保留阶段设计契约；完成情况与验收证据见 [progress](progress.md)。
 
 本文档是 P0 的可执行设计。顶层路线以 `docs/planning.md` 为准；已经落地的架构事实记录在 `docs/architecture.md`。
 

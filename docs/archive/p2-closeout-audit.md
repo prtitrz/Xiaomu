@@ -1,8 +1,10 @@
-# P2 收官审计
+# 历史归档：P2 收官审计
 
 状态：**CLOSED。功能 Gate、Windows 实机 Gate 与收官 CI 均通过。**
 
-本文档记录 P2 的最终收官判断。长期架构事实放在 `docs/architecture.md`，执行证据放在 `progress.md`，未来路线仍以 `docs/planning.md` 为准。
+> 2026-10-01 归档。本文保留 P2 收官时的判断；“当前”和“后续”均指当时状态，不是今天的待办。当前实现见 [architecture](../architecture.md)，路线见 [planning](../planning.md)。
+
+本文档记录 P2 的最终收官判断，执行证据保留在 [P2 progress](../phases/p2-document-tree/progress.md)。
 
 ## 1. 最终阶段判断
 

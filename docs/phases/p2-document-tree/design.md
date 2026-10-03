@@ -2,7 +2,7 @@
 
 状态：已完成
 
-本文档是 P2 的可执行设计。顶层路线以 `docs/planning.md` 为准；已经落地的架构事实记录在 `docs/architecture.md`；P0 / P1 的契约与决策见对应 `docs/phases/` 与 `docs/adr/`。P2 实施期间收官审计补充出的 correctness Gate 及最终处置记录在 `closeout-audit.md`。
+本文档保留 P2 的设计契约。顶层路线以 `docs/planning.md` 为准；已经落地的架构事实记录在 `docs/architecture.md`；P0 / P1 的契约与决策见对应 `docs/phases/` 与 `docs/adr/`。P2 实施期间补充的 correctness Gate 及最终处置见 [收官审计归档](../../archive/p2-closeout-audit.md)。
 
 P1 让晓木在真实输入管线中编辑单个 Paragraph。P2 把编辑对象从"一个 inline node"升级为"整棵 document tree"：multi-block 文档、SplitNode / JoinNodes 等结构 transaction、heading / quote / list、跨 block 键盘导航与 document selection、position mapping 稳定化，以及第一个 minimal host-contract harness。
 
@@ -293,7 +293,7 @@ Unicode fixture（中文 / emoji / combining marks）继续出现在涉及文本
 
 ## 9. P2 完成定义
 
-以下条件均已由实现、自动化测试、Windows 实机 Gate 与 `closeout-audit.md` 的补充审计满足；最终执行证据见 `progress.md`：
+以下条件均已由实现、自动化测试、Windows 实机 Gate 与 [收官审计归档](../../archive/p2-closeout-audit.md) 的补充审计满足；最终执行证据见 `progress.md`：
 
 ```text
 SplitNode / JoinNodes 以 Core step 落地，mapping + inverse 满足随机不变量

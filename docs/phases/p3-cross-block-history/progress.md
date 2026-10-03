@@ -17,14 +17,14 @@
 
 当前切片：**P3.7 Closeout 已完成**
 
-P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection、P3.3 Cross-block Editing / Structured Clipboard、P3.4 History Grouping / Stored Marks / IME、P3.5 HardBreak / CodeBlock Multi-line、P3.6 Accessibility / Realistic Host Integration 与 P3.7 Closeout 均已完成。2026-09-01 Windows 最终实机 Gate 通过，未发现缺陷；Windows 与输入法具体版本未单独记录。最终 docs-only current-head CI 通过后，PR #49 可 squash merge，P3 阶段保持 CLOSED。
+P0、P1、P2 均已 CLOSED。P3.0 Phase Contract、P3.1 Visual-line Geometry / Soft-wrap、P3.2 Visual Navigation / Selection、P3.3 Cross-block Editing / Structured Clipboard、P3.4 History Grouping / Stored Marks / IME、P3.5 HardBreak / CodeBlock Multi-line、P3.6 Accessibility / Realistic Host Integration 与 P3.7 Closeout 均已完成。2026-09-01 Windows 最终实机 Gate 通过，未发现缺陷；Windows 与输入法具体版本未单独记录。P3 阶段已 CLOSED；下方保留当时的实施与验收记录，不是新的执行队列。
 
 ## P3.0 Phase Contract
 
 - [x] 创建 P3 `design.md`
 - [x] 创建 P3 `progress.md`
 - [x] 固化 P2 → P3 handoff
-- [x] 将 `roadmap-gap-review.md` 中 visual-line / structured clipboard / stored marks / accessibility / multiline 结论并入阶段契约
+- [x] 将 [历史路线审计](../../archive/2026-08-27-roadmap-gap-review.md) 中 visual-line / structured clipboard / stored marks / accessibility / multiline 结论并入阶段契约
 - [x] source-size baseline 复核
 - [x] dependency-boundary baseline 复核
 - [x] fmt / clippy / workspace tests / CI Success
