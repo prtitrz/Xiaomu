@@ -118,25 +118,22 @@ impl EntityInputHandler for ParagraphView {
             return;
         }
 
-        if let Some(range_utf16) = replacement_range.filter(|_| !self.is_range_input()) {
-            // Preserve a platform echo's seam ordinal instead of converting
-            // it through the legacy text-only PlaceCaret intent.
-            let Some((start, end)) = self.input_range_points(Some(range_utf16)) else {
-                return;
+        let selection =
+            if let Some(range_utf16) = replacement_range.filter(|_| !self.is_range_input()) {
+                // Preserve a platform echo's seam ordinal instead of converting
+                // it through the legacy text-only PlaceCaret intent.
+                let Some((start, end)) = self.input_range_points(Some(range_utf16)) else {
+                    return;
+                };
+                Some(xiaomu_runtime::session::DocumentSelection::new(start, end))
+            } else {
+                None
             };
-            if self
-                .session
-                .borrow_mut()
-                .set_inline_selection(start, end)
-                .is_err()
-            {
-                return;
-            }
-        }
-        self.apply_intent(
+        self.apply_intent_with_selection(
             EditIntent::InsertText {
                 text: text.to_owned(),
             },
+            selection,
             cx,
         );
     }

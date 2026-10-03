@@ -18,6 +18,8 @@ mod ime_atom_tests;
 mod ime_geometry;
 mod input_handler;
 mod layout;
+#[cfg(test)]
+mod policy_input_tests;
 mod scroll;
 #[cfg(test)]
 mod tests;
@@ -353,7 +355,23 @@ impl ParagraphView {
     }
 
     fn apply_intent(&mut self, intent: EditIntent, cx: &mut Context<Self>) {
-        let applied = match self.session.borrow_mut().apply_intent(&intent) {
+        self.apply_intent_with_selection(intent, None, cx);
+    }
+
+    fn apply_intent_with_selection(
+        &mut self,
+        intent: EditIntent,
+        selection: Option<xiaomu_runtime::session::DocumentSelection>,
+        cx: &mut Context<Self>,
+    ) {
+        let outcome = {
+            let mut session = self.session.borrow_mut();
+            match selection {
+                Some(selection) => session.apply_intent_with_selection(selection, &intent),
+                None => session.apply_intent(&intent),
+            }
+        };
+        let applied = match outcome {
             Ok(_) => true,
             Err(error) => {
                 eprintln!("xiaomu: intent rejected: {error}");

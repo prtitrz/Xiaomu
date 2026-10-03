@@ -324,6 +324,20 @@ pub struct PrimaryEdit {
 }
 
 impl PrimaryEdit {
+    /// Describes a text replacement for a plan's caret-resolution policy.
+    ///
+    /// `range` uses pre-edit UTF-8 byte coordinates; `inserted_len` is the
+    /// replacement's byte length. The resolved post-edit point is validated
+    /// when the session commits the plan.
+    #[must_use]
+    pub const fn new(node: NodeId, range: TextRange, inserted_len: usize) -> Self {
+        Self {
+            node,
+            range,
+            inserted_len,
+        }
+    }
+
     /// Returns the inline node the edit applies to.
     #[must_use]
     pub const fn node(&self) -> NodeId {
@@ -345,18 +359,25 @@ impl PrimaryEdit {
 
 /// A planned edit: the Core transaction plus Runtime selection/history policy.
 ///
-/// Plans are produced by the session from intents; callers never construct
-/// them directly.
+/// Plans are produced by the default planner or a host's [`super::SessionPolicy`].
+/// Host-constructed plans always form one isolated undo unit.
 #[derive(Clone, Debug)]
 pub struct EditPlan {
     transaction: Transaction,
     selection_update: SelectionUpdate,
     primary_edit: Option<PrimaryEdit>,
     history_policy: HistoryPolicy,
+    stored_marks_after: Option<Option<MarkSet>>,
 }
 
 impl EditPlan {
-    pub(crate) fn new(
+    /// Creates a single-transaction plan with isolated undo semantics.
+    ///
+    /// Caret policies referring to a primary text replacement require
+    /// `primary_edit`. Core, selection and host policy validation happen
+    /// atomically on commit, not when constructing this description.
+    #[must_use]
+    pub fn new(
         transaction: Transaction,
         selection_update: SelectionUpdate,
         primary_edit: Option<PrimaryEdit>,
@@ -366,7 +387,24 @@ impl EditPlan {
             selection_update,
             primary_edit,
             history_policy: HistoryPolicy::Isolated,
+            stored_marks_after: None,
         }
+    }
+
+    /// Installs explicit typing marks together with a successful commit.
+    ///
+    /// The resolved selection must be a collapsed inline caret; otherwise
+    /// the whole plan fails before publication. `None` restores inheritance,
+    /// while `Some(empty)` requests unmarked typing. Without this option,
+    /// the calling intent's existing stored-mark behavior is unchanged.
+    #[must_use]
+    pub fn with_stored_marks(mut self, marks: Option<MarkSet>) -> Self {
+        self.stored_marks_after = Some(marks);
+        self
+    }
+
+    pub(crate) fn stored_marks_after(&self) -> Option<&Option<MarkSet>> {
+        self.stored_marks_after.as_ref()
     }
 
     pub(crate) fn with_history_policy(mut self, history_policy: HistoryPolicy) -> Self {

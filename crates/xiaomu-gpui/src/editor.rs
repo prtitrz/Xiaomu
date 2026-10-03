@@ -16,7 +16,9 @@ use std::rc::Rc;
 use xiaomu_core::document::{NodeId, XiaomuDocument};
 use xiaomu_core::selection::TextSelection;
 use xiaomu_runtime::persistence::DocumentPersistence;
-use xiaomu_runtime::session::{DocumentChangeListener, DocumentSelection, DocumentSession};
+use xiaomu_runtime::session::{
+    DocumentChangeListener, DocumentSelection, DocumentSession, SessionPolicy,
+};
 
 use crate::atom_capability::SharedAtomCapability;
 use crate::block_view::{
@@ -80,17 +82,36 @@ impl EditorInstance {
         selection: DocumentSelection,
         hooks: EditorHooks,
     ) -> Result<Self, xiaomu_runtime::session::SessionError> {
-        let mut session = DocumentSession::new(document, selection)?;
+        let session = DocumentSession::new(document, selection)?;
+        Ok(Self::from_session(session, hooks))
+    }
+
+    /// Creates an independent editor with construction-time host edit rules.
+    ///
+    /// The initial document must pass the policy. The policy remains bound
+    /// to this session for its lifetime, including undo/redo and raw applies.
+    /// The original `new` and `EditorHooks` require no policy integration.
+    pub fn new_with_policy(
+        document: XiaomuDocument,
+        selection: DocumentSelection,
+        hooks: EditorHooks,
+        policy: Box<dyn SessionPolicy>,
+    ) -> Result<Self, xiaomu_runtime::session::SessionError> {
+        let session = DocumentSession::new_with_policy(document, selection, policy)?;
+        Ok(Self::from_session(session, hooks))
+    }
+
+    fn from_session(mut session: DocumentSession, hooks: EditorHooks) -> Self {
         if let Some(listener) = hooks.listener {
             session.add_listener(listener);
         }
-        Ok(Self {
+        Self {
             session: Rc::new(RefCell::new(session)),
             persistence: hooks.persistence,
             atom_renderers: hooks.atom_renderers,
             atom_capability: hooks.atom_capability,
             asset_service: hooks.asset_service,
-        })
+        }
     }
 
     /// Returns this instance's independent shared session handle.
