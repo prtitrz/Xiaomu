@@ -21,6 +21,8 @@ mod layout;
 mod scroll;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unmark_tests;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
