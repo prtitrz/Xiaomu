@@ -100,7 +100,7 @@ XiaomuDocument
 
 `MarkSet` 使用确定性顺序，完全相同的重复 mark 自动规范化，同一 semantic kind 的冲突值被拒绝。`TextRun` 将非空 `TextBuffer` 与 normalized `MarkSet` 绑定。Run segmentation 不属于 document coordinate。
 
-`InlineContent` 在构造时规范化相邻且 `MarkSet` 相同的 `TextRun`。`NodeAttrs` 使用确定性 key 顺序并 preservation-first 保存未知属性值。
+`InlineContent` 在构造时规范化相邻且 `MarkSet` 相同的 `TextRun`。`NodeAttrs` 使用确定性 key 顺序并 preservation-first 保存未知属性值。`AttrValue::Null` 是显式空值，支持 list/object 内递归保留；`get(key) == Some(&AttrValue::Null)` 与缺失 key 的 `None` 不同，不表示删除属性。它不放宽 image 等 typed attrs 校验，也不引入浮点值；canonical document version 仍为 v1。见 [ADR 0006](adr/0006-nullable-node-attrs.md)。
 
 ADR 0004 固化了当前 line-break contract：LF `\n`（U+000A）是晓木唯一赋予 line-break 语义的 inline scalar。Paragraph / Heading 等普通富文本 inline node 中 LF 表示 HardBreak；CodeBlock 中 LF 表示代码 newline；soft-wrap 不产生 canonical byte。LF 继续使用普通 UTF-8 `TextOffset`，因此无需 HardBreak 专用 Core content variant 或 position system。Core 原始 construction 当前仍容忍 CR 作为普通 scalar；平台 adapter / codec 表达 line break 时负责 `CRLF / CR → LF` 规范化。
 
@@ -401,7 +401,7 @@ DocumentSelection
 
 `ClipboardSlice` 是 detached value，不携带 canonical `NodeId`。单一 inline leaf 只保留所选 inline fragment；跨多个 inline leaf 时，projection 从 canonical tree 剪出覆盖 selection 的最小 fragment tree，因此 list / quote 等 container 可以保留，同时不会携带未选择的 sibling。
 
-`plain_text` 始终存在，普通片段用 `\n` 表达 inline block boundary；表格矩形使用 TSV，cell 内 block 边界与 tab/CR/LF 扁平化为空格。Runtime metadata 使用私有 serde wire DTO，不给 Core 增加 serde 依赖；非表片段写 `xiaomu.clipboard` v4，普通表写 v5，含非空 row attrs 的表写 v6。decode 重建临时 document 校验 fragment tree；foreign、malformed、unknown-version、旧信封带新特性或与系统文本不一致的 stale metadata 均由 frontend 回退到 plain text。
+`plain_text` 始终存在，普通片段用 `\n` 表达 inline block boundary；表格矩形使用 TSV，cell 内 block 边界与 tab/CR/LF 扁平化为空格。Runtime metadata 使用私有 serde wire DTO，不给 Core 增加 serde 依赖；不含 Null 时，非表片段写 `xiaomu.clipboard` v4，普通表写 v5，含非空 row attrs 的表写 v6。任一 node、atom、row attrs（包括嵌套 list/object）含 Null 时写 v7，使用 `{"type":"null"}`。decode 保持 v4–v6 兼容，拒绝旧信封中的 Null 和未知 attr variant，重建临时 document 校验 fragment tree；foreign、malformed、unknown-version、旧信封带新特性或与系统文本不一致的 stale metadata 均由 frontend 回退到 plain text。
 
 cross-block Delete / Cut 由 Runtime 统一编排。Delete 保留首个 inline block identity 与未选 prefix，把末 block 未选 suffix 接到 seam，删除覆盖的中间 leaves，并清理因本次操作而变空的 container；Cut 的 clipboard projection 是只读步骤，文档侧仍只提交一次 Delete history change。
 
@@ -537,7 +537,7 @@ GPUI 已绑定 Left / Right / visual Home / End / Up / Down、Shift visual selec
 
 普通 rich-text `Enter` 继续结构 `SplitBlock`，`Shift+Enter` 插入 canonical LF HardBreak。CodeBlock 的 Enter / Shift+Enter 都插入 LF；Tab 插入四个可见空格，并绕开 list conversion / list indent，Shift-Tab 当前只保证不触发 list structural command。
 
-Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 versioned Xiaomu structured metadata：普通片段使用 v4，含 table 使用 v5，含 table row attrs 使用 v6。外部应用按普通文本消费；晓木 Paste 优先验证 structured metadata，metadata 缺失、过期或非法时自动走 `PasteText` plain-text fallback。普通 rich-text plain paste 当前把 line break 折叠为空格；CodeBlock plain paste 保留多行并规范化为 LF。若剪贴板带有效 Xiaomu structured metadata 但目标是 CodeBlock，frontend 主动使用 `ClipboardSlice::plain_text` 而不重建 rich structure，使代码块保持 plain-code destination semantics。structured paste 与 plain-text paste 都是显式 history boundary；平台 adapter 只负责 transport，不进入 Core 类型系统。
+Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 versioned Xiaomu structured metadata：含 Null attrs 的片段使用 v7；否则普通片段使用 v4，含 table 使用 v5，含 table row attrs 使用 v6。外部应用按普通文本消费；晓木 Paste 优先验证 structured metadata，metadata 缺失、过期或非法时自动走 `PasteText` plain-text fallback。普通 rich-text plain paste 当前把 line break 折叠为空格；CodeBlock plain paste 保留多行并规范化为 LF。若剪贴板带有效 Xiaomu structured metadata 但目标是 CodeBlock，frontend 主动使用 `ClipboardSlice::plain_text` 而不重建 rich structure，使代码块保持 plain-code destination semantics。structured paste 与 plain-text paste 都是显式 history boundary；平台 adapter 只负责 transport，不进入 Core 类型系统。
 
 ### Host hooks / reusable editor instance
 
