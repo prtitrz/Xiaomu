@@ -42,6 +42,10 @@ impl AssetRef {
 pub enum AssetError {
     /// The reference is empty or otherwise malformed.
     InvalidRef,
+    /// Import is not supported by this host or for this encoding.
+    ImportUnsupported,
+    /// Image bytes are corrupt, empty, or exceed the host import limits.
+    InvalidImage,
     /// The host has no asset for the reference.
     NotFound,
     /// The host denied access to the asset.
@@ -129,4 +133,23 @@ pub trait AssetSink: 'static {
 pub trait AssetService: 'static {
     /// Requests the bytes for one opaque asset reference.
     fn resolve(&self, asset_ref: AssetRef, sink: Rc<dyn AssetSink>);
+
+    /// Imports encoded clipboard pixels into host-owned durable storage.
+    ///
+    /// Return only after the bytes can be resolved across save/reopen. The
+    /// returned attrs must use an `ImageSource::AssetRef`; paths and pixels
+    /// never enter the document. The host validates encoding and size and
+    /// chooses alt text and dimensions. This synchronous, bounded import is
+    /// optional; existing resolver-only hosts reject it by default.
+    ///
+    /// Import does not edit the document. Assets must survive Undo/Redo and
+    /// failed insertions; do not collect them solely from the live snapshot.
+    /// Hosts own reclamation after all document/history references expire.
+    fn import_image(
+        &self,
+        _format: AssetFormat,
+        _bytes: &[u8],
+    ) -> Result<xiaomu_core::document::ImageAttrs, AssetError> {
+        Err(AssetError::ImportUnsupported)
+    }
 }

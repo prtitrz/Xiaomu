@@ -70,6 +70,7 @@ impl ImageLoadCache {
 
     /// Marks a request as in flight.
     pub fn begin_load(&self, node: NodeId, source_key: String) {
+        self.render_sources.borrow_mut().remove(&node);
         self.entries.borrow_mut().insert(
             node,
             ImageLoadEntry {
@@ -82,7 +83,6 @@ impl ImageLoadCache {
     /// Returns the render source for `node`, or `None` when absent or stale.
     #[must_use]
     pub fn render_source(&self, node: NodeId, source_key: &str) -> Option<Arc<GpuiImage>> {
-        self.entries.borrow();
         self.render_sources
             .borrow()
             .get(&node)
@@ -92,9 +92,11 @@ impl ImageLoadCache {
 
     /// Stores the render source for one fresh resolve.
     pub fn store_render_source(&self, node: NodeId, source_key: String, image: Arc<GpuiImage>) {
-        self.render_sources
-            .borrow_mut()
-            .insert(node, (source_key, image));
+        if self.fresh_state(node, &source_key).is_some() {
+            self.render_sources
+                .borrow_mut()
+                .insert(node, (source_key, image));
+        }
     }
 
     /// Applies a resolve outcome, dropping stale results whose node moved on
@@ -128,7 +130,17 @@ struct NodeImageSink {
 
 impl AssetSink for NodeImageSink {
     fn resolved(self: Rc<Self>, result: Result<ResolvedAsset, AssetError>) {
+        if self
+            .cache
+            .fresh_state(self.node, &self.source_key)
+            .is_none()
+        {
+            return;
+        }
         let state = match result {
+            Ok(resolved) if resolved.asset_ref().value() != self.source_key => {
+                ImageLoadState::Failed(AssetError::InvalidRef)
+            }
             Ok(resolved) => {
                 let format = match resolved.format() {
                     AssetFormat::Png => gpui::ImageFormat::Png,
@@ -284,3 +296,6 @@ pub(crate) fn render_image_block(
             .into_any_element(),
     }
 }
+
+#[cfg(test)]
+mod tests;
