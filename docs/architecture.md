@@ -684,3 +684,7 @@ Harness writer 现统一写 fixture v5：`table` / `row` / `cell` 与 `end` 容�
 - CI 执行 Rust formatting、Clippy 和 tests；
 - `cargo-deny` 检查 dependency source / license policy；
 - `engineering-rules.md` 约束实现与文档同步。
+
+## Linux stock-GPUI unmark semantics
+
+Linux `unmark_text` now preserves a nonempty, non-rejected overlay through the existing canonical composition commit path before stock GPUI dispatches its pointer event. Explicit empty cancellation and already-committed input remain no-ops on subsequent unmark. No input-owner protocol, pointer wait barrier or dependency patch is introduced; focus-out and non-Linux callback handling remain unchanged. See [scope, regressions and native evidence boundaries](linux-unmark-preservation.md).

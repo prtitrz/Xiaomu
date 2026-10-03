@@ -197,3 +197,46 @@ fn rectangular_input_and_clipboard_do_not_leak_to_another_editor(cx: &mut TestAp
     assert_eq!(session_b.borrow().history_depths(), (0, 0));
     assert_eq!(session_a.borrow().document().store(), document.store());
 }
+
+#[cfg(target_os = "linux")]
+#[gpui::test]
+fn linux_unmark_commits_rectangle_overlay_once_and_undo_restores_range(cx: &mut TestAppContext) {
+    let (document, intro, left, right) = fixture();
+    let before = document.clone();
+    let (window, session) = open(cx, document, intro, left, right);
+    let selection = session.borrow().selection();
+    window
+        .update(cx, |view, window, cx| {
+            let input = view.range_input.as_ref().unwrap().1.clone();
+            input.update(cx, |input, cx| {
+                input.replace_and_mark_text_in_range(None, "你好🙂", Some(4..4), window, cx);
+                input.unmark_text(window, cx);
+                input.unmark_text(window, cx);
+                assert!(!input.is_composing());
+            });
+        })
+        .unwrap();
+    assert_eq!(session.borrow().history_depths(), (1, 0));
+    let xiaomu_runtime::session::DocumentPosition::Inline(point) =
+        session.borrow().selection().focus()
+    else {
+        panic!("commit should place an inline caret");
+    };
+    let focus = point.node_id();
+    let text: String = session
+        .borrow()
+        .document()
+        .node(focus)
+        .unwrap()
+        .content()
+        .as_inline()
+        .unwrap()
+        .runs()
+        .iter()
+        .map(|run| run.text().as_str())
+        .collect();
+    assert_eq!(text, "你好🙂");
+    session.borrow_mut().undo().unwrap();
+    assert_eq!(session.borrow().document().store(), before.store());
+    assert_eq!(session.borrow().selection(), selection);
+}
