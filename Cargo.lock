@@ -6817,6 +6817,7 @@ version = "0.1.0"
 name = "xiaomu-editor-harness"
 version = "0.1.0"
 dependencies = [
+ "image",
  "xiaomu-core",
  "xiaomu-gpui",
  "xiaomu-runtime",

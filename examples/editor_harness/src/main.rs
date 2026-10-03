@@ -18,6 +18,8 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+mod assets;
+mod atomic_file;
 mod store;
 
 use xiaomu_core::document::{AttrValue, NodeContent, NodeId, XiaomuDocument};
@@ -66,7 +68,7 @@ fn main() {
         listener: Some(Box::new(CounterListener(counter.clone()))),
         atom_renderers: Some(Rc::new(renderers)),
         atom_capability: Some(Rc::new(LoggingCapability)),
-        asset_service: None,
+        asset_service: Some(Rc::new(assets::FixtureAssets::for_document(&path))),
     };
 
     // The counter survives the run because GPUI quits when the window
