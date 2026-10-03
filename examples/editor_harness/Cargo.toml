@@ -10,3 +10,6 @@ publish = false
 xiaomu-core.workspace = true
 xiaomu-runtime.workspace = true
 xiaomu-gpui.workspace = true
+
+# Reuse GPUI's decoder to validate untrusted fixture imports with bounded limits.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

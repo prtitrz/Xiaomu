@@ -47,7 +47,7 @@ impl DocumentPersistence for FixtureStore {
     fn save(&mut self, document: &XiaomuDocument) -> Result<(), PersistenceError> {
         let mut out = String::from("xiaomu-fixture-doc v5\n");
         write_node(document, document.root(), &mut out)?;
-        std::fs::write(&self.path, out)
+        crate::atomic_file::write(&self.path, out.as_bytes())
             .map_err(|error| PersistenceError(format!("{}: {error}", self.path.display())))
     }
 
