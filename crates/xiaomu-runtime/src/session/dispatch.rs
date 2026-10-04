@@ -20,6 +20,12 @@ impl DocumentSession {
         if matches!(intent, EditIntent::InsertHorizontalRule) {
             return Err(SessionError::UnsupportedEdit);
         }
+        // Policy already saw the original logical command. Resolve these
+        // against the live selection before generic node/cell-range guards;
+        // unsupported targets are genuine no-ops, not range convergence.
+        if let Some(outcome) = self.apply_table_cell_intent(intent)? {
+            return Ok(outcome);
+        }
         // Guard raw internal slices too, before closed/task fitting or any
         // tentative history/selection change can obscure unsupported spans.
         if let EditIntent::PasteSlice { slice } = intent {
@@ -346,6 +352,8 @@ impl DocumentSession {
             | EditIntent::InsertTableColumn { .. }
             | EditIntent::DeleteTableRow { .. }
             | EditIntent::DeleteTableColumn { .. }
+            | EditIntent::MergeTableCells
+            | EditIntent::SplitTableCell
             | EditIntent::PlaceCaret { .. }
             | EditIntent::PasteSlice { .. }
             | EditIntent::SetSelection { .. } => unreachable!("handled above"),
