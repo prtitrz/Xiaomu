@@ -94,7 +94,7 @@ pub(super) fn replace_text_inverse(
     node: NodeId,
     range: TextRange,
     replacement: &str,
-    pre: &InlineContent,
+    post: &InlineContent,
     spans: &[InlineSpan],
 ) -> Vec<TransactionStep> {
     let start = range.start().as_usize();
@@ -120,11 +120,11 @@ pub(super) fn replace_text_inverse(
     }];
 
     // After the restoring replacement, the restored span carries exactly the
-    // marks the original replacement had inherited. Strip them so the
+    // marks inherited at the actual post-edit insertion point. Strip them so the
     // per-span re-add below reconstructs the original segmentation.
     let restored_span =
         TextRange::new(offset(start), offset(start + old_len)).expect("inverse span stays ordered");
-    for mark in inherited_marks_at(pre, start).as_slice() {
+    for mark in inherited_marks_at(post, start).as_slice() {
         steps.push(TransactionStep::RemoveMark {
             node,
             range: restored_span,
