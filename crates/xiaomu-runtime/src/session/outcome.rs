@@ -39,6 +39,12 @@ pub enum SessionError {
     /// Task-containing clipboard slices require an explicit task-aware policy
     /// plan; default fitting must not downgrade them to ordinary text/lists.
     UnsupportedEdit,
+    /// An optional input-rule reversal exceeds the bounded session budget,
+    /// or contains a new Core payload shape this Runtime cannot account for.
+    ///
+    /// The host must choose a literal-input fallback or report the refusal;
+    /// Runtime never silently converts while discarding requested metadata.
+    InputRuleUndoBudgetExceeded,
     /// A structured paste would have to drop detached inline atoms.
     ///
     /// Multi-block and hierarchical paste cannot address freshly inserted
@@ -79,6 +85,9 @@ impl fmt::Display for SessionError {
             }
             Self::UnsupportedEdit => {
                 f.write_str("edit requires an explicit semantics-preserving planner")
+            }
+            Self::InputRuleUndoBudgetExceeded => {
+                f.write_str("input-rule reversal exceeds the supported session payload budget")
             }
             Self::ClipboardAtomicUnsupported => {
                 f.write_str("clipboard fragment places an atomic block in an unsupported context")

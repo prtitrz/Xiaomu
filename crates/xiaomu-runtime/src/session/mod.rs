@@ -22,6 +22,7 @@ mod cross_block_atom;
 mod dispatch;
 mod history;
 mod image;
+mod input_rule_undo;
 mod intent;
 mod listener;
 mod marks;
@@ -40,6 +41,7 @@ mod table;
 mod task_checked;
 
 pub use history::HistoryStack;
+pub use input_rule_undo::InputRuleUndoSpec;
 pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
 pub use listener::DocumentChangeListener;
 pub use outcome::{SessionError, SessionOutcome};
@@ -68,6 +70,9 @@ pub struct DocumentSession {
     // An atomic platform replacement plans at a tentative selection but
     // Undo must restore the selection from before the whole operation.
     history_selection_before: Option<DocumentSelection>,
+    // At most one bounded, session-local token. Rollback shares ownership;
+    // no canonical metadata or document/history snapshot is retained.
+    input_rule_undo: Option<std::rc::Rc<input_rule_undo::InputRuleUndoToken>>,
 }
 
 impl DocumentSession {
@@ -89,6 +94,7 @@ impl DocumentSession {
             listeners: Vec::new(),
             policy: None,
             history_selection_before: None,
+            input_rule_undo: None,
         })
     }
 

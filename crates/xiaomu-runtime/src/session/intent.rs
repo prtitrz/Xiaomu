@@ -247,6 +247,11 @@ pub enum EditIntent {
     /// inside a run gives both halves that run's marks. After commit the
     /// caret sits at the start of the new (tail) block.
     SplitBlock,
+    /// Request a host-defined horizontal-rule insertion.
+    ///
+    /// The default planner returns `UnsupportedEdit`. Host policy must choose
+    /// the structure, exact selection and any input-rule semantics explicitly.
+    InsertHorizontalRule,
     /// Merge the focused inline block into its immediately preceding sibling.
     ///
     /// No previous sibling is a no-op. After commit the caret sits at the
@@ -441,6 +446,7 @@ pub struct EditPlan {
     primary_edit: Option<PrimaryEdit>,
     history_policy: HistoryPolicy,
     stored_marks_after: Option<Option<MarkSet>>,
+    pub(super) input_rule_undo: Option<Box<super::InputRuleUndoSpec>>,
 }
 
 impl EditPlan {
@@ -461,6 +467,7 @@ impl EditPlan {
             primary_edit,
             history_policy: HistoryPolicy::Isolated,
             stored_marks_after: None,
+            input_rule_undo: None,
         }
     }
 

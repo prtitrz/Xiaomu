@@ -9,7 +9,7 @@ use xiaomu_core::mapping::StepMap;
 use xiaomu_core::transaction::{Transaction, TransactionOrigin};
 
 impl DocumentSession {
-    pub(super) fn commit(&mut self, plan: EditPlan) -> Result<SessionOutcome, SessionError> {
+    pub(super) fn commit(&mut self, mut plan: EditPlan) -> Result<SessionOutcome, SessionError> {
         let before_selection = self.selection;
         let group = history::history_group_for_plan(&plan);
         let applied = plan
@@ -40,6 +40,11 @@ impl DocumentSession {
             .inverse()
             .clone();
 
+        let input_rule_undo = plan
+            .take_input_rule_undo()
+            .map(|spec| self.prepare_input_rule_undo(spec, applied.document(), after_selection))
+            .transpose()?;
+
         self.history.record(HistoryEntry {
             redo,
             undo,
@@ -49,6 +54,7 @@ impl DocumentSession {
         });
         self.document = applied.into_document();
         self.selection = after_selection;
+        self.input_rule_undo = input_rule_undo;
         if let Some(marks) = stored_marks_after {
             self.stored_marks = marks;
         }
@@ -161,6 +167,7 @@ impl DocumentSession {
         });
         self.document = current;
         self.selection = after_selection;
+        self.input_rule_undo = None;
         self.notify_document_changed();
 
         Ok(SessionOutcome::DocumentChanged)
@@ -181,6 +188,7 @@ impl DocumentSession {
         self.validate_candidate(applied.document())?;
         self.document = applied.into_document();
         self.selection = selection;
+        self.input_rule_undo = None;
         self.notify_document_changed();
 
         Ok(())

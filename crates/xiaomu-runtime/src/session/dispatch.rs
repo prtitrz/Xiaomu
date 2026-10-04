@@ -17,6 +17,9 @@ impl DocumentSession {
         &mut self,
         intent: &EditIntent,
     ) -> Result<SessionOutcome, SessionError> {
+        if matches!(intent, EditIntent::InsertHorizontalRule) {
+            return Err(SessionError::UnsupportedEdit);
+        }
         // Whole-block selections carry identity, not an ordinary partial gap
         // range. A node-aware policy may replace this default; until then no
         // selection-driven edit may accidentally take an All/text/gap route.
@@ -331,6 +334,7 @@ impl DocumentSession {
             | EditIntent::RemoveMark { .. }
             | EditIntent::SetTaskChecked { .. }
             | EditIntent::InsertLineBreak
+            | EditIntent::InsertHorizontalRule
             | EditIntent::MoveToNextCell
             | EditIntent::MoveToPreviousCell
             | EditIntent::InsertTableRow { .. }
