@@ -87,8 +87,8 @@ fn offset(raw: usize) -> TextOffset {
 
 /// Builds the inverse steps of one applied `ReplaceText`.
 ///
-/// The inverse restores the old text, strips the marks the replacement had
-/// inherited from the restored span, and re-adds each old span's marks so
+/// The inverse restores the old text, strips the marks that restoration
+/// inherits from the post-edit content, and re-adds each old span's marks so
 /// even replacements crossing differently-marked runs round-trip exactly.
 pub(super) fn replace_text_inverse(
     node: NodeId,
