@@ -221,6 +221,25 @@ pub enum EditIntent {
         /// Semantic mark kind to remove, irrespective of its attributes.
         kind: MarkKind,
     },
+    /// Set one task item's checked attribute by stable identity.
+    ///
+    /// Only `TaskItem` nodes are accepted. The current document selection
+    /// stays exact, even outside the item, and all other attributes and
+    /// content are preserved. A change clears pending typing marks and owns
+    /// one isolated undo unit. Undo restores the original missing/null/bool
+    /// attribute value and selection. Host policy still validates the intent
+    /// and final candidate before publication.
+    ///
+    /// An already-identical boolean is a no-op, preserving stored marks and
+    /// typing grouping as well as revision, history and listeners. Missing
+    /// and null are distinct from `false` and become an explicit boolean.
+    /// A stale identity or non-task target is rejected without changing state.
+    SetTaskChecked {
+        /// Existing task item to update; independent of the current selection.
+        item: NodeId,
+        /// Exact canonical boolean to store in the `checked` attribute.
+        checked: bool,
+    },
     /// Split the focused inline block at the caret.
     ///
     /// A non-collapsed selection is deleted first in the same transaction.

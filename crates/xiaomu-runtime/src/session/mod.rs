@@ -37,6 +37,7 @@ mod split;
 mod stored_marks;
 mod structure;
 mod table;
+mod task_checked;
 
 pub use history::HistoryStack;
 pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
