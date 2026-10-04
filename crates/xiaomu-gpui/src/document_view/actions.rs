@@ -206,8 +206,27 @@ impl DocumentView {
             return;
         };
         let anchor = TextPoint::new(first.node, start, CursorAffinity::Before);
-        let focus = TextPoint::new(last.node, end, CursorAffinity::Before);
-        self.set_selection(anchor, focus, window, cx);
+        let trailing_atoms = self
+            .session
+            .borrow()
+            .document()
+            .node(last.node)
+            .and_then(|node| node.content().as_inline())
+            .map(|inline| {
+                inline
+                    .atoms()
+                    .iter()
+                    .filter(|atom| atom.text_offset() == end)
+                    .count()
+            })
+            .unwrap_or(0);
+        let focus = xiaomu_core::selection::InlinePoint::new(
+            last.node,
+            end,
+            trailing_atoms,
+            CursorAffinity::Before,
+        );
+        self.set_inline_selection(anchor.into(), focus, window, cx);
     }
 
     pub(crate) fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {

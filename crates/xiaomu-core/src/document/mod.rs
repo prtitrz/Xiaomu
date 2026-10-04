@@ -7,6 +7,7 @@
 mod atom;
 mod attrs;
 mod content;
+mod input_marks;
 mod kind;
 mod link;
 mod marks;
@@ -40,3 +41,5 @@ pub use text_style::{TextStyleAttributes, TextStyleMark};
 pub use version::{DocumentRevision, DocumentVersion};
 
 pub(crate) use store::allows_child;
+
+pub(crate) use input_marks::inherited_marks_with_store;

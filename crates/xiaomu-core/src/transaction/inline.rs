@@ -153,7 +153,7 @@ pub fn replace_text(
     validate_inline_range(inline, range)?;
     validate_text_replacement_against_atoms(inline, range)?;
 
-    let pieces = splice_pieces(inline, range, replacement);
+    let pieces = splice_pieces(inline, range, replacement, None);
     let atoms = mapped_atom_placements_after_text_replace(inline, range, replacement.len());
     rebuild(pieces, &atoms)
 }
@@ -163,12 +163,13 @@ pub fn replace_text(
 ///
 /// The replacement inherits the marks of the piece containing `range.start`;
 /// an empty range is a pure insertion at that boundary. Shared by the
-/// text-only and atom-aware replacement contracts, which differ only in how
-/// atom placements are validated and remapped.
+/// text-only and atom-aware replacement contracts. Mixed-inline callers
+/// supply exact-gap marks; `None` preserves legacy text-run inheritance.
 pub(super) fn splice_pieces(
     inline: &InlineContent,
     range: TextRange,
     replacement: &str,
+    insertion_marks: Option<&MarkSet>,
 ) -> Vec<Piece> {
     let mut output: Vec<Piece> = Vec::new();
     let mut offset = 0usize;
@@ -193,7 +194,7 @@ pub(super) fn splice_pieces(
 
         // Replacement goes where the affected span begins.
         if !replaced && range_start <= end {
-            let inherited = run.marks().clone();
+            let inherited = insertion_marks.unwrap_or_else(|| run.marks()).clone();
             output.push(Piece::new(inherited, replacement));
             replaced = true;
         }
@@ -210,11 +211,13 @@ pub(super) fn splice_pieces(
 
     // Empty inline content or a range starting at the very end.
     if !replaced {
-        let inherited = inline
-            .runs()
-            .last()
-            .map(|run| run.marks().clone())
-            .unwrap_or_else(MarkSet::empty);
+        let inherited = insertion_marks.cloned().unwrap_or_else(|| {
+            inline
+                .runs()
+                .last()
+                .map(|run| run.marks().clone())
+                .unwrap_or_else(MarkSet::empty)
+        });
         output.push(Piece::new(inherited, replacement));
     }
 

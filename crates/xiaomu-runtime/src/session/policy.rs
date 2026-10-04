@@ -72,8 +72,8 @@ impl<'a> SessionContext<'a> {
     /// Returns the marks typing would use at a collapsed inline caret.
     ///
     /// Explicit stored marks take precedence, including `Some(empty)`.
-    /// Otherwise this uses Runtime's surrounding-run inheritance: the left
-    /// run wins at a boundary, except offset zero uses the first run. Returns
+    /// Otherwise the exact mixed-inline gap selects the left child, or the
+    /// right child at paragraph start, including independent atom marks. Returns
     /// `None` for a range, cell range, atomic selection or structural gap.
     #[must_use]
     pub fn effective_typing_marks(self) -> Option<MarkSet> {
@@ -81,10 +81,10 @@ impl<'a> SessionContext<'a> {
             return None;
         }
         let (_, focus) = self.selection.as_same_node_inline()?;
-        let inline = self.document.node(focus.node_id())?.content().as_inline()?;
-        Some(self.stored_marks.cloned().unwrap_or_else(|| {
-            super::stored_marks::inherited_marks_at(inline, focus.text_offset().as_usize())
-        }))
+        match self.stored_marks {
+            Some(marks) => Some(marks.clone()),
+            None => self.document.inherited_inline_marks(focus).ok(),
+        }
     }
 }
 

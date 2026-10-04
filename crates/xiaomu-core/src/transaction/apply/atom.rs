@@ -29,7 +29,11 @@ impl ApplyContext {
         let content = self.inline_content(node)?;
         let range = TextRange::new(at.text_offset(), end)?;
         let spans = inverse::spans_within(&content, range)?;
-        let next = inline_atom::replace_inline_text(&content, at, end, replacement)?;
+        let marks = crate::document::inherited_marks_with_store(&content, at, &self.store)?;
+        let next = inline_atom::replace_inline_text(&content, at, end, replacement, Some(&marks))?;
+        // Undo may inherit different marks after deletion exposes a new
+        // right child at the paragraph start. Capture that actual fallback.
+        let restore_marks = crate::document::inherited_marks_with_store(&next, at, &self.store)?;
         self.rewrite_node(
             node,
             self.attrs_of(node)?,
@@ -43,7 +47,7 @@ impl ApplyContext {
             seam_atom_index: at.atom_index(),
         };
         let inverse_steps =
-            inverse::replace_inline_text_inverse(at, range, replacement, &content, &spans);
+            inverse::replace_inline_text_inverse(at, range, replacement, &restore_marks, &spans);
         Ok((vec![step_map], inverse_steps))
     }
 

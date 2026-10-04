@@ -93,7 +93,8 @@ impl DocumentSession {
                     .iter()
                     .rev()
                     .find_map(|step| match step {
-                        StepMap::NodeSplit { inserted, .. } => Some(*inserted),
+                        StepMap::NodeSplit { inserted, .. }
+                        | StepMap::InlineNodeSplit { inserted, .. } => Some(*inserted),
                         _ => None,
                     });
             }

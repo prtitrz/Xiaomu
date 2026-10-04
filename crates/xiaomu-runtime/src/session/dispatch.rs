@@ -123,6 +123,26 @@ impl DocumentSession {
             };
         }
 
+        if !self.selection.is_collapsed()
+            && matches!(
+                intent,
+                EditIntent::ToggleMark { .. }
+                    | EditIntent::SetMark { .. }
+                    | EditIntent::RemoveMark { .. }
+            )
+        {
+            let action = marks::plan_range_mark(&self.document, self.selection, intent)?;
+            if !matches!(action, PlannedAction::NoChange) {
+                self.history.break_group();
+                self.clear_stored_marks();
+            }
+            return match action {
+                PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
+                PlannedAction::Commit(plan) => self.commit(plan),
+                PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
+            };
+        }
+
         // Remaining content and structural intents in this slice act from one
         // inline node. The endpoints keep their mixed-inline coordinates;
         // planners decide between the text-only and atom-aware contracts.
@@ -148,6 +168,7 @@ impl DocumentSession {
                 self.plan_insert_table(*rows, *columns)?
             }
             EditIntent::InsertText { text } => atom_edit::plan_text_input(
+                &self.document,
                 &inline,
                 anchor,
                 focus,
@@ -177,6 +198,7 @@ impl DocumentSession {
                     )?
                 } else {
                     atom_edit::plan_ime_commit(
+                        &self.document,
                         &inline,
                         focus,
                         *range,
@@ -187,12 +209,13 @@ impl DocumentSession {
             }
             EditIntent::PasteText { text } => {
                 self.history.break_group();
-                intent::plan_insert_text(
+                atom_edit::plan_paste_text(
+                    &self.document,
                     &inline,
-                    atom_edit::text_selection_from(anchor, focus)?,
+                    anchor,
+                    focus,
                     text,
                     self.stored_marks.as_ref(),
-                    HistoryPolicy::Isolated,
                 )?
             }
             EditIntent::Backspace => {
@@ -240,54 +263,19 @@ impl DocumentSession {
                 atom_edit::plan_delete(&inline, anchor, focus)?
             }
             EditIntent::ToggleMark { mark } if self.selection.is_collapsed() => {
-                return self.toggle_stored_mark(&inline, mark);
-            }
-            EditIntent::ToggleMark { mark } => {
-                self.history.break_group();
-                self.clear_stored_marks();
-                // Mark edits stay text-only: a selection that carries seam
-                // ordinals cannot address text ranges without losing them.
-                let selection = self
-                    .selection
-                    .as_single_node()
-                    .ok_or(SessionError::SelectionInvalid)?;
-                marks::plan_toggle_mark(&inline, selection, mark)?
+                return self.toggle_stored_mark(mark);
             }
             EditIntent::SetMark { mark } if self.selection.is_collapsed() => {
-                return self.set_stored_mark(&inline, mark);
+                return self.set_stored_mark(mark);
             }
             EditIntent::RemoveMark { kind } if self.selection.is_collapsed() => {
-                return self.remove_stored_mark(&inline, *kind);
-            }
-            EditIntent::SetMark { .. } | EditIntent::RemoveMark { .. } => {
-                let selection = self
-                    .selection
-                    .as_single_node()
-                    .ok_or(SessionError::SelectionInvalid)?;
-                let action = match intent {
-                    EditIntent::SetMark { mark } => marks::plan_set_mark(&inline, selection, mark)?,
-                    EditIntent::RemoveMark { kind } => {
-                        marks::plan_remove_mark(&inline, selection, *kind)?
-                    }
-                    _ => unreachable!("explicit mark intent"),
-                };
-                // A truly idempotent operation leaves all transient state
-                // alone. A real range edit is one isolated Core transaction.
-                if !matches!(action, PlannedAction::NoChange) {
-                    self.history.break_group();
-                    self.clear_stored_marks();
-                }
-                action
+                return self.remove_stored_mark(*kind);
             }
             EditIntent::SplitBlock => {
                 // Split is an explicit history boundary, but pending marks are
                 // intentionally inherited into the new tail block.
                 self.history.break_group();
-                let selection = self
-                    .selection
-                    .as_single_node()
-                    .ok_or(SessionError::SelectionInvalid)?;
-                split::plan_split_block(&self.document, selection)?
+                split::plan_split_block(&self.document, anchor, focus)?
             }
             EditIntent::JoinWithPrevious => {
                 self.history.break_group();
@@ -310,6 +298,9 @@ impl DocumentSession {
                 structure::plan_outdent_list_item(&self.document, focus.node_id())?
             }
             EditIntent::MoveCaret { .. }
+            | EditIntent::ToggleMark { .. }
+            | EditIntent::SetMark { .. }
+            | EditIntent::RemoveMark { .. }
             | EditIntent::InsertLineBreak
             | EditIntent::MoveToNextCell
             | EditIntent::MoveToPreviousCell

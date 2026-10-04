@@ -34,6 +34,8 @@ mod host_form_order_tests;
 mod host_intent_tests;
 #[cfg(test)]
 mod list_marker_tests;
+#[cfg(test)]
+mod select_all_inline_atoms_tests;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -44,7 +46,7 @@ use gpui::{
 };
 
 use xiaomu_core::document::{ImageAttrs, ImageSource, NodeContent, NodeId, NodeKind};
-use xiaomu_core::selection::{InlinePoint, TextPoint};
+use xiaomu_core::selection::InlinePoint;
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
 use xiaomu_runtime::assets::AssetService;
@@ -306,21 +308,6 @@ impl DocumentView {
 
     fn apply_intent(&mut self, intent: EditIntent, window: &mut Window, cx: &mut Context<Self>) {
         self.apply_edit_intent(intent, window, cx);
-    }
-
-    /// Places the selection endpoints absolutely, routing focus afterwards.
-    ///
-    /// Text-only compatibility entry for keyboard flows whose positions are
-    /// canonical `TextPoint`s; mouse placement routes through
-    /// [`Self::set_inline_selection`] so atom ordinals survive.
-    fn set_selection(
-        &mut self,
-        anchor: TextPoint,
-        focus: TextPoint,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.set_inline_selection(anchor.into(), focus.into(), window, cx);
     }
 
     /// Places the selection endpoints at exact mixed-inline positions,
