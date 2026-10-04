@@ -23,6 +23,9 @@ mod table_block;
 mod vertical_geometry;
 mod visual_navigation;
 
+#[cfg(test)]
+mod host_intent_tests;
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -194,10 +197,20 @@ impl DocumentView {
 
     // ---- central intent application ----
 
-    /// Applies one editing intent centrally: guards the composing block,
-    /// bumps the render epoch on change, and routes platform focus to the
-    /// block holding the selection focus afterwards.
-    fn apply_intent(&mut self, intent: EditIntent, window: &mut Window, cx: &mut Context<Self>) {
+    /// Applies a host command through the same path as built-in edit actions.
+    ///
+    /// Toolbars and host controls should use this instead of editing the
+    /// shared session directly. An active native composition ignores the
+    /// command. Otherwise the session's policy runs normally; accepted edits
+    /// invalidate layout, sync child views, restore focus and request caret
+    /// scrolling using the built-in action behavior. Rejections are logged
+    /// and leave canonical session state unchanged.
+    pub fn apply_edit_intent(
+        &mut self,
+        intent: EditIntent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.focused_child_composing(window, cx) {
             #[cfg(debug_assertions)]
             eprintln!("xiaomu: editing action ignored during composition");
@@ -276,6 +289,10 @@ impl DocumentView {
             }
             Err(error) => eprintln!("xiaomu: intent rejected: {error}"),
         }
+    }
+
+    fn apply_intent(&mut self, intent: EditIntent, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_edit_intent(intent, window, cx);
     }
 
     /// Places the selection endpoints absolutely, routing focus afterwards.

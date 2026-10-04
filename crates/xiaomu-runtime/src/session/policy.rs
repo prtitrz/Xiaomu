@@ -1,0 +1,269 @@
+//! Optional, construction-time host rules around the generic edit pipeline.
+
+use std::fmt;
+
+use xiaomu_core::document::{MarkSet, XiaomuDocument};
+
+use super::{
+    DocumentSelection, DocumentSession, EditIntent, EditPlan, SessionError, SessionOutcome,
+};
+
+/// A host-defined reason for refusing an intent or document snapshot.
+///
+/// The message is diagnostic, not a stable machine-readable error code.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PolicyError {
+    message: String,
+}
+
+impl PolicyError {
+    /// Creates a rejection with a host-provided diagnostic message.
+    #[must_use]
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    /// Returns the host-provided diagnostic message.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl fmt::Display for PolicyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for PolicyError {}
+
+/// Read-only editing state supplied before any intent changes session state.
+/// For an atomic selection-plus-intent operation, this describes the proposed
+/// target selection and the typing marks that target would inherit.
+#[derive(Clone, Copy)]
+pub struct SessionContext<'a> {
+    document: &'a XiaomuDocument,
+    selection: DocumentSelection,
+    stored_marks: Option<&'a MarkSet>,
+}
+
+impl<'a> SessionContext<'a> {
+    /// Returns the current, policy-validated canonical snapshot.
+    #[must_use]
+    pub const fn document(self) -> &'a XiaomuDocument {
+        self.document
+    }
+
+    /// Returns the intent's validated target selection.
+    #[must_use]
+    pub const fn selection(self) -> DocumentSelection {
+        self.selection
+    }
+
+    /// Returns explicit typing marks; `None` means surrounding-run inheritance.
+    #[must_use]
+    pub const fn stored_marks(self) -> Option<&'a MarkSet> {
+        self.stored_marks
+    }
+
+    /// Returns the marks typing would use at a collapsed inline caret.
+    ///
+    /// Explicit stored marks take precedence, including `Some(empty)`.
+    /// Otherwise this uses Runtime's surrounding-run inheritance: the left
+    /// run wins at a boundary, except offset zero uses the first run. Returns
+    /// `None` for a range, cell range, atomic selection or structural gap.
+    #[must_use]
+    pub fn effective_typing_marks(self) -> Option<MarkSet> {
+        if !self.selection.is_collapsed() {
+            return None;
+        }
+        let (_, focus) = self.selection.as_same_node_inline()?;
+        let inline = self.document.node(focus.node_id())?.content().as_inline()?;
+        Some(self.stored_marks.cloned().unwrap_or_else(|| {
+            super::stored_marks::inherited_marks_at(inline, focus.text_offset().as_usize())
+        }))
+    }
+}
+
+/// A policy's decision before the default intent planner runs.
+#[derive(Clone, Debug)]
+pub enum IntentDisposition {
+    /// Use the existing host-neutral intent behavior.
+    Continue,
+    /// Do nothing, including leaving stored marks and typing grouping intact.
+    NoChange,
+    /// Replace explicit typing marks and close the current typing group.
+    ///
+    /// Only a collapsed inline selection accepts this decision. `None`
+    /// restores inheritance; `Some(empty)` explicitly requests unmarked text.
+    /// No document revision, history entry or listener notification is made.
+    StoredMarks(Option<MarkSet>),
+    /// Commit one host-planned transaction as an isolated undo unit.
+    ///
+    /// Stored marks are cleared unless the plan uses `with_stored_marks`.
+    /// Core, after-selection and policy validation
+    /// all run before publication; any error leaves session state unchanged.
+    Apply(EditPlan),
+}
+
+/// Optional per-session host editing rules, fixed at construction time.
+///
+/// Implementations must be pure, read-only and non-reentrant: do not mutate
+/// external state or recursively borrow/apply to the session in a callback.
+/// In particular, validation must use stable rules for the session's lifetime
+/// so undo snapshots cannot become invalid after a configuration change.
+/// Callbacks receive no mutable session. Return one plan to replace an intent
+/// rather than recursively dispatching another intent or repairing listeners.
+/// The session can roll back its own state, not a callback's external effects.
+pub trait SessionPolicy {
+    /// Checks or replaces an intent before any session state changes.
+    ///
+    /// This also runs before structured-paste planning, stored-mark clearing,
+    /// cell-range collapse and history boundaries. An error is a rejection.
+    fn prepare_intent(
+        &self,
+        _context: SessionContext<'_>,
+        _intent: &EditIntent,
+    ) -> Result<IntentDisposition, PolicyError> {
+        Ok(IntentDisposition::Continue)
+    }
+
+    /// Validates the initial document and every final candidate snapshot.
+    ///
+    /// Called for normal, staged, raw, undo and redo commits before history,
+    /// document or listeners are published. Hidden intermediate stages are
+    /// not host-validated. A rejection never reaches document listeners.
+    fn validate_document(&self, _document: &XiaomuDocument) -> Result<(), PolicyError> {
+        Ok(())
+    }
+}
+
+impl DocumentSession {
+    /// Creates a session with host rules that cannot be replaced later.
+    ///
+    /// Both the initial selection and document must be valid. A rejected
+    /// initial document produces an error without constructing a session.
+    pub fn new_with_policy(
+        document: XiaomuDocument,
+        selection: DocumentSelection,
+        policy: Box<dyn SessionPolicy>,
+    ) -> Result<Self, SessionError> {
+        let mut session = Self::new(document, selection)?;
+        policy.validate_document(&session.document)?;
+        session.policy = Some(policy);
+        Ok(session)
+    }
+
+    /// Applies one typed editing intent after optional policy preflight.
+    ///
+    /// No-op intents do not advance the revision, write history or notify
+    /// document listeners. Collapsed mark toggles change only stored marks.
+    /// On error, the document, selection, stored marks and history grouping
+    /// remain unchanged and no listener is notified.
+    pub fn apply_intent(&mut self, intent: &EditIntent) -> Result<SessionOutcome, SessionError> {
+        self.apply_intent_with_selection(self.selection, intent)
+    }
+
+    /// Applies an intent at a validated target selection as one atomic action.
+    ///
+    /// Platform replacement ranges can use this instead of first publishing
+    /// a selection change. Policy preflight sees the target selection; stored
+    /// marks are inherited normally if it differs from the current selection.
+    /// On success only the final selection/document is notified and Undo
+    /// restores the selection from before this whole operation. On rejection
+    /// or a policy `NoChange`, the original editing state stays unchanged.
+    pub fn apply_intent_with_selection(
+        &mut self,
+        selection: DocumentSelection,
+        intent: &EditIntent,
+    ) -> Result<SessionOutcome, SessionError> {
+        selection.validate(&self.document)?;
+        // Preflight deliberately precedes even transient state changes.
+        let disposition = match &self.policy {
+            Some(policy) => policy.prepare_intent(
+                SessionContext {
+                    document: &self.document,
+                    selection,
+                    stored_marks: if selection == self.selection {
+                        self.stored_marks.as_ref()
+                    } else {
+                        None
+                    },
+                },
+                intent,
+            )?,
+            None => IntentDisposition::Continue,
+        };
+        if matches!(disposition, IntentDisposition::NoChange) {
+            return Ok(SessionOutcome::NoChange);
+        }
+        self.with_transient_rollback(|session| {
+            let before = session.selection;
+            if selection != before {
+                session.history_selection_before = Some(before);
+                session.selection = selection;
+                session.clear_stored_marks();
+                session.history.break_group();
+            }
+            let outcome = match disposition {
+                IntentDisposition::Continue => session.apply_default_intent(intent),
+                IntentDisposition::NoChange => Ok(SessionOutcome::NoChange),
+                IntentDisposition::StoredMarks(marks) => {
+                    if !session.selection.is_collapsed()
+                        || session.selection.as_same_node_inline().is_none()
+                    {
+                        return Err(SessionError::SelectionInvalid);
+                    }
+                    session.stored_marks = marks;
+                    session.history.break_group();
+                    Ok(SessionOutcome::NoChange)
+                }
+                IntentDisposition::Apply(plan) => {
+                    session.history.break_group();
+                    session.clear_stored_marks();
+                    session.commit(plan)
+                }
+            }?;
+            // Target selection and cell-range convergence are tentative
+            // until all planning succeeds. Other successful outcomes have
+            // already published the final selection or document.
+            if outcome == SessionOutcome::NoChange && session.selection != before {
+                session.history.break_group();
+                session.notify_selection_changed();
+                return Ok(SessionOutcome::SelectionChanged);
+            }
+            Ok(outcome)
+        })
+    }
+
+    pub(super) fn validate_candidate(&self, document: &XiaomuDocument) -> Result<(), SessionError> {
+        if let Some(policy) = &self.policy {
+            policy.validate_document(document)?;
+        }
+        Ok(())
+    }
+
+    /// Save only cheap transient state. Commit paths publish once, after
+    /// their last fallible step; failed undo/redo put back their taken entry.
+    /// Neither the document nor either transaction stack is cloned here.
+    pub(super) fn with_transient_rollback(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> Result<SessionOutcome, SessionError>,
+    ) -> Result<SessionOutcome, SessionError> {
+        let selection = self.selection;
+        let marks = self.stored_marks.clone();
+        let group_open = self.history.typing_group_open();
+        let history_selection_before = self.history_selection_before;
+        let result = operation(self);
+        self.history_selection_before = history_selection_before;
+        if result.is_err() {
+            self.selection = selection;
+            self.stored_marks = marks;
+            self.history.restore_typing_group(group_open);
+        }
+        result
+    }
+}

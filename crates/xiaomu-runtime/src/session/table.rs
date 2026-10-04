@@ -64,7 +64,8 @@ impl DocumentSession {
             .leading_caret(range.anchor())
             .unwrap_or_else(|| self.selection.focus());
         self.selection = DocumentSelection::collapsed(target);
-        self.notify_selection_changed();
+        // Tentative navigation state: the intent wrapper restores this on
+        // error and publishes only the final successful selection.
     }
 
     pub(crate) fn plan_insert_table(

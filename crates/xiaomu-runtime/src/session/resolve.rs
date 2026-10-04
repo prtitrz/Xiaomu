@@ -23,9 +23,12 @@ pub(super) fn resolve_selection(
         SelectionUpdate::CaretAfterReplacement | SelectionUpdate::CaretAtEditStart => {
             let edit = plan.primary_edit().ok_or(SessionError::SelectionInvalid)?;
             let raw = match plan.selection_update() {
-                SelectionUpdate::CaretAfterReplacement => {
-                    edit.range().start().as_usize() + edit.inserted_len()
-                }
+                SelectionUpdate::CaretAfterReplacement => edit
+                    .range()
+                    .start()
+                    .as_usize()
+                    .checked_add(edit.inserted_len())
+                    .ok_or(SessionError::SelectionInvalid)?,
                 _ => edit.range().start().as_usize(),
             };
             collapsed_caret(document, edit.node(), raw, affinity_of(before))

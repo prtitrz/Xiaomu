@@ -240,7 +240,25 @@ JoinNodes          → 删除追加文本 + RestoreSubtree
 
 ## Runtime 边界
 
+### Per-instance host edit policy（2026-10-03 实验）
+
+`DocumentSession::new_with_policy` 在构造时绑定可选 `SessionPolicy`；旧 `new` 保留无 policy 的通用语义。`EditorInstance::new_with_policy` 把同一能力带到 GPUI，原 `EditorHooks` 字段和 `new` 签名不变。没有运行时更换 policy 的入口，避免旧 Undo 历史受后换规则影响。Core `MarkSet` 不包含任何宿主 schema 或 codec 的规则。
+
+宿主工具栏可调用 `DocumentView::apply_edit_intent` 复用内建编辑 action 的同一入口：composition guard、session policy、render epoch、child 同步、焦点和 caret scroll 均沿原路径执行，不直接绕过前端对共享 session 操作。该 seam 只公开已有行为，不新增输入协议。
+
+`prepare_intent(SessionContext, &EditIntent)` 在任何 selection / StoredMarks / history mutation 前运行，包括 `PasteSlice` 和 cell-range convergence。只读 context 提供 document、selection、explicit stored marks，以及复用 Runtime 周围 run 继承语义的 `effective_typing_marks`。宿主返回 Continue、完全保留状态的 NoChange、collapsed inline caret 的显式 StoredMarks（区分 None / Some(empty)），或一个 `EditPlan`。宿主可用 `EditPlan::new` / `PrimaryEdit::new` 描述替代 transaction 与 selection policy，一次成功接管只产生一个 isolated Undo 单元，无需可变 session 或递归 `apply_intent`。
+
+`EditPlan::with_stored_marks` 可指定成功事务后的 typing marks，供 split 到空块等无法从 canonical run 继承的场景使用。最终 selection 必须是 collapsed inline caret；合法性与 candidate 在同一发布前阶段检查，通过后 marks 与 document / selection 一起安装。失败不能先发布文档再报错。
+
+平台显式 replacement range 通过 `apply_intent_with_selection` 把目标 selection 与 intent 合为一个原子动作，不先调用 selection setter。Preflight 只读查看目标；不同目标按既有输入规则重新继承 marks，成功仅通知最终结果，Undo 恢复整个回调前的 selection；拒绝或 policy NoChange 不泄露临时选区、marks / grouping 清理或通知。Composition 状态机不因该入口改变。
+
+`validate_document` 检查构造时文档及所有将发布的最终 candidate：普通 commit、隐藏 staged commit、raw apply、Undo、Redo。它不检查 staged 中间 snapshot；最终 candidate 必须先通过 Core、selection 和 host 检查，才记录 history、发布 document 并通知 listener。拒绝以 `SessionError::Policy(PolicyError)` 返回，不允许 listener 事后修补。
+
+失败只恢复轻量 transient checkpoint（Copy selection、StoredMarks、typing-group flag），不克隆整个历史；Undo/Redo 失败归还取出的 entry。文档、revision、selection、stored marks、history depths / grouping 和 listener 均保留。Cell-range navigation 的 collapse 在后续操作成功前不通知，避免 candidate 拒绝后已泄露 selection 通知。Policy callback 必须纯只读、稳定、不可重入、无外部副作用；引擎只保证自己状态的原子性。公开 seam 回归位于 Runtime `tests/session_policy.rs` / `policy_context.rs` 和 GPUI `tests/editor_policy.rs`；不据此宣称真实平台或宿主 schema 的原生验收。
+
 `xiaomu-runtime` 围绕 Core 类型协调 editing session、command execution、history、clipboard seam 与 persistence seam。它依赖 `xiaomu-core`，不依赖 GPUI 或产品宿主语义。
+
+本地验证：2026-10-03，workspace575 tests、vendored decoder8 tests、strict Clippy、fmt、source-size/dependency/provenance guards 和 cargo-deny bans/licenses/sources 通过。独立源码审查发现的平台 range 提前通知问题已修并以 Runtime/真实 GPUI 虚拟平台回归覆盖。日志在 `/workspace/shared/xiaomu-instance-policy-checks`；该验证不是 OS 原生 GUI 或远程发布证明。
 
 Runtime 不拥有 App Shell、window、filesystem policy、networking、product configuration 或 codec，并保持 `#![forbid(unsafe_code)]` 与 `#![warn(missing_docs)]`。
 
