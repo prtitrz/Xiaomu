@@ -8,7 +8,9 @@
 
 use std::{collections::HashMap, rc::Rc};
 
-use xiaomu_core::document::{DocumentRevision, NodeId, NodeKind, NodeStore, XiaomuDocument};
+use xiaomu_core::document::{
+    DocumentRevision, NodeAttrs, NodeId, NodeKind, NodeStore, XiaomuDocument,
+};
 use xiaomu_runtime::session::DocumentSelection;
 
 use super::{TableCapabilityKey, TableLayoutError, build_key};
@@ -77,7 +79,13 @@ impl CapabilityCache {
         });
     }
 
-    fn table(&mut self, document: &XiaomuDocument, table: NodeId) -> Option<&CachedTable> {
+    fn table(
+        &mut self,
+        document: &XiaomuDocument,
+        table: NodeId,
+        row_metadata: &NodeAttrs,
+        configuration: u64,
+    ) -> Option<&CachedTable> {
         self.prepare(document);
         // Do not retain misses for arbitrary/deleted IDs: entries are bounded
         // by the current snapshot's actual table count, errors included.
@@ -93,7 +101,7 @@ impl CapabilityCache {
             {
                 self.counts.1 += 1;
             }
-            let key = build_key(document, table).map(Rc::new);
+            let key = build_key(document, table, row_metadata, configuration).map(Rc::new);
             let measured = self.measured.get(&table);
             let admitted = key.as_ref().is_ok_and(|key| measured == Some(key));
             CachedTable {
@@ -112,14 +120,22 @@ impl CapabilityCache {
         &mut self,
         document: &XiaomuDocument,
         table: NodeId,
+        row_metadata: &NodeAttrs,
+        configuration: u64,
     ) -> Result<Rc<TableCapabilityKey>, TableLayoutError> {
-        self.table(document, table)
+        self.table(document, table, row_metadata, configuration)
             .map(|entry| entry.key.clone())
             .unwrap_or(Err(TableLayoutError::InvalidDimension))
     }
 
-    pub(super) fn permits(&mut self, document: &XiaomuDocument, table: NodeId) -> bool {
-        self.table(document, table)
+    pub(super) fn permits(
+        &mut self,
+        document: &XiaomuDocument,
+        table: NodeId,
+        row_metadata: &NodeAttrs,
+        configuration: u64,
+    ) -> bool {
+        self.table(document, table, row_metadata, configuration)
             .is_some_and(|entry| entry.admitted)
     }
 

@@ -28,6 +28,9 @@ mod handoff_tests;
 #[path = "measured_table_guard_tests.rs"]
 mod presentation_guard_tests;
 
+#[path = "measured_table_row_metadata_tests.rs"]
+mod row_metadata_tests;
+
 struct Fixture {
     document: XiaomuDocument,
     table: NodeId,
