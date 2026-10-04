@@ -1,11 +1,12 @@
 //! Rectangular cell geometry shared by commands, clipboard and frontends.
 use super::SessionError;
-use xiaomu_core::document::{NodeId, NodeKind, XiaomuDocument};
+use xiaomu_core::document::{NodeId, NodeKind, TableGrid, TableRect, XiaomuDocument};
 
 /// A rectangular cell selection inside one table (P5.5).
 ///
-/// Endpoints are cell identities, so row/column insertions never move the
-/// rectangle — it only shrinks when an endpoint cell's subtree is removed.
+/// Endpoints are cell identities, so row/column insertions retain the gesture
+/// targets while logical coordinates are rebuilt from the current snapshot.
+/// Canonical merge mapping moves absorbed endpoints to their survivor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CellRange {
     anchor: NodeId,
@@ -69,12 +70,72 @@ impl CellRange {
 }
 
 impl CellRange {
+    /// Returns the logical bounding rectangle of the complete endpoint cells.
+    ///
+    /// Coordinates are half-open and belong to the endpoints' common table.
+    /// Reversing the endpoints leaves the rectangle unchanged. Other cells
+    /// crossing its boundary do not expand it: callers requiring complete
+    /// coverage must separately check [`Self::is_closed_rect`].
+    pub fn logical_rect(self, document: &XiaomuDocument) -> Result<TableRect, SessionError> {
+        self.checked_grid(document)?
+            .rect_between(self.anchor, self.focus)
+            .map_err(SessionError::Core)
+    }
+
+    /// Returns selected cell origins once each, in logical row-major order.
+    ///
+    /// This follows ProseMirror's `TableMap.cellsInRect`: a cell is selected
+    /// exactly when its top-left origin lies inside [`Self::logical_rect`].
+    /// Cells crossing into the rectangle from above or the left are excluded;
+    /// cells originating inside and extending below or right are included.
+    /// This differs from Core's `TableGrid::unique_cells_in`, which returns
+    /// every intersecting cell, and from [`Self::cells`]' unit-cell matrix.
+    /// Covered slots and entirely covered physical rows add no duplicates.
+    /// Nested tables remain content of their outer cells, not range targets.
+    pub fn unique_origins(self, document: &XiaomuDocument) -> Result<Vec<NodeId>, SessionError> {
+        let grid = self.checked_grid(document)?;
+        let rect = grid
+            .rect_between(self.anchor, self.focus)
+            .map_err(SessionError::Core)?;
+        Ok(grid
+            .origins()
+            .filter(|cell| {
+                (rect.top()..rect.bottom()).contains(&cell.row())
+                    && (rect.left()..rect.right()).contains(&cell.column())
+            })
+            .map(|cell| cell.cell())
+            .collect())
+    }
+
+    /// Whether every cell intersecting the logical rectangle is fully inside.
+    ///
+    /// A valid CellRange may be non-closed. This predicate does not normalize
+    /// the rectangle or change either endpoint; geometry-dependent commands
+    /// such as merge or partial structured copy must choose their own policy.
+    pub fn is_closed_rect(self, document: &XiaomuDocument) -> Result<bool, SessionError> {
+        let grid = self.checked_grid(document)?;
+        let rect = grid
+            .rect_between(self.anchor, self.focus)
+            .map_err(SessionError::Core)?;
+        Ok(grid.is_closed_rect(rect))
+    }
+
+    fn checked_grid(self, document: &XiaomuDocument) -> Result<TableGrid, SessionError> {
+        self.validate(document)?;
+        let table = document
+            .parent_of(self.anchor)
+            .and_then(|row| document.parent_of(row))
+            .ok_or(SessionError::SelectionInvalid)?;
+        document.table_grid(table).map_err(SessionError::Core)
+    }
+
     /// Returns unit-cell rows of unique canonical cell identities.
     ///
     /// This is not a logical-slot API: merged cells can occupy several slots
-    /// with the same identity. Until range editing defines an origin-aware
-    /// contract, a table containing spans returns `UnsupportedTableOperation`
-    /// rather than repeating identities or interpreting physical indexes.
+    /// with the same identity. A table containing spans continues to return
+    /// `UnsupportedTableOperation` rather than repeating identities or
+    /// interpreting physical indexes. Use [`Self::unique_origins`] for
+    /// origin-aware editing; this legacy matrix contract stays unchanged.
     ///
     /// Both endpoints must belong to one table. Descendant nested tables
     /// are content of their outer cells, not additional cells of this range.

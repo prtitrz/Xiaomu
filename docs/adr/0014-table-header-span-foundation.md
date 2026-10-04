@@ -31,8 +31,15 @@ does not claim universal zero-impact schema compatibility.
 ## Safe transition of consumers
 
 The existing rectangular row/column steps keep empty body-cell defaults and
-refuse spans before changing data. Runtime cell-range, row/column, navigation
-and rich-paste paths similarly refuse still-physical operations on spans.
+refuse spans before changing data. Runtime row/column, navigation and rich-paste
+paths similarly refuse still-physical operations on spans. `CellRange::cells`
+keeps its unit-matrix contract; separate `logical_rect`, `unique_origins` and
+`is_closed_rect` APIs describe spans. Unique origins follow ProseMirror's
+origin-inside rule, not all cells intersecting the rectangle. Generic range
+clear and toggle/set/remove marks visit each selected origin's subtree once,
+with one transaction and inverse; text replacement and partial clipboard
+remain explicitly unsupported on spans. Product whole-table Backspace deletion
+is a separate host command, not implied by generic range clearing.
 Inline text/marks and exact Undo inside canonical cells remain possible in
 headless Runtime. Header unit-cell reconstruction preserves node kind.
 
@@ -74,6 +81,12 @@ allocated cell; these checks do not constitute a total execution-memory sandbox.
 This increment passed 251 Core tests and strict Core all-target Clippy, including
 15 new merge/split/budget/mapping and stale-inverse cases. It has no product
 toolbar, row/column-span commands, native GUI or visual-parity claim yet.
+
+Runtime logical-selection integration passed 467 tests and strict all-target
+Clippy, including 15 new cases. Raw merge maps both CellRange endpoints through
+Core node-identity maps, including absorbed cells; Undo restores the original
+reverse range. Clear/marks failure tests cover canonical content, selection,
+pending marks, typing groups, history and listener counts.
 
 Core236, Runtime452 and ten new GPUI virtual tests passed; workspace/all-target
 tests total1034 and strict Clippy pass. Tests cover Header inverse, aggregate
