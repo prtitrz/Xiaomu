@@ -31,6 +31,7 @@ mod paste;
 mod paste_fragment;
 pub(crate) mod paste_hierarchy;
 mod paste_table;
+mod plan;
 mod policy;
 mod resolve;
 mod selection;
