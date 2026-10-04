@@ -46,6 +46,7 @@ pub(super) fn append_node(
     index: usize,
     node: ClipboardNode,
 ) -> Result<StagedPlan, SessionError> {
+    crate::clipboard::require_unit_tables(std::slice::from_ref(&node))?;
     if let ClipboardNodeContent::Table { rows, row_attrs } = node.content() {
         return append_table(staged, parent, index, &node, rows, row_attrs);
     }
@@ -128,6 +129,10 @@ fn append_table(
                 });
             }
             for (column, cell) in row.iter().enumerate() {
+                transaction.push_step(TransactionStep::SetNodeKind {
+                    node: row_path.child(column).resolve(document)?,
+                    kind: cell.kind().clone(),
+                });
                 transaction.push_step(TransactionStep::SetNodeAttrs {
                     node: row_path.child(column).resolve(document)?,
                     attrs: cell.attrs().clone(),
@@ -165,7 +170,7 @@ pub(super) fn append_cell_blocks(
     index: usize,
     payload: &ClipboardNode,
 ) -> Result<StagedPlan, SessionError> {
-    if !matches!(payload.kind(), NodeKind::TableCell) {
+    if !payload.kind().is_table_cell() {
         return Err(SessionError::ClipboardTableUnsupported);
     }
     let children = payload

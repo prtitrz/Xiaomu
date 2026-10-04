@@ -25,16 +25,29 @@ impl CellRange {
         let table_of = |cell: NodeId| -> Result<NodeId, SessionError> {
             if !matches!(
                 document.node(cell),
-                Some(node) if matches!(node.kind(), NodeKind::TableCell)
+                Some(node) if node.kind().is_table_cell()
             ) {
                 return Err(SessionError::SelectionInvalid);
             }
             let row = document
                 .parent_of(cell)
                 .ok_or(SessionError::SelectionInvalid)?;
-            document
+            if !document
+                .node(row)
+                .is_some_and(|node| matches!(node.kind(), NodeKind::TableRow))
+            {
+                return Err(SessionError::SelectionInvalid);
+            }
+            let table = document
                 .parent_of(row)
-                .ok_or(SessionError::SelectionInvalid)
+                .ok_or(SessionError::SelectionInvalid)?;
+            if !document
+                .node(table)
+                .is_some_and(|node| matches!(node.kind(), NodeKind::Table))
+            {
+                return Err(SessionError::SelectionInvalid);
+            }
+            Ok(table)
         };
         if table_of(self.anchor)? != table_of(self.focus)? {
             return Err(SessionError::SelectionInvalid);
@@ -56,7 +69,12 @@ impl CellRange {
 }
 
 impl CellRange {
-    /// Returns the validated rectangle as rows of canonical cell identities.
+    /// Returns unit-cell rows of unique canonical cell identities.
+    ///
+    /// This is not a logical-slot API: merged cells can occupy several slots
+    /// with the same identity. Until range editing defines an origin-aware
+    /// contract, a table containing spans returns `UnsupportedTableOperation`
+    /// rather than repeating identities or interpreting physical indexes.
     ///
     /// Both endpoints must belong to one table. Descendant nested tables
     /// are content of their outer cells, not additional cells of this range.
@@ -83,12 +101,16 @@ impl CellRange {
             ))
         };
         let (table, ar, ac) = locate(self.anchor)?;
+        super::table::require_unit_grid(document, table)?;
         let (_, fr, fc) = locate(self.focus)?;
         super::structure::children_of(document, table)[ar.min(fr)..=ar.max(fr)]
             .iter()
             .map(|row| {
                 let cells = super::structure::children_of(document, *row);
-                Ok(cells[ac.min(fc)..=ac.max(fc)].to_vec())
+                cells
+                    .get(ac.min(fc)..=ac.max(fc))
+                    .map(<[NodeId]>::to_vec)
+                    .ok_or(SessionError::SelectionInvalid)
             })
             .collect()
     }

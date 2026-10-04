@@ -84,6 +84,12 @@ pub enum Error {
     InvalidImageAttrs,
     /// A task item has a checked attribute other than missing, null, or boolean.
     InvalidTaskItemChecked,
+    /// Known cell attributes have an invalid type, span, or width list.
+    InvalidTableAttrs,
+    /// Table grids exceed the documented snapshot-wide resource budget.
+    TableResourceLimit,
+    /// A legacy table operation cannot preserve span semantics.
+    UnsupportedTableOperation,
     /// A table violates row/column structural invariants.
     InvalidTableStructure,
 }
@@ -140,8 +146,17 @@ impl fmt::Display for Error {
             Self::InvalidTaskItemChecked => {
                 f.write_str("task item checked attribute must be missing, null, or boolean")
             }
-            Self::InvalidTableStructure => {
-                f.write_str("table rows must share one column count with non-empty cells")
+            Self::InvalidTableStructure => f.write_str(
+                "table cells must cover a bounded rectangular grid without overlaps or holes",
+            ),
+            Self::InvalidTableAttrs => {
+                f.write_str("table cell attrs violate the geometry contract")
+            }
+            Self::TableResourceLimit => {
+                f.write_str("table grids exceed the snapshot resource budget")
+            }
+            Self::UnsupportedTableOperation => {
+                f.write_str("table operation does not support spanning cells")
             }
             Self::InvalidImageAttrs => f.write_str("image attrs violate the typed image contract"),
         }

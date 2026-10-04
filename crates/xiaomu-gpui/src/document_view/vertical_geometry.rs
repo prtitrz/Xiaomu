@@ -24,6 +24,9 @@ impl DocumentView {
     pub(super) fn vertical_neighbor(&self, node: NodeId, x: Pixels, down: bool) -> Option<NodeId> {
         let session = self.session.borrow();
         let document = session.document();
+        if navigation::spanning_table_ancestor(document, node).is_some() {
+            return None;
+        }
         let mut scope = navigation::table_cell_ancestor(document, node);
         let mut source = self.block_bounds(node)?;
         let mut excluded = Some(node);
@@ -100,7 +103,8 @@ impl DocumentView {
     ) -> Option<NodeId> {
         let mut best: Option<(NodeId, (Pixels, Pixels, Pixels, Pixels))> = None;
         for (node, bounds) in self.registry.borrow().iter() {
-            if scope.is_some_and(|scope| !navigation::node_is_within(document, *node, scope))
+            if navigation::spanning_table_ancestor(document, *node).is_some()
+                || scope.is_some_and(|scope| !navigation::node_is_within(document, *node, scope))
                 || excluded
                     .is_some_and(|excluded| navigation::node_is_within(document, *node, excluded))
             {

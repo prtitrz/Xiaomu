@@ -72,6 +72,10 @@ impl ParagraphView {
         new_selected_range: Option<std::ops::Range<usize>>,
         cx: &mut Context<Self>,
     ) {
+        if self.input_is_hidden_by_table() {
+            self.cancel_if_composing(cx);
+            return;
+        }
         if self.rejected_composition {
             if new_text.is_empty() {
                 self.cancel_composition(cx);

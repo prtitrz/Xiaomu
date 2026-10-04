@@ -20,6 +20,11 @@ impl DocumentSession {
         if matches!(intent, EditIntent::InsertHorizontalRule) {
             return Err(SessionError::UnsupportedEdit);
         }
+        // Guard raw internal slices too, before closed/task fitting or any
+        // tentative history/selection change can obscure unsupported spans.
+        if let EditIntent::PasteSlice { slice } = intent {
+            crate::clipboard::require_unit_tables(slice.roots())?;
+        }
         // Whole-block selections carry identity, not an ordinary partial gap
         // range. A node-aware policy may replace this default; until then no
         // selection-driven edit may accidentally take an All/text/gap route.
