@@ -23,6 +23,7 @@ mod host_transaction;
 pub(crate) mod markers;
 pub(crate) mod mouse;
 pub(crate) mod navigation;
+mod node_selection;
 mod table_block;
 mod task_checkbox;
 mod vertical_geometry;
@@ -393,6 +394,9 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.route_atomic_selection(node, window, cx) {
+            return;
+        }
         let outcome = self.session.borrow_mut().set_atomic_selection(node);
         match outcome {
             Ok(_) => {
@@ -435,7 +439,16 @@ impl DocumentView {
 
     /// Marks the block holding the document focus for one keep-visible pass.
     fn request_focus_scroll(&self, cx: &App) {
-        let node = match self.session.borrow().selection().focus() {
+        let selection = self.session.borrow().selection();
+        if let Some(node) = selection.as_node_selection() {
+            if let Some((anchor, input)) = &self.range_input
+                && *anchor == node
+            {
+                input.read(cx).request_caret_scroll();
+            }
+            return;
+        }
+        let node = match selection.focus() {
             DocumentPosition::Inline(point) => point.node_id(),
             DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => return,
         };
@@ -500,7 +513,11 @@ impl DocumentView {
 
 impl Render for DocumentView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let restore_focus = self.range_input_is_focused(window, cx) && !self.uses_range_input();
+        // A host policy may commit into another node/All/cell range. Capture
+        // ownership before syncing drops the old proxy, and transfer focus
+        // only if that proxy owned it, including range-to-range transitions.
+        let restore_focus = self.range_input_is_focused(window, cx)
+            && self.range_input.as_ref().map(|(anchor, _)| *anchor) != self.range_input_anchor();
         self.sync_children(cx);
         if restore_focus {
             self.route_focus(window, cx);

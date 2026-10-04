@@ -26,7 +26,7 @@ impl DocumentView {
             return div().into_any_element();
         };
 
-        match content {
+        let block = match content {
             NodeContent::Inline(_) => {
                 let Some((_, view)) = self.children.iter().find(|(child, _)| *child == id) else {
                     return div().into_any_element();
@@ -133,6 +133,7 @@ impl DocumentView {
                 };
                 div()
                     .id(("atomic-block", index))
+                    .debug_selector(move || format!("atomic-block-{id:?}"))
                     .h(height)
                     .w_full()
                     .my_3()
@@ -147,6 +148,7 @@ impl DocumentView {
                     .into_any_element()
             }
             _ => div().into_any_element(),
-        }
+        };
+        self.render_node_selection(id, block, cx)
     }
 }

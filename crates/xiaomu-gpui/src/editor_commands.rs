@@ -1,6 +1,6 @@
 //! Opt-in, read-only routing of a bounded set of editor gestures.
 
-use xiaomu_core::document::{MarkSet, XiaomuDocument};
+use xiaomu_core::document::{MarkSet, NodeId, XiaomuDocument};
 use xiaomu_runtime::clipboard::ClipboardSlice;
 use xiaomu_runtime::session::{DocumentSelection, DocumentSession, EditIntent, PolicyError};
 
@@ -30,6 +30,34 @@ pub enum EnterSource {
     ///
     /// A default route propagates this action to outer application handlers.
     PrimaryModifier,
+}
+
+/// A navigation direction offered only for an explicit whole-block selection.
+///
+/// These are original key gestures, not inferred text or structural targets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NodeNavigationDirection {
+    /// Left arrow.
+    Left,
+    /// Right arrow.
+    Right,
+    /// Up arrow.
+    Up,
+    /// Down arrow.
+    Down,
+    /// Home (visual line start for ordinary text selections).
+    Home,
+    /// End (visual line end for ordinary text selections).
+    End,
+}
+
+/// One original navigation gesture at an explicit whole-block selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NodeNavigation {
+    /// The key's direction; the host supplies its exact target semantics.
+    pub direction: NodeNavigationDirection,
+    /// Whether Shift requested extension rather than an ordinary move.
+    pub extend: bool,
 }
 
 /// The validated clipboard transport offered to a code-block paste hook.
@@ -124,6 +152,42 @@ pub enum CommandRoute {
 /// Install with [`EditorInstance::with_command_router`](crate::editor::EditorInstance::with_command_router)
 /// or [`DocumentView::set_command_router`](crate::document_view::DocumentView::set_command_router).
 pub trait EditorCommandRouter {
+    /// Optionally selects an atomic block after its native pointer gesture.
+    ///
+    /// Receives the original selection and a currently validated atomic node.
+    /// `None` preserves legacy Atomic selection, including images and hosts
+    /// that do not implement this hook. `Some` is validated and installed as
+    /// an exact selection; errors consume the gesture without falling back.
+    /// This read-only callback cannot edit the document or typing marks.
+    /// Successful installation uses normal Runtime selection semantics,
+    /// including clearing stored marks on change and notifying selection
+    /// listeners, but creates no document revision or undo entry. NoChange
+    /// also restores this view's focus; rejected targets preserve focus.
+    fn select_atomic(
+        &self,
+        _context: EditorCommandContext<'_>,
+        _node: NodeId,
+    ) -> Result<Option<DocumentSelection>, PolicyError> {
+        Ok(None)
+    }
+
+    /// Optionally supplies an exact target for explicit whole-block navigation.
+    ///
+    /// Called only for `selection().as_node_selection().is_some()`, outside
+    /// composition. `None` and errors consume the gesture without changes:
+    /// no generic gap, atomic or first-paragraph navigation is inferred.
+    /// A returned selection is validated and installed without a document
+    /// transaction, document-change notification or undo entry. An actual
+    /// selection change still notifies selection listeners. Existing routers,
+    /// ordinary text, explicit All and legacy Atomic navigation are unchanged.
+    fn route_node_navigation(
+        &self,
+        _context: EditorCommandContext<'_>,
+        _navigation: NodeNavigation,
+    ) -> Result<Option<DocumentSelection>, PolicyError> {
+        Ok(None)
+    }
+
     /// Optionally supplies an explicit selection for the Select All gesture.
     ///
     /// `None` preserves the original text-range behavior. Hosts opting into
