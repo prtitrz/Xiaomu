@@ -117,19 +117,20 @@ impl ImageAttrs {
 
     /// Reads typed image attrs from canonical node attrs.
     ///
-    /// Exactly one of the source keys must be present; dimensions must be
-    /// positive integers. Unknown keys are ignored here and preserved in the
-    /// generic attribute container.
+    /// Exactly one of the source keys must be present; all present source,
+    /// alt and title values must be strings, and dimensions must be positive
+    /// integers. Null and other non-string values are not treated as missing.
+    /// Unknown keys are ignored here and preserved in the generic container.
     pub fn from_attrs(attrs: &NodeAttrs) -> Result<Self> {
-        let src = string_attr(attrs, IMAGE_ATTR_SRC);
-        let asset = string_attr(attrs, IMAGE_ATTR_ASSET);
+        let src = string_attr(attrs, IMAGE_ATTR_SRC)?;
+        let asset = string_attr(attrs, IMAGE_ATTR_ASSET)?;
         let source = match (src, asset) {
             (Some(url), None) => ImageSource::ExternalUrl(url),
             (None, Some(asset_ref)) => ImageSource::AssetRef(asset_ref),
             _ => return Err(Error::InvalidImageAttrs),
         };
-        let alt = string_attr(attrs, IMAGE_ATTR_ALT).ok_or(Error::InvalidImageAttrs)?;
-        let title = string_attr(attrs, IMAGE_ATTR_TITLE);
+        let alt = string_attr(attrs, IMAGE_ATTR_ALT)?.ok_or(Error::InvalidImageAttrs)?;
+        let title = string_attr(attrs, IMAGE_ATTR_TITLE)?;
         let width = dimension_attr(attrs, IMAGE_ATTR_WIDTH)?;
         let height = dimension_attr(attrs, IMAGE_ATTR_HEIGHT)?;
         Self::new(source, alt, title, width, height)
@@ -175,10 +176,11 @@ impl ImageAttrs {
     }
 }
 
-fn string_attr(attrs: &NodeAttrs, key: &str) -> Option<String> {
+fn string_attr(attrs: &NodeAttrs, key: &str) -> Result<Option<String>> {
     match attrs.get(key) {
-        Some(AttrValue::String(value)) => Some(value.clone()),
-        _ => None,
+        None => Ok(None),
+        Some(AttrValue::String(value)) => Ok(Some(value.clone())),
+        Some(_) => Err(Error::InvalidImageAttrs),
     }
 }
 

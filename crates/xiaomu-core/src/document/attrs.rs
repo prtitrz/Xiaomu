@@ -12,6 +12,11 @@ use crate::{Error, Result};
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AttrValue {
+    /// Explicit null, distinct from an absent attribute key.
+    ///
+    /// Null is a preserved value, including inside lists and objects; it does
+    /// not request attribute removal or bypass a node kind's typed contract.
+    Null,
     /// Boolean value.
     Bool(bool),
     /// Signed integer value.
@@ -52,6 +57,9 @@ impl NodeAttrs {
     }
 
     /// Returns an attribute by key.
+    ///
+    /// An explicit null returns `Some(&AttrValue::Null)`; only an absent key
+    /// returns `None`.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&AttrValue> {
         self.values.get(key)

@@ -8,6 +8,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+mod strict_json;
+
 use serde::{Deserialize, Serialize};
 use xiaomu_core::document::{
     AtomKind, AttrValue, HeadingLevel, InlineAtomContent, LinkMark, Mark, MarkSet, NodeAttrs,
@@ -33,6 +35,9 @@ const VERSION: u32 = 4;
 const VERSION_TABLE: u32 = 5;
 // Row attributes require a new envelope so v5 readers cannot silently drop them.
 const VERSION_TABLE_ROW_ATTRS: u32 = 6;
+// Explicit null is a new tagged attr variant, including in nested values.
+// Keep older envelopes for null-free fragments; older readers reject v7.
+const VERSION_NULL_ATTRS: u32 = 7;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -47,7 +52,7 @@ pub struct ClipboardMetadataError {
 impl ClipboardMetadataError {
     const fn unsupported() -> Self {
         Self {
-            message: "clipboard slice contains a value unsupported by metadata v2",
+            message: "clipboard slice contains a value unsupported by metadata",
         }
     }
 
@@ -76,22 +81,25 @@ impl std::error::Error for ClipboardMetadataError {}
 ///
 /// The plain-text fallback is deliberately not duplicated in the metadata;
 /// callers put [`ClipboardSlice::plain_text`] in the platform text flavor.
-/// Tables with nonempty row attributes encode as v6; other tables stay at
+/// Fragments containing explicit null attributes encode as v7. Otherwise,
+/// tables with nonempty row attributes encode as v6; other tables stay at
 /// v5 and non-table fragments at v4. Older readers fall back to plain text
 /// only for payloads whose semantics they cannot preserve.
 pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetadataError> {
-    let version = if slice.roots().iter().any(WireNode::carries_row_attrs) {
+    let roots = slice
+        .roots()
+        .iter()
+        .map(WireNode::from_node)
+        .collect::<Result<Vec<_>, _>>()?;
+    let version = if roots.iter().any(WireNode::carries_null) {
+        VERSION_NULL_ATTRS
+    } else if slice.roots().iter().any(WireNode::carries_row_attrs) {
         VERSION_TABLE_ROW_ATTRS
     } else if slice.roots().iter().any(WireNode::carries_table) {
         VERSION_TABLE
     } else {
         VERSION
     };
-    let roots = slice
-        .roots()
-        .iter()
-        .map(WireNode::from_node)
-        .collect::<Result<Vec<_>, _>>()?;
     serde_json::to_string(&WireEnvelope {
         format: FORMAT.to_owned(),
         version,
@@ -106,16 +114,25 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
 /// values, invalid fragment trees, and stale metadata whose computed fallback
 /// differs from the platform text all return `None`. The caller should then
 /// paste the supplied plain text normally. An older envelope carrying a
-/// newer feature (v4 tables or v5 row attributes) is also rejected.
+/// newer feature (v4 tables, v5 row attributes, or pre-v7 null attributes)
+/// is also rejected. Unknown attribute variants reject the entire fragment
+/// rather than silently dropping values. Historical v1-v3 envelopes remain
+/// unsupported, as before the null-attribute extension.
 #[must_use]
 pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlice> {
+    // serde's map deserializer keeps the last duplicate key. Reject that
+    // ambiguity before DTO parsing can overwrite an unsupported/null value.
+    serde_json::from_str::<strict_json::UniqueFields>(metadata).ok()?;
     let envelope: WireEnvelope = serde_json::from_str(metadata).ok()?;
     if envelope.format != FORMAT
         || !matches!(
             envelope.version,
-            VERSION | VERSION_TABLE | VERSION_TABLE_ROW_ATTRS
+            VERSION | VERSION_TABLE | VERSION_TABLE_ROW_ATTRS | VERSION_NULL_ATTRS
         )
     {
+        return None;
+    }
+    if envelope.version < VERSION_NULL_ATTRS && envelope.roots.iter().any(WireNode::carries_null) {
         return None;
     }
     let roots = envelope
@@ -141,6 +158,7 @@ pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlic
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WireEnvelope {
     format: String,
     version: u32,
@@ -148,6 +166,7 @@ struct WireEnvelope {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WireNode {
     kind: WireKind,
     attrs: BTreeMap<String, WireAttr>,
@@ -155,6 +174,25 @@ struct WireNode {
 }
 
 impl WireNode {
+    fn carries_null(&self) -> bool {
+        if self.attrs.values().any(WireAttr::carries_null) {
+            return true;
+        }
+        match &self.content {
+            WireContent::Inline { atoms, .. } => atoms
+                .iter()
+                .any(|atom| atom.attrs.values().any(WireAttr::carries_null)),
+            WireContent::Children { children } => children.iter().any(Self::carries_null),
+            WireContent::Table { rows, row_attrs } => {
+                row_attrs
+                    .iter()
+                    .any(|attrs| attrs.values().any(WireAttr::carries_null))
+                    || rows.iter().flatten().any(Self::carries_null)
+            }
+            WireContent::Atomic => false,
+        }
+    }
+
     fn carries_row_attrs(node: &ClipboardNode) -> bool {
         match node.content() {
             ClipboardNodeContent::Table { rows, row_attrs } => {
@@ -300,7 +338,12 @@ impl WireNode {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[serde(
+    tag = "type",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 enum WireContent {
     Inline {
         runs: Vec<WireRun>,
@@ -322,6 +365,7 @@ enum WireContent {
 /// One detached inline-atom payload on the wire: anchor boundary plus the
 /// canonical payload a paste re-materializes under a fresh identity.
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WireAtom {
     anchor: usize,
     kind: String,
@@ -363,7 +407,12 @@ impl WireAtom {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[serde(
+    tag = "type",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 enum WireKind {
     Paragraph,
     Heading(u8),
@@ -424,8 +473,14 @@ impl WireKind {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[serde(
+    tag = "type",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 enum WireAttr {
+    Null,
     Bool(bool),
     Integer(i64),
     String(String),
@@ -434,8 +489,18 @@ enum WireAttr {
 }
 
 impl WireAttr {
+    fn carries_null(&self) -> bool {
+        match self {
+            Self::Null => true,
+            Self::List(values) => values.iter().any(Self::carries_null),
+            Self::Object(values) => values.values().any(Self::carries_null),
+            Self::Bool(_) | Self::Integer(_) | Self::String(_) => false,
+        }
+    }
+
     fn from_attr(value: &AttrValue) -> Result<Self, ClipboardMetadataError> {
         match value {
+            AttrValue::Null => Ok(Self::Null),
             AttrValue::Bool(value) => Ok(Self::Bool(*value)),
             AttrValue::Integer(value) => Ok(Self::Integer(*value)),
             AttrValue::String(value) => Ok(Self::String(value.clone())),
@@ -457,6 +522,7 @@ impl WireAttr {
 
     fn into_attr(self) -> Result<AttrValue, ClipboardMetadataError> {
         match self {
+            Self::Null => Ok(AttrValue::Null),
             Self::Bool(value) => Ok(AttrValue::Bool(value)),
             Self::Integer(value) => Ok(AttrValue::Integer(value)),
             Self::String(value) => Ok(AttrValue::String(value)),
@@ -477,6 +543,7 @@ impl WireAttr {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WireRun {
     text: String,
     marks: Vec<WireMark>,
@@ -510,24 +577,26 @@ impl WireRun {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum WireMark {
-    Bold,
-    Italic,
-    Code,
-    Underline,
-    Strike,
+    // Empty struct variants preserve the wire shape while making serde
+    // enforce unknown-field rejection for internally tagged unit-like marks.
+    Bold {},
+    Italic {},
+    Code {},
+    Underline {},
+    Strike {},
     Link { href: String, title: Option<String> },
 }
 
 impl WireMark {
     fn from_mark(mark: &Mark) -> Result<Self, ClipboardMetadataError> {
         match mark {
-            Mark::Bold => Ok(Self::Bold),
-            Mark::Italic => Ok(Self::Italic),
-            Mark::Code => Ok(Self::Code),
-            Mark::Underline => Ok(Self::Underline),
-            Mark::Strike => Ok(Self::Strike),
+            Mark::Bold => Ok(Self::Bold {}),
+            Mark::Italic => Ok(Self::Italic {}),
+            Mark::Code => Ok(Self::Code {}),
+            Mark::Underline => Ok(Self::Underline {}),
+            Mark::Strike => Ok(Self::Strike {}),
             Mark::Link(link) => Ok(Self::Link {
                 href: link.href().to_owned(),
                 title: link.title().map(str::to_owned),
@@ -538,11 +607,11 @@ impl WireMark {
 
     fn into_mark(self) -> Result<Mark, ClipboardMetadataError> {
         Ok(match self {
-            Self::Bold => Mark::Bold,
-            Self::Italic => Mark::Italic,
-            Self::Code => Mark::Code,
-            Self::Underline => Mark::Underline,
-            Self::Strike => Mark::Strike,
+            Self::Bold {} => Mark::Bold,
+            Self::Italic {} => Mark::Italic,
+            Self::Code {} => Mark::Code,
+            Self::Underline {} => Mark::Underline,
+            Self::Strike {} => Mark::Strike,
             Self::Link { href, title } => Mark::Link(LinkMark::new(href, title)),
         })
     }
