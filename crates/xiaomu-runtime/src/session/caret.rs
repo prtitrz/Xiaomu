@@ -175,6 +175,9 @@ impl DocumentSession {
         &mut self,
         next: DocumentSelection,
     ) -> Result<SessionOutcome, SessionError> {
+        // An explicit selection publication invalidates rule restoration even
+        // at identical coordinates. Callers validate before entering here.
+        self.input_rule_undo = None;
         if next == self.selection {
             return Ok(SessionOutcome::NoChange);
         }

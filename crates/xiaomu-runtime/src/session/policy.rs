@@ -48,9 +48,18 @@ pub struct SessionContext<'a> {
     document: &'a XiaomuDocument,
     selection: DocumentSelection,
     stored_marks: Option<&'a MarkSet>,
+    input_rule_undo_available: bool,
 }
 
 impl<'a> SessionContext<'a> {
+    /// Whether one exact rule reversal is eligible at this target selection.
+    ///
+    /// A different atomic target never inherits the current caret's token.
+    #[must_use]
+    pub const fn input_rule_undo_available(self) -> bool {
+        self.input_rule_undo_available
+    }
+
     /// Returns the current, policy-validated canonical snapshot.
     #[must_use]
     pub const fn document(self) -> &'a XiaomuDocument {
@@ -90,7 +99,7 @@ impl<'a> SessionContext<'a> {
 
 /// A policy's decision before the default intent planner runs.
 #[derive(Clone, Debug)]
-// Exact final selections make EditPlan 232 bytes. Keep the established Apply
+// Exact final selections make EditPlan relatively large. Keep the established Apply
 // API and stack-owned one-shot plans rather than allocating every edit merely
 // to reduce the size of the two empty decision variants.
 #[allow(clippy::large_enum_variant)]
@@ -105,6 +114,12 @@ pub enum IntentDisposition {
     /// restores inheritance; `Some(empty)` explicitly requests unmarked text.
     /// No document revision, history entry or listener notification is made.
     StoredMarks(Option<MarkSet>),
+    /// Consume the eligible rule reversal as one isolated forward edit.
+    ///
+    /// The host opts in for a verified input source, normally Backspace.
+    /// Runtime rechecks eligibility and never falls through on failure. This
+    /// restores exact rule input but does not reproduce grouped Ctrl+Z timing.
+    UndoInputRule,
     /// Commit one host-planned transaction as an isolated undo unit.
     ///
     /// Stored marks are cleared unless the plan uses `with_stored_marks`.
@@ -196,6 +211,7 @@ impl DocumentSession {
                     } else {
                         None
                     },
+                    input_rule_undo_available: self.input_rule_undo_available_at(selection),
                 },
                 intent,
             )?,
@@ -209,6 +225,7 @@ impl DocumentSession {
             if selection != before {
                 session.history_selection_before = Some(before);
                 session.selection = selection;
+                session.input_rule_undo = None;
                 session.clear_stored_marks();
                 session.history.break_group();
             }
@@ -225,6 +242,7 @@ impl DocumentSession {
                     session.history.break_group();
                     Ok(SessionOutcome::NoChange)
                 }
+                IntentDisposition::UndoInputRule => session.undo_input_rule(),
                 IntentDisposition::Apply(plan) => {
                     session.history.break_group();
                     session.clear_stored_marks();
@@ -235,6 +253,7 @@ impl DocumentSession {
             // until all planning succeeds. Other successful outcomes have
             // already published the final selection or document.
             if outcome == SessionOutcome::NoChange && session.selection != before {
+                session.input_rule_undo = None;
                 session.history.break_group();
                 session.notify_selection_changed();
                 return Ok(SessionOutcome::SelectionChanged);
@@ -261,12 +280,14 @@ impl DocumentSession {
         let marks = self.stored_marks.clone();
         let group_open = self.history.typing_group_open();
         let history_selection_before = self.history_selection_before;
+        let input_rule_undo = self.input_rule_undo.clone();
         let result = operation(self);
         self.history_selection_before = history_selection_before;
         if result.is_err() {
             self.selection = selection;
             self.stored_marks = marks;
             self.history.restore_typing_group(group_open);
+            self.input_rule_undo = input_rule_undo;
         }
         result
     }
