@@ -202,6 +202,11 @@ pub enum TransactionStep {
     /// the original kind and non-geometric attrs; width lists are sliced by
     /// column. A unit cell is rejected as a no-op. Core does not repair other
     /// cells' widths or rewrite missing/null attributes into defaults.
+    ///
+    /// Before copying attrs, a separate expansion budget limits projected
+    /// output-cell attribute storage to 64 MiB of accounted key/string/value
+    /// payload, one million values and 64 nesting levels. Exceeding it returns
+    /// `TableResourceLimit`; it is not a bound on all execution memory.
     SplitTableCell {
         /// Existing table containing the cell origin.
         table: NodeId,
