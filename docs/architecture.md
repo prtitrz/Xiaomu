@@ -436,6 +436,15 @@ staged plan 的多个 Core transaction 对用户表现为一笔 history。undo �
 
 Runtime clipboard 已从 P2 的纯文本 seam 升级为 frontend-neutral structured clipboard：
 
+2026-10-04 的 opt-in 导出增量见 [表格导出契约](table-clipboard-export.md)：
+`SessionPolicy::clipboard_export_spec(context, Copy/Cut)` 在投影与平台写入之前运行。
+默认仍保持历史 unit/TSV/wire 行为；显式配置可复制几何闭合的含跨度 CellRange，
+并独立采用可重算的 LF/LF text-between 文本。CellRange 来源固定 open 1/1、
+区分 Rows 与 Table 根；全篇/完整节点来源为 closed 0/0，二者不会互相推断。
+新 v14 使用固定传输前缀与严格 JSON；`RejectedNative` 禁止 Text/Image fallback。
+投影前借用预算预扫；未知自定义文本语义拒绝；新 CellRange Cut 在写剪贴板前拒绝。
+该增量不包含矩形 Paste/clipping 或真实 OS 剪贴板验收。
+
 ```text
 DocumentSelection
 → ClipboardSlice

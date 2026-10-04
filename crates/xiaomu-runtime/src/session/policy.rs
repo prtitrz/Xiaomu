@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use crate::clipboard::{ClipboardExportPurpose, ClipboardExportSpec};
 use xiaomu_core::document::{MarkSet, XiaomuDocument};
 
 use super::{
@@ -138,6 +139,21 @@ pub enum IntentDisposition {
 /// rather than recursively dispatching another intent or repairing listeners.
 /// The session can roll back its own state, not a callback's external effects.
 pub trait SessionPolicy {
+    /// Selects explicit clipboard export rules before projection or writes.
+    ///
+    /// This is pure and read-only like other policy callbacks. `None` retains
+    /// historical unit-cell geometry, plain text and metadata behavior. An
+    /// error rejects Copy/Cut before touching the platform clipboard. Hosts
+    /// must reject unsupported Cut purposes here, not in the later Delete.
+    /// Opted-in CellRange Cut is also rejected by Runtime until atomic source
+    /// deletion is supported. The callback cannot supply arbitrary text.
+    fn clipboard_export_spec(
+        &self,
+        _context: SessionContext<'_>,
+        _purpose: ClipboardExportPurpose,
+    ) -> Result<Option<ClipboardExportSpec>, PolicyError> {
+        Ok(None)
+    }
     /// Checks or replaces an intent before any session state changes.
     ///
     /// This also runs before structured-paste planning, stored-mark clearing,
@@ -161,6 +177,23 @@ pub trait SessionPolicy {
 }
 
 impl DocumentSession {
+    pub(crate) fn clipboard_export_spec(
+        &self,
+        purpose: ClipboardExportPurpose,
+    ) -> Result<Option<ClipboardExportSpec>, PolicyError> {
+        self.policy.as_ref().map_or(Ok(None), |policy| {
+            policy.clipboard_export_spec(
+                SessionContext {
+                    document: &self.document,
+                    selection: self.selection,
+                    stored_marks: self.stored_marks.as_ref(),
+                    input_rule_undo_available: self.input_rule_undo_available_at(self.selection),
+                },
+                purpose,
+            )
+        })
+    }
+
     /// Creates a session with host rules that cannot be replaced later.
     ///
     /// Both the initial selection and document must be valid. A rejected

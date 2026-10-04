@@ -6,12 +6,18 @@ use crate::editor_commands::{CodePasteSource, EditorCommand};
 use crate::input::platform_clipboard::{PlatformClipboard, PlatformClipboardContent};
 use gpui::{Context, Window};
 use xiaomu_core::document::NodeKind;
-use xiaomu_runtime::clipboard::{normalize_multiline_paste_text, normalize_paste_text};
+use xiaomu_runtime::clipboard::{
+    ClipboardExportPurpose, normalize_multiline_paste_text, normalize_paste_text,
+};
 use xiaomu_runtime::session::EditIntent;
 
 impl DocumentView {
     pub(crate) fn copy(&mut self, _: &ClipboardCopy, _: &mut Window, cx: &mut Context<Self>) {
-        match self.session.borrow().clipboard_slice() {
+        match self
+            .session
+            .borrow()
+            .clipboard_slice_for(ClipboardExportPurpose::Copy)
+        {
             Ok(Some(slice)) => PlatformClipboard::new(&*cx).write_slice(&slice),
             Ok(None) => {}
             Err(error) => eprintln!("xiaomu: clipboard projection failed: {error}"),
@@ -19,7 +25,11 @@ impl DocumentView {
     }
 
     pub(crate) fn cut(&mut self, _: &ClipboardCut, window: &mut Window, cx: &mut Context<Self>) {
-        let slice = match self.session.borrow().clipboard_slice() {
+        let slice = match self
+            .session
+            .borrow()
+            .clipboard_slice_for(ClipboardExportPurpose::Cut)
+        {
             Ok(Some(slice)) => slice,
             Ok(None) => return,
             Err(error) => {
@@ -130,3 +140,11 @@ impl DocumentView {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "clipboard_export_tests.rs"]
+mod export_tests;
+
+#[cfg(test)]
+#[path = "clipboard_native_tests.rs"]
+mod native_tests;

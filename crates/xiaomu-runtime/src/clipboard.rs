@@ -5,19 +5,74 @@
 //! structure is carried as optional metadata and never leaks canonical
 //! `NodeId`s or frontend-specific types into Core.
 
+mod cell_export;
+mod export;
+mod export_budget;
+#[cfg(test)]
+mod export_tests;
 mod fragment;
 mod projection;
 mod table_template;
+mod text_projection;
 mod wire;
+
+pub use export::{
+    ClipboardCellRangeRoot, ClipboardExportPurpose, ClipboardExportSpec, ClipboardSourceBoundary,
+    ClipboardTextProjection,
+};
 
 pub use fragment::{
     ClipboardAtom, ClipboardBlock, ClipboardInline, ClipboardNode, ClipboardNodeContent,
     ClipboardSlice,
 };
-pub use wire::{ClipboardMetadataError, decode_metadata, encode_metadata};
+pub use wire::{
+    ClipboardMetadataDecode, ClipboardMetadataError, decode_metadata, decode_metadata_checked,
+    encode_metadata,
+};
 
 pub(crate) use fragment::{require_unit_tables, validate_roots};
 pub(crate) use projection::slice_selection;
+
+pub(crate) fn export_selection(
+    document: &xiaomu_core::document::XiaomuDocument,
+    selection: crate::session::DocumentSelection,
+    purpose: ClipboardExportPurpose,
+    spec: ClipboardExportSpec,
+) -> Result<Option<ClipboardSlice>, crate::session::SessionError> {
+    use crate::session::{PolicyError, SessionError};
+    // Cut safety precedes all borrowed scans, cloning and platform side effects.
+    if purpose == ClipboardExportPurpose::Cut && selection.active_cell_range().is_some() {
+        return Err(SessionError::UnsupportedTableOperation);
+    }
+    export_budget::document(document)
+        .map_err(|()| PolicyError::new("clipboard export exceeds bounded projection budget"))?;
+    selection.validate(document)?;
+    if let Some(range) = selection.active_cell_range() {
+        if !spec.closed_cell_ranges() {
+            // Preserve the opt-in dimension separately from text projection.
+            // This check keeps historical unit-only geometry admission.
+            range.cells(document)?;
+        }
+        let (roots, boundary) = cell_export::capture(document, range)?;
+        return ClipboardSlice::from_export_roots(roots, boundary, spec.text_projection())
+            .map(Some)
+            .map_err(|()| {
+                PolicyError::new("clipboard export cannot preserve source projection").into()
+            });
+    }
+    let Some(mut slice) = slice_selection(document, selection)? else {
+        return Ok(None);
+    };
+    let boundary = if slice.is_closed() {
+        ClipboardSourceBoundary::WholeRoots
+    } else {
+        ClipboardSourceBoundary::Open
+    };
+    slice
+        .set_export(boundary, spec.text_projection())
+        .map_err(|()| PolicyError::new("clipboard export cannot preserve source projection"))?;
+    Ok(Some(slice))
+}
 
 /// Plain-text read/write seam between the editing layer and the platform.
 ///
