@@ -7,6 +7,7 @@
 
 mod fragment;
 mod projection;
+mod table_template;
 mod wire;
 
 pub use fragment::{
