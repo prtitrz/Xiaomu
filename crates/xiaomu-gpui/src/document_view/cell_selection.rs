@@ -30,9 +30,22 @@ impl DocumentView {
     /// The identity of the virtual input surface for the current selection.
     /// It can change without leaving range-selection mode.
     pub(super) fn range_input_anchor(&self) -> Option<NodeId> {
+        self.range_input_anchor_for(false)
+    }
+
+    fn range_input_anchor_for(&self, building: bool) -> Option<NodeId> {
         let session = self.session.borrow();
         let selection = session.selection();
-        if self.selection_has_hidden_table_endpoint() {
+        let hidden = if building {
+            crate::table_capability::selection_has_hidden_table_endpoint_for_build(
+                session.document(),
+                selection,
+                &self.table_capability.borrow(),
+            )
+        } else {
+            self.selection_has_hidden_table_endpoint()
+        };
+        if hidden {
             return None;
         }
         selection
@@ -47,7 +60,7 @@ impl DocumentView {
     }
 
     pub(super) fn sync_range_input(&mut self, cx: &mut Context<Self>) {
-        let anchor = self.range_input_anchor();
+        let anchor = self.range_input_anchor_for(self.table_capability.borrow().enabled());
         if self.range_input.as_ref().map(|(cell, _)| *cell) == anchor {
             return;
         }
@@ -61,7 +74,8 @@ impl DocumentView {
                 )
             });
             view.update(cx, |view, _| {
-                view.attach_scroll_handle(self.scroll_handle.clone())
+                view.attach_scroll_handle(self.scroll_handle.clone());
+                view.attach_table_capability(self.table_capability.clone());
             });
             cx.observe(&view, |_, _, cx| cx.notify()).detach();
             (cell, view)
@@ -76,7 +90,9 @@ impl DocumentView {
             .rev()
             .find(|(cell, bounds)| {
                 bounds.contains(&position)
-                    && navigation::spanning_table_ancestor(session.document(), *cell).is_none()
+                    && self
+                        .hidden_table_ancestor(session.document(), *cell)
+                        .is_none()
             })
             .map(|(cell, _)| *cell)
     }
@@ -93,10 +109,10 @@ impl DocumentView {
         }
         {
             let session = self.session.borrow();
-            if [anchor, focus]
-                .into_iter()
-                .any(|cell| navigation::spanning_table_ancestor(session.document(), cell).is_some())
-            {
+            if [anchor, focus].into_iter().any(|cell| {
+                self.hidden_table_ancestor(session.document(), cell)
+                    .is_some()
+            }) {
                 return;
             }
         }
@@ -141,7 +157,10 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if navigation::spanning_table_ancestor(self.session.borrow().document(), cell).is_some() {
+        if self
+            .hidden_table_ancestor(self.session.borrow().document(), cell)
+            .is_some()
+        {
             return;
         }
         let anchor = if extend {
@@ -203,7 +222,7 @@ impl DocumentView {
             let Some(range) = session.selection().active_cell_range() else {
                 return;
             };
-            super::table_guard::rendered_nav_units(session.document())
+            self.rendered_nav_units(session.document())
                 .into_iter()
                 .find(|unit| {
                     let node = match unit {
@@ -236,11 +255,12 @@ impl DocumentView {
         let Some(range) = self.session.borrow().selection().active_cell_range() else {
             return false;
         };
-        if navigation::spanning_table_ancestor(self.session.borrow().document(), range.focus())
+        if self
+            .hidden_table_ancestor(self.session.borrow().document(), range.focus())
             .is_some()
         {
-            // Consume the old physical-column gesture without guessing a new
-            // logical cell. A future span-aware route replaces this boundary.
+            // Stale/unsupported tables cannot use even the logical route until
+            // their current geometry is actually admitted by this instance.
             return true;
         }
         if !extend {
@@ -253,6 +273,27 @@ impl DocumentView {
             let cell = range.focus();
             let row = document.parent_of(cell).expect("validated cell");
             let table = document.parent_of(row).expect("validated row");
+            if let Ok(grid) = document.table_grid(table)
+                && grid.has_spans()
+            {
+                let Some(at) = grid.placement(cell) else {
+                    return true;
+                };
+                let target = match step {
+                    NavStep::Left => at.column().checked_sub(1).map(|c| (at.row(), c)),
+                    NavStep::Right => Some((at.row(), at.column() + at.colspan())),
+                    NavStep::Up => at.row().checked_sub(1).map(|r| (r, at.column())),
+                    NavStep::Down => Some((at.row() + at.rowspan(), at.column())),
+                    NavStep::LineStart => Some((at.row(), 0)),
+                    NavStep::LineEnd => grid.columns().checked_sub(1).map(|c| (at.row(), c)),
+                };
+                let next = target.and_then(|(row, column)| grid.slot(row, column));
+                drop(session);
+                if let Some(cell) = next {
+                    self.install_cell_range(range.anchor(), cell, window, cx);
+                }
+                return true;
+            }
             let rows = children(document, table);
             let cells = children(document, row);
             let r = rows

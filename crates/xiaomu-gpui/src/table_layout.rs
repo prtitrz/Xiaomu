@@ -1,10 +1,10 @@
-//! Isolated, explicitly width-constrained spanning-table layout prototype.
+//! Explicitly width-constrained spanning-table layout.
 //!
-//! This module is deliberately **not connected to `DocumentView`**. Its presence
-//! does not admit spanning tables for editing or remove the current placeholder
-//! and input guards. Production integration still needs a same-frame source of
-//! the actual containing content width, full-cell hit registration, navigation,
-//! selection and IME tests, and native visual verification.
+//! `DocumentView` can explicitly opt into this path per instance; default views
+//! retain their legacy placeholder and input guards. The opt-in connection uses
+//! current-frame viewport width, full-cell hit registration and exact per-table
+//! measurement admission shared with retained native input handlers. This does
+//! not claim browser intrinsic-width parity or native GUI verification.
 //! Runtime measurement failures render a visible, noninteractive placeholder,
 //! never a zero-sized invisible table. The owning host must still refuse edits
 //! through unavailable descendants; presentation failure cannot grant admission.
@@ -26,7 +26,7 @@
 //! Header identity is retained for host styling. Heights come from the actual
 //! child layouts; rowspan deficits are distributed over covered rows.
 //!
-//! # Proposed host connection (not implemented here)
+//! # Same-frame host connection
 //!
 //! A fixed-viewport adapter can request the editor viewport's ordinary full
 //! width/height, then, in **prepaint**, build the document subtree using those
@@ -42,6 +42,7 @@
 //! measured-layout callback. It requires a bounded viewport, as the current
 //! `DocumentView::render`'s `size_full()` scroller already does. Intrinsically
 //! sized outer hosts need a different explicit measurement contract.
+//! The opt-in `DocumentView` connection follows this bounded-viewport route.
 //!
 //! Cell padding belongs to the real child subtree (for example a padded div),
 //! so child layout, hit tests and native input bounds all include it naturally.
