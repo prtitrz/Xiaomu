@@ -98,6 +98,7 @@ pub struct DocumentView {
     /// Per-node image load states shared with resolve callbacks.
     image_loads: SharedImageLoadCache,
     command_router: Option<Rc<dyn crate::editor_commands::EditorCommandRouter>>,
+    code_block_presentation: Option<crate::code_presentation::CodeBlockPresentation>,
     list_marker_provider: Option<Rc<dyn crate::list_marker::ListMarkerLabelProvider>>,
 }
 
@@ -123,6 +124,7 @@ impl DocumentView {
             asset_service: None,
             image_loads: Rc::new(ImageLoadCache::default()),
             command_router: None,
+            code_block_presentation: None,
             list_marker_provider: None,
         }
     }
@@ -484,6 +486,7 @@ impl DocumentView {
             child.update(cx, |view, _| {
                 view.attach_scroll_handle(scroll_handle);
                 view.attach_atom_renderers(atom_renderers);
+                view.set_code_block_presentation(self.code_block_presentation.clone());
             });
         }
         // Stale entries dropped with `pool`.
@@ -543,6 +546,7 @@ impl Render for DocumentView {
             .on_action(cx.listener(Self::escape_cell_range))
             .on_action(cx.listener(Self::enter))
             .on_action(cx.listener(Self::hard_break))
+            .on_action(cx.listener(Self::primary_modifier_enter))
             .on_action(cx.listener(Self::tab_indent))
             .on_action(cx.listener(Self::shift_tab_indent))
             .on_action(cx.listener(Self::undo_entry))

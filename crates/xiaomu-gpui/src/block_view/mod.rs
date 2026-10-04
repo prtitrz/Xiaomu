@@ -40,9 +40,10 @@ use gpui::{
     actions, div, prelude::*,
 };
 
-use xiaomu_core::document::{InlineContent, NodeId};
+use xiaomu_core::document::{InlineContent, NodeId, NodeKind};
 use xiaomu_runtime::session::{DocumentPosition, DocumentSession, EditIntent};
 
+use crate::code_presentation::CodeBlockPresentation;
 use crate::document_view::cache_key::LayoutCacheKey;
 use crate::inline_atom::InlineAtomRendererRegistry;
 use crate::input::composition::CompositionState;
@@ -153,6 +154,7 @@ pub struct ParagraphView {
     pub(super) scroll_handle: Option<ScrollHandle>,
     pub(super) scroll_caret_pending: Cell<bool>,
     pub(super) atom_renderers: Rc<InlineAtomRendererRegistry>,
+    code_block_presentation: Option<CodeBlockPresentation>,
     composition: Option<CompositionState>,
     /// Consume the remainder of an unsupported native composition without
     /// falling through to ordinary typing and deleting selected atoms.
@@ -186,6 +188,7 @@ impl ParagraphView {
             scroll_handle: None,
             scroll_caret_pending: Cell::new(true),
             atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
+            code_block_presentation: None,
             composition: None,
             rejected_composition: false,
             focus_out_subscription: None,
@@ -217,6 +220,32 @@ impl ParagraphView {
     /// Attaches the owning document view's renderer registry.
     pub(crate) fn attach_atom_renderers(&mut self, renderers: Rc<InlineAtomRendererRegistry>) {
         self.atom_renderers = renderers;
+    }
+
+    /// Applies the owning editor's optional visual-only code presentation.
+    pub(crate) fn set_code_block_presentation(
+        &mut self,
+        presentation: Option<CodeBlockPresentation>,
+    ) {
+        if self.code_block_presentation != presentation {
+            self.code_block_presentation = presentation;
+            self.last_layout = None;
+            self.last_bounds = None;
+            self.cache_key = None;
+        }
+    }
+
+    pub(super) fn active_code_presentation(&self) -> Option<&CodeBlockPresentation> {
+        if self.range_input {
+            return None;
+        }
+        self.code_block_presentation.as_ref().filter(|_| {
+            self.session
+                .borrow()
+                .document()
+                .node(self.node)
+                .is_some_and(|node| node.kind() == &NodeKind::CodeBlock)
+        })
     }
 
     /// Returns the shared session rendered by this view.
@@ -437,6 +466,9 @@ impl Render for ParagraphView {
             .track_focus(&self.focus_handle(cx))
             .w_full()
             .cursor(gpui::CursorStyle::IBeam)
+            .when_some(self.active_code_presentation(), |wrapper, presentation| {
+                presentation.style_wrapper(wrapper)
+            })
             .child(ParagraphElement { view: cx.entity() })
     }
 }
