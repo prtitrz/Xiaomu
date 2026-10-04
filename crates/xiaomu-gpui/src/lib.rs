@@ -36,6 +36,7 @@ pub mod inline_atom_display;
 mod inline_position;
 pub mod input;
 pub mod list_marker;
+pub mod table_layout;
 
 // Source-only prototype; production dispatch remains unchanged until admission
 // and all editor geometry consumers can switch together.
