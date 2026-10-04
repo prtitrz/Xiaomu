@@ -433,7 +433,7 @@ impl ClipboardSlice {
         slice
     }
 
-    /// Whether the source explicitly selected whole root subtrees.
+    /// Whether the source explicitly selected complete block subtrees.
     ///
     /// Closed slices retain their outer block boundaries when pasted. They
     /// must not be fitted with the legacy text-fragment merge rules. This is
