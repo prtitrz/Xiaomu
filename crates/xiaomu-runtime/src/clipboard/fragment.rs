@@ -16,6 +16,8 @@ use xiaomu_core::document::{
 };
 use xiaomu_core::text::TextOffset;
 
+use crate::session::SessionError;
+
 /// One detached inline atom captured by the clipboard.
 ///
 /// The payload is identity-free: paste allocates a fresh canonical `NodeId`
@@ -426,54 +428,51 @@ impl ClipboardSlice {
     }
 }
 
-/// Projects selected inline leaves back through the canonical tree, pruning
-/// every unselected branch. The document root itself is omitted from the
-/// detached fragment.
+/// Projects selected leaves back through the canonical tree, pruning every
+/// unselected branch. Selected atomic blocks and empty containers carry the
+/// same detached payload as inline leaves. The document root is omitted.
 pub(crate) fn project_roots(
     document: &XiaomuDocument,
-    selected: &BTreeMap<NodeId, ClipboardInline>,
-) -> Vec<ClipboardNode> {
-    let Some(children) = document
+    selected: &BTreeMap<NodeId, ClipboardNode>,
+) -> std::result::Result<Vec<ClipboardNode>, SessionError> {
+    let children = document
         .node(document.root())
         .and_then(|root| root.content().as_children())
-    else {
-        return Vec::new();
-    };
-    children
-        .iter()
-        .filter_map(|child| project_node(document, *child, selected))
-        .collect()
+        .ok_or(SessionError::SelectionInvalid)?;
+    let mut roots = Vec::new();
+    for child in children {
+        if let Some(node) = project_node(document, *child, selected)? {
+            roots.push(node);
+        }
+    }
+    Ok(roots)
 }
 
 fn project_node(
     document: &XiaomuDocument,
     id: NodeId,
-    selected: &BTreeMap<NodeId, ClipboardInline>,
-) -> Option<ClipboardNode> {
-    let node = document.node(id)?;
-    match node.content() {
-        NodeContent::Inline(_) => selected.get(&id).map(|inline| {
-            ClipboardNode::new(
-                node.kind().clone(),
-                node.attrs().clone(),
-                ClipboardNodeContent::Inline(inline.clone()),
-            )
-        }),
-        NodeContent::Children(children) => {
-            let projected: Vec<_> = children
-                .iter()
-                .filter_map(|child| project_node(document, *child, selected))
-                .collect();
-            (!projected.is_empty()).then(|| {
-                ClipboardNode::new(
-                    node.kind().clone(),
-                    node.attrs().clone(),
-                    ClipboardNodeContent::Children(projected),
-                )
-            })
-        }
-        NodeContent::Atomic | _ => None,
+    selected: &BTreeMap<NodeId, ClipboardNode>,
+) -> std::result::Result<Option<ClipboardNode>, SessionError> {
+    let node = document.node(id).ok_or(SessionError::SelectionInvalid)?;
+    if let Some(fragment) = selected.get(&id) {
+        return Ok(Some(fragment.clone()));
     }
+    let Some(children) = node.content().as_children() else {
+        return Ok(None);
+    };
+    let mut projected = Vec::new();
+    for child in children {
+        if let Some(fragment) = project_node(document, *child, selected)? {
+            projected.push(fragment);
+        }
+    }
+    Ok((!projected.is_empty()).then(|| {
+        ClipboardNode::new(
+            node.kind().clone(),
+            node.attrs().clone(),
+            ClipboardNodeContent::Children(projected),
+        )
+    }))
 }
 
 /// Validates an untrusted detached fragment by rebuilding it through Core's
