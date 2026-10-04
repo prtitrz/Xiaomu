@@ -22,6 +22,8 @@ pub enum SessionOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SessionError {
+    /// The construction-time host policy rejected an intent or snapshot.
+    Policy(super::PolicyError),
     /// The underlying Core transaction was rejected.
     Core(xiaomu_core::Error),
     /// The resolved selection maps to a node deleted by the transaction.
@@ -59,6 +61,7 @@ pub enum SessionError {
 impl fmt::Display for SessionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Policy(error) => write!(f, "session policy rejected: {error}"),
             Self::Core(error) => write!(f, "core transaction rejected: {error}"),
             Self::SelectionDeleted => {
                 f.write_str("selection target was deleted by the transaction")
@@ -84,5 +87,11 @@ impl std::error::Error for SessionError {}
 impl From<xiaomu_core::Error> for SessionError {
     fn from(error: xiaomu_core::Error) -> Self {
         Self::Core(error)
+    }
+}
+
+impl From<super::PolicyError> for SessionError {
+    fn from(error: super::PolicyError) -> Self {
+        Self::Policy(error)
     }
 }

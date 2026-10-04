@@ -61,7 +61,7 @@ impl DocumentSession {
 
 /// Matches Core `ReplaceText` insertion inheritance: a boundary belongs to
 /// the run on its left, except offset zero which uses the first run.
-fn inherited_marks_at(inline: &InlineContent, offset: usize) -> MarkSet {
+pub(super) fn inherited_marks_at(inline: &InlineContent, offset: usize) -> MarkSet {
     let mut cursor = 0usize;
     for run in inline.runs() {
         cursor += run.len_bytes();

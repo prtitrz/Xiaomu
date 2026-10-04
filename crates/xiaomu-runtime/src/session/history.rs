@@ -97,6 +97,14 @@ impl HistoryStack {
         self.typing_group_open = false;
     }
 
+    pub(crate) const fn typing_group_open(&self) -> bool {
+        self.typing_group_open
+    }
+
+    pub(crate) fn restore_typing_group(&mut self, open: bool) {
+        self.typing_group_open = open;
+    }
+
     /// Records a committed edit and clears the redo stack.
     pub(crate) fn record(&mut self, entry: HistoryEntry) {
         self.redo.clear();

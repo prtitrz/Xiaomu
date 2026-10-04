@@ -16,8 +16,10 @@ mod atomic_block;
 mod caret;
 mod cell_edit;
 mod cell_range;
+mod commit;
 mod cross_block;
 mod cross_block_atom;
+mod dispatch;
 mod history;
 mod image;
 mod intent;
@@ -27,6 +29,7 @@ mod paste;
 mod paste_fragment;
 pub(crate) mod paste_hierarchy;
 mod paste_table;
+mod policy;
 mod resolve;
 mod selection;
 mod split;
@@ -38,18 +41,14 @@ pub use history::HistoryStack;
 pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
 pub use listener::DocumentChangeListener;
 pub use outcome::{SessionError, SessionOutcome};
+pub use policy::{IntentDisposition, PolicyError, SessionContext, SessionPolicy};
 pub use selection::CellRange;
 pub use selection::DocumentPosition;
 pub use selection::DocumentSelection;
 
 use xiaomu_core::document::{InlineContent, MarkSet, NodeId, XiaomuDocument};
-use xiaomu_core::mapping::StepMap;
 use xiaomu_core::selection::{InlinePoint, TextPoint, TextSelection};
-use xiaomu_core::transaction::{Transaction, TransactionOrigin};
-
-use self::history::{HistoryEntry, HistoryGroup};
-use self::intent::{HistoryPolicy, PlannedAction};
-use self::resolve::{affinity_of, collapsed_caret, preserved_focus, resolve_selection};
+use xiaomu_core::transaction::Transaction;
 
 /// Orchestrates one editing session over an immutable Core snapshot.
 ///
@@ -63,6 +62,10 @@ pub struct DocumentSession {
     history: HistoryStack,
     stored_marks: Option<MarkSet>,
     listeners: Vec<Box<dyn DocumentChangeListener>>,
+    policy: Option<Box<dyn SessionPolicy>>,
+    // An atomic platform replacement plans at a tentative selection but
+    // Undo must restore the selection from before the whole operation.
+    history_selection_before: Option<DocumentSelection>,
 }
 
 impl DocumentSession {
@@ -82,6 +85,8 @@ impl DocumentSession {
             history: HistoryStack::new(),
             stored_marks: None,
             listeners: Vec::new(),
+            policy: None,
+            history_selection_before: None,
         })
     }
 
@@ -130,295 +135,6 @@ impl DocumentSession {
         self.listeners.push(listener);
     }
 
-    /// Applies one typed editing intent.
-    ///
-    /// Legal empty operations (Backspace at the start of the first block,
-    /// caret moves at a boundary, TurnInto the kind already present) return
-    /// [`SessionOutcome::NoChange`] without calling Core, advancing the
-    /// revision, notifying document listeners, or writing history. A
-    /// collapsed mark toggle updates Runtime StoredMarks without a Core
-    /// transaction.
-    pub fn apply_intent(&mut self, intent: &EditIntent) -> Result<SessionOutcome, SessionError> {
-        if let Some(outcome) = self.apply_cell_range_intent(intent)? {
-            return Ok(outcome);
-        }
-        if let EditIntent::MoveCaret {
-            caret_move,
-            extend_selection,
-        } = intent
-        {
-            return self.move_caret(*caret_move, *extend_selection);
-        }
-        if let EditIntent::PlaceCaret {
-            offset,
-            extend_selection,
-        } = intent
-        {
-            return self.place_caret(*offset, *extend_selection);
-        }
-        if let EditIntent::SetSelection { anchor, focus } = intent {
-            return self.set_selection(*anchor, *focus);
-        }
-        if let EditIntent::PasteSlice { slice } = intent {
-            self.history.break_group();
-            self.clear_stored_marks();
-            let action = paste::plan_paste_slice(&self.document, self.selection, slice)?;
-            return match action {
-                PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
-                PlannedAction::Commit(plan) => self.commit(plan),
-                PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
-            };
-        }
-        if let EditIntent::MoveToNextCell = intent {
-            return self.move_to_next_cell();
-        }
-        if let EditIntent::MoveToPreviousCell = intent {
-            return self.move_to_previous_cell();
-        }
-
-        // Table row/column operations are addressed by table + index and do
-        // not require an inline focus; they are structural history
-        // boundaries like the other structural commands.
-        if matches!(
-            intent,
-            EditIntent::InsertTableRow { .. }
-                | EditIntent::InsertTableColumn { .. }
-                | EditIntent::DeleteTableRow { .. }
-                | EditIntent::DeleteTableColumn { .. }
-        ) {
-            self.history.break_group();
-            self.clear_stored_marks();
-        }
-        let table_action = match intent {
-            EditIntent::InsertTableRow { table, index } => {
-                Some(self.plan_insert_table_row(*table, *index))
-            }
-            EditIntent::InsertTableColumn { table, index } => {
-                Some(self.plan_insert_table_column(*table, *index))
-            }
-            EditIntent::DeleteTableRow { table, index } => {
-                Some(self.plan_delete_table_row(*table, *index))
-            }
-            EditIntent::DeleteTableColumn { table, index } => {
-                Some(self.plan_delete_table_column(*table, *index))
-            }
-            _ => None,
-        };
-        if let Some(action) = table_action {
-            return match action? {
-                PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
-                PlannedAction::Commit(plan) => self.commit(plan),
-                PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
-            };
-        }
-
-        // Backspace/Delete on a collapsed atomic node selection removes the
-        // whole block as one logical history change.
-        if matches!(intent, EditIntent::Backspace | EditIntent::Delete)
-            && self.selection.as_atomic_node().is_some()
-        {
-            self.history.break_group();
-            return match self.plan_atomic_removal()? {
-                PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
-                PlannedAction::Commit(plan) => self.commit(plan),
-                PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
-            };
-        }
-
-        // Backspace/Delete over a document-level text selection share the
-        // same cross-block delete plan. Single-block forms continue through
-        // the normal inline planners below.
-        if matches!(intent, EditIntent::Backspace | EditIntent::Delete)
-            && self.selection.as_same_node_inline().is_none()
-        {
-            self.history.break_group();
-            let action = cross_block_atom::plan_delete_selection(&self.document, self.selection)?;
-            return match action {
-                PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
-                PlannedAction::Commit(plan) => self.commit(plan),
-                PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
-            };
-        }
-
-        // Remaining content and structural intents in this slice act from one
-        // inline node. The endpoints keep their mixed-inline coordinates;
-        // planners decide between the text-only and atom-aware contracts.
-        let focus = self.inline_focus()?;
-        let inline = self.inline_of(focus.node_id())?;
-        let anchor = if self.selection.is_collapsed() {
-            None
-        } else {
-            match self.selection.anchor() {
-                DocumentPosition::Inline(point) if point.node_id() == focus.node_id() => {
-                    Some(point)
-                }
-                _ => return Err(SessionError::SelectionInvalid),
-            }
-        };
-        let action = match intent {
-            EditIntent::InsertImage { image } => {
-                self.history.break_group();
-                self.plan_insert_image(image)?
-            }
-            EditIntent::InsertTable { rows, columns } => {
-                self.history.break_group();
-                self.plan_insert_table(*rows, *columns)?
-            }
-            EditIntent::InsertText { text } => atom_edit::plan_text_input(
-                &inline,
-                anchor,
-                focus,
-                text,
-                self.stored_marks.as_ref(),
-                HistoryPolicy::Typing,
-            )?,
-            EditIntent::CommitComposition { range, text } => {
-                self.history.break_group();
-                inline
-                    .validate_offset(range.start())
-                    .map_err(SessionError::Core)?;
-                inline
-                    .validate_offset(range.end())
-                    .map_err(SessionError::Core)?;
-                if inline.atoms().is_empty() {
-                    let ime_selection = TextSelection::new(
-                        TextPoint::new(focus.node_id(), range.start(), focus.affinity()),
-                        TextPoint::new(focus.node_id(), range.end(), focus.affinity()),
-                    );
-                    intent::plan_insert_text(
-                        &inline,
-                        ime_selection,
-                        text,
-                        self.stored_marks.as_ref(),
-                        HistoryPolicy::Isolated,
-                    )?
-                } else {
-                    atom_edit::plan_ime_commit(
-                        &inline,
-                        focus,
-                        *range,
-                        text,
-                        self.stored_marks.as_ref(),
-                    )?
-                }
-            }
-            EditIntent::PasteText { text } => {
-                self.history.break_group();
-                intent::plan_insert_text(
-                    &inline,
-                    atom_edit::text_selection_from(anchor, focus)?,
-                    text,
-                    self.stored_marks.as_ref(),
-                    HistoryPolicy::Isolated,
-                )?
-            }
-            EditIntent::Backspace => {
-                self.history.break_group();
-                let at_block_start = self.selection.is_collapsed()
-                    && focus.text_offset().as_usize() == 0
-                    && focus.atom_index() == 0;
-                // Priority at a block start: merge into the previous block
-                // (same parent), then into the previous list item's tail,
-                // then leave the list itself (outdent when nested, lift out
-                // at the top level).
-                if !at_block_start {
-                    atom_edit::plan_backspace(&inline, anchor, focus)?
-                } else {
-                    match structure::plan_join_with_previous(&self.document, focus.node_id())? {
-                        PlannedAction::NoChange => {
-                            match structure::list_ancestry_of(&self.document, focus.node_id()) {
-                                Some(ancestry) if ancestry.item_index > 0 => {
-                                    structure::plan_merge_item_into_previous(
-                                        &self.document,
-                                        focus.node_id(),
-                                    )?
-                                }
-                                Some(ancestry) => {
-                                    let nested =
-                                        structure::item_is_nested(&self.document, &ancestry)?;
-                                    if nested {
-                                        structure::plan_outdent_list_item(
-                                            &self.document,
-                                            focus.node_id(),
-                                        )?
-                                    } else {
-                                        structure::plan_lift_out_of_list(&self.document, ancestry)?
-                                    }
-                                }
-                                None => PlannedAction::NoChange,
-                            }
-                        }
-                        planned => planned,
-                    }
-                }
-            }
-            EditIntent::Delete => {
-                self.history.break_group();
-                atom_edit::plan_delete(&inline, anchor, focus)?
-            }
-            EditIntent::ToggleMark { mark } if self.selection.is_collapsed() => {
-                return self.toggle_stored_mark(&inline, mark);
-            }
-            EditIntent::ToggleMark { mark } => {
-                self.history.break_group();
-                self.clear_stored_marks();
-                // Mark edits stay text-only: a selection that carries seam
-                // ordinals cannot address text ranges without losing them.
-                let selection = self
-                    .selection
-                    .as_single_node()
-                    .ok_or(SessionError::SelectionInvalid)?;
-                intent::plan_toggle_mark(&inline, selection, mark)?
-            }
-            EditIntent::SplitBlock => {
-                // Split is an explicit history boundary, but pending marks are
-                // intentionally inherited into the new tail block.
-                self.history.break_group();
-                let selection = self
-                    .selection
-                    .as_single_node()
-                    .ok_or(SessionError::SelectionInvalid)?;
-                split::plan_split_block(&self.document, selection)?
-            }
-            EditIntent::JoinWithPrevious => {
-                self.history.break_group();
-                self.clear_stored_marks();
-                structure::plan_join_with_previous(&self.document, focus.node_id())?
-            }
-            EditIntent::TurnInto { kind } => {
-                self.history.break_group();
-                self.clear_stored_marks();
-                structure::plan_turn_into(&self.document, focus.node_id(), kind)?
-            }
-            EditIntent::IndentListItem => {
-                self.history.break_group();
-                self.clear_stored_marks();
-                structure::plan_indent_list_item(&self.document, focus.node_id())?
-            }
-            EditIntent::OutdentListItem => {
-                self.history.break_group();
-                self.clear_stored_marks();
-                structure::plan_outdent_list_item(&self.document, focus.node_id())?
-            }
-            EditIntent::MoveCaret { .. }
-            | EditIntent::MoveToNextCell
-            | EditIntent::MoveToPreviousCell
-            | EditIntent::InsertTableRow { .. }
-            | EditIntent::InsertTableColumn { .. }
-            | EditIntent::DeleteTableRow { .. }
-            | EditIntent::DeleteTableColumn { .. }
-            | EditIntent::PlaceCaret { .. }
-            | EditIntent::PasteSlice { .. }
-            | EditIntent::SetSelection { .. } => unreachable!("handled above"),
-        };
-
-        match action {
-            PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
-            PlannedAction::Commit(plan) => self.commit(plan),
-            PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
-        }
-    }
-
     /// Applies a raw Core transaction with the map-existing selection
     /// policy.
     ///
@@ -427,9 +143,11 @@ impl DocumentSession {
     /// history. The previous selection is mapped through the change map; a
     /// transaction that deletes a selection endpoint fails atomically.
     pub fn apply(&mut self, transaction: &Transaction) -> Result<SessionOutcome, SessionError> {
-        self.history.break_group();
-        self.clear_stored_marks();
-        self.commit(intent::map_existing_plan(transaction.clone()))
+        self.with_transient_rollback(|session| {
+            session.history.break_group();
+            session.clear_stored_marks();
+            session.commit(intent::map_existing_plan(transaction.clone()))
+        })
     }
 
     /// Undoes the newest history entry.
@@ -438,6 +156,10 @@ impl DocumentSession {
     /// the exact previous store, and reinstates the recorded
     /// `before_selection` directly. Undo on an empty history is a no-op.
     pub fn undo(&mut self) -> Result<SessionOutcome, SessionError> {
+        self.with_transient_rollback(Self::undo_inner)
+    }
+
+    fn undo_inner(&mut self) -> Result<SessionOutcome, SessionError> {
         self.clear_stored_marks();
         let Some(entry) = self.history.take_undo() else {
             return Ok(SessionOutcome::NoChange);
@@ -460,6 +182,10 @@ impl DocumentSession {
     /// Redo replays the original transaction and reinstates the recorded
     /// `after_selection`. Redo on an empty redo stack is a no-op.
     pub fn redo(&mut self) -> Result<SessionOutcome, SessionError> {
+        self.with_transient_rollback(Self::redo_inner)
+    }
+
+    fn redo_inner(&mut self) -> Result<SessionOutcome, SessionError> {
         self.clear_stored_marks();
         let Some(entry) = self.history.take_redo() else {
             return Ok(SessionOutcome::NoChange);
@@ -475,164 +201,6 @@ impl DocumentSession {
                 Err(error)
             }
         }
-    }
-
-    fn commit(&mut self, plan: EditPlan) -> Result<SessionOutcome, SessionError> {
-        let before_selection = self.selection;
-        let group = history::history_group_for_plan(&plan);
-        let applied = plan
-            .transaction()
-            .apply_with_changes(&self.document)
-            .map_err(SessionError::Core)?;
-        let after_selection = resolve_selection(
-            &plan,
-            applied.changes(),
-            before_selection,
-            &self.document,
-            applied.document(),
-        )?;
-        let undo = applied.inverse().clone();
-        // Redo must reproduce the post-commit identities, not mint new ones.
-        // `inverse(inverse(T))` restores allocated NodeIds (SplitNode tail)
-        // via RestoreSubtree; replaying the original SplitNode would not.
-        let redo = undo
-            .apply_with_changes(applied.document())
-            .map_err(SessionError::Core)?
-            .inverse()
-            .clone();
-
-        self.history.record(HistoryEntry {
-            redo,
-            undo,
-            before_selection,
-            after_selection,
-            group,
-        });
-        self.document = applied.into_document();
-        self.selection = after_selection;
-        self.notify_document_changed();
-
-        Ok(SessionOutcome::DocumentChanged)
-    }
-
-    /// Commits a multi-stage command as one history entry.
-    ///
-    /// Stages run against intermediate snapshots that never become visible:
-    /// if any stage fails, the session keeps its previous state unchanged.
-    /// The combined undo applies every stage's inverse in reverse order; the
-    /// redo is `inverse(undo)` so restored identities are reused, matching
-    /// single-transaction commits.
-    fn commit_staged(
-        &mut self,
-        staged: structure::StagedPlan,
-    ) -> Result<SessionOutcome, SessionError> {
-        let before_selection = self.selection;
-        let mut current = self.document.clone();
-        let mut inverse_groups: Vec<Transaction> = Vec::new();
-        let mut split_tail = None;
-        let mut last_inserted = None;
-        // MapExisting resolves the after-selection by folding the mapped
-        // selection through every stage's change map (cell ranges shrink or
-        // survive through the same fold).
-        let mut mapped = before_selection;
-
-        for build in staged.stages {
-            let transaction = build(&current)?;
-            let applied = transaction
-                .apply_with_changes(&current)
-                .map_err(SessionError::Core)?;
-            if matches!(staged.selection_update, SelectionUpdate::MapExisting) {
-                mapped = mapped.map_through(applied.changes(), &current)?;
-            }
-            if split_tail.is_none() {
-                split_tail = applied
-                    .changes()
-                    .steps()
-                    .iter()
-                    .rev()
-                    .find_map(|step| match step {
-                        StepMap::NodeSplit { inserted, .. } => Some(*inserted),
-                        _ => None,
-                    });
-            }
-            if let Some(inserted) =
-                applied
-                    .changes()
-                    .steps()
-                    .iter()
-                    .rev()
-                    .find_map(|step| match step {
-                        StepMap::NodeInserted { inserted, .. } => Some(*inserted),
-                        _ => None,
-                    })
-            {
-                last_inserted = Some(inserted);
-            }
-            inverse_groups.push(applied.inverse().clone());
-            current = applied.into_document();
-        }
-
-        let mut undo = Transaction::new(TransactionOrigin::UserInput);
-        for transaction in inverse_groups.into_iter().rev() {
-            for step in transaction.steps() {
-                undo.push_step(step.clone());
-            }
-        }
-        // Redo must reproduce the post-command identities (see `commit`).
-        let redo = undo
-            .apply_with_changes(&current)
-            .map_err(SessionError::Core)?
-            .inverse()
-            .clone();
-
-        let after_selection = match staged.selection_update {
-            SelectionUpdate::PreserveFocus => preserved_focus(before_selection, &current)?,
-            SelectionUpdate::CaretAtSplitTail => {
-                let inserted = split_tail.ok_or(SessionError::SelectionInvalid)?;
-                collapsed_caret(&current, inserted, 0, affinity_of(before_selection))?
-            }
-            SelectionUpdate::CaretAtLastInsertedOffset { offset } => {
-                let inserted = last_inserted.ok_or(SessionError::SelectionInvalid)?;
-                collapsed_caret(&current, inserted, offset, affinity_of(before_selection))?
-            }
-            SelectionUpdate::MapExisting => {
-                mapped.validate(&current)?;
-                mapped
-            }
-            _ => return Err(SessionError::SelectionInvalid),
-        };
-
-        self.history.record(HistoryEntry {
-            redo,
-            undo,
-            before_selection,
-            after_selection,
-            group: HistoryGroup::Isolated,
-        });
-        self.document = current;
-        self.selection = after_selection;
-        self.notify_document_changed();
-
-        Ok(SessionOutcome::DocumentChanged)
-    }
-
-    fn apply_history_transaction(
-        &mut self,
-        transaction: &Transaction,
-        selection: DocumentSelection,
-    ) -> Result<(), SessionError> {
-        let applied = transaction
-            .apply_with_changes(&self.document)
-            .map_err(SessionError::Core)?;
-        selection
-            .validate(applied.document())
-            .map_err(|_| SessionError::SelectionInvalid)?;
-
-        self.document = applied.into_document();
-        self.selection = selection;
-        self.notify_document_changed();
-
-        Ok(())
     }
 
     fn inline_of(&self, node: NodeId) -> Result<InlineContent, SessionError> {
