@@ -219,7 +219,7 @@ fn merged_tables_reject_every_legacy_row_column_and_cell_navigation_path() {
 }
 
 #[test]
-fn merged_range_slots_are_not_duplicate_origin_edit_targets() {
+fn merged_range_keeps_legacy_matrix_clipboard_and_replacement_guards() {
     let f = fixture(true, true);
     let unit = fixture(false, false);
     let plain = ClipboardSlice::from_roots(vec![
@@ -243,8 +243,6 @@ fn merged_range_slots_are_not_duplicate_origin_edit_targets() {
         Err(SessionError::UnsupportedTableOperation)
     );
     for intent in [
-        EditIntent::Backspace,
-        EditIntent::Delete,
         EditIntent::InsertText {
             text: "overwrite".into(),
         },

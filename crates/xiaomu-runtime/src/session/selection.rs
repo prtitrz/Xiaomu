@@ -258,11 +258,11 @@ impl DocumentSelection {
     /// Maps the selection through `changes`, whose coordinates are those of
     /// `document` (the snapshot the transaction was applied to).
     ///
-    /// An active cell range maps first: the rectangle keeps cell identities,
-    /// so only removals can shrink it. An endpoint cell deleted by the
-    /// change shrinks the range to the surviving endpoint; both endpoints
-    /// deleted (or the parked caret deleted) converge the selection onto the
-    /// mapped caret position without a range.
+    /// An active cell range maps first: its endpoints follow canonical node
+    /// mapping, including absorbed cells converging onto a merge survivor.
+    /// An endpoint deleted by the change shrinks the range to the surviving
+    /// endpoint; both endpoints deleted (or the parked caret deleted)
+    /// converge onto the mapped caret position without a range.
     pub fn map_through(
         &self,
         changes: &ChangeMap,
@@ -295,45 +295,24 @@ impl DocumentSelection {
         };
 
         if let Some(range) = self.cell_range {
-            let surviving: Vec<NodeId> = [range.anchor(), range.focus()]
-                .into_iter()
-                .filter(|cell| {
-                    !changes.steps().iter().any(|step| match step {
-                        StepMap::NodeRemoved { removed, .. } => removed.contains(cell),
-                        _ => false,
-                    })
-                })
-                .collect();
+            let map_cell = |cell| match changes.map_node_selection(NodeSelection::new(cell)) {
+                MappedPosition::Mapped(mapped) => Some(mapped.node_id()),
+                MappedPosition::Deleted => None,
+            };
+            let anchor_cell = map_cell(range.anchor());
+            let focus_cell = map_cell(range.focus());
             // The parked caret may die with a removed endpoint; the range
             // then converges onto the structural seam where its anchor cell
             // was removed (the nearest legal gap in the post snapshot).
-            let seam = changes.steps().iter().find_map(|step| match step {
-                StepMap::NodeRemoved {
-                    removed,
-                    parent,
-                    index,
-                } if removed.contains(&range.anchor()) => {
-                    Some(DocumentPosition::Gap(NodeGap::new(*parent, *index)))
-                }
-                _ => None,
-            });
             let park = match map_one(self.focus, MapBias::Start) {
-                Ok(mapped) => Some(mapped),
-                Err(SessionError::SelectionDeleted) => seam,
+                Ok(mapped) => mapped,
+                Err(SessionError::SelectionDeleted) => map_cell_seam(range.anchor(), changes)?,
                 Err(other) => return Err(other),
             };
-            let park = park.or(seam);
-            return match surviving.len() {
-                0 => Ok(Self::collapsed(park.ok_or(SessionError::SelectionDeleted)?)),
-                1 => {
-                    let park = park.ok_or(SessionError::SelectionDeleted)?;
-                    let only = surviving[0];
-                    Ok(Self::cell_range(only, only, park))
-                }
-                _ => {
-                    let park = park.ok_or(SessionError::SelectionDeleted)?;
-                    Ok(Self::cell_range(range.anchor(), range.focus(), park))
-                }
+            return match (anchor_cell, focus_cell) {
+                (None, None) => Ok(Self::collapsed(park)),
+                (Some(only), None) | (None, Some(only)) => Ok(Self::cell_range(only, only, park)),
+                (Some(anchor), Some(focus)) => Ok(Self::cell_range(anchor, focus, park)),
             };
         }
 
@@ -380,6 +359,24 @@ impl DocumentSelection {
             Ok((self.focus, self.anchor))
         }
     }
+}
+
+/// Follow a cell's interior seam, including a merge followed by removal in
+/// the same transaction. When its containing subtree disappears, continue
+/// mapping from that subtree's former position rather than a stale cell ID.
+fn map_cell_seam(cell: NodeId, changes: &ChangeMap) -> Result<DocumentPosition, SessionError> {
+    let mut gap = NodeGap::new(cell, 0);
+    for step in changes.steps() {
+        gap = match step.map_node_gap(gap, MapBias::Start) {
+            MappedPosition::Mapped(mapped) => mapped,
+            MappedPosition::Deleted => match step {
+                StepMap::NodeRemoved { parent, index, .. }
+                | StepMap::NodeJoined { parent, index, .. } => NodeGap::new(*parent, *index),
+                _ => return Err(SessionError::SelectionDeleted),
+            },
+        };
+    }
+    Ok(DocumentPosition::Gap(gap))
 }
 
 /// Pre-order slot assignment over one snapshot.
