@@ -6,7 +6,7 @@
 //! (seam insertions via `ReplaceInlineText`, atomic Backspace/Delete via
 //! `RemoveInlineAtom`, and explicit selection-span atom removals).
 
-use xiaomu_core::document::{InlineContent, MarkSet, NodeId};
+use xiaomu_core::document::{InlineContent, MarkSet, NodeId, XiaomuDocument};
 use xiaomu_core::selection::{InlinePoint, TextSelection};
 use xiaomu_core::text::{TextOffset, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
@@ -143,6 +143,7 @@ fn plan_seam_deletion(
 /// same-boundary atoms. A selection spanning atoms deletes them explicitly
 /// in the same transaction.
 pub(crate) fn plan_text_input(
+    document: &XiaomuDocument,
     inline: &InlineContent,
     anchor: Option<InlinePoint>,
     focus: InlinePoint,
@@ -154,7 +155,88 @@ pub(crate) fn plan_text_input(
         let selection = text_selection_from(anchor, focus)?;
         return plan_insert_text(inline, selection, text, stored_marks, requested_history);
     }
-    plan_inline_replacement(inline, anchor, focus, text, stored_marks, requested_history)
+    // Capture selection inheritance before removing any selected atom.
+    // Ranges with mark-contributing atoms inherit from their right/start
+    // child; legacy unmarked extensions retain text-only compatibility.
+    let marks = if !text.is_empty() {
+        Some(input_marks(document, anchor, focus, stored_marks)?)
+    } else {
+        None
+    };
+    plan_inline_replacement(
+        inline,
+        anchor,
+        focus,
+        text,
+        marks.as_ref(),
+        requested_history,
+    )
+}
+
+/// Plain clipboard text uses the insertion gap's marks even over a range.
+/// Actual paste context differs from typed/insertContent range replacement.
+/// Text-only nodes preserve their existing planner and history semantics.
+pub(crate) fn plan_paste_text(
+    document: &XiaomuDocument,
+    inline: &InlineContent,
+    anchor: Option<InlinePoint>,
+    focus: InlinePoint,
+    text: &str,
+    stored_marks: Option<&MarkSet>,
+) -> Result<PlannedAction, SessionError> {
+    let (start, _) = ordered_points(anchor, focus);
+    let marks = if !inline.atoms().is_empty() && !text.is_empty() {
+        Some(match stored_marks {
+            Some(marks) => marks.clone(),
+            None => document
+                .inherited_inline_marks(start)
+                .map_err(SessionError::Core)?,
+        })
+    } else {
+        stored_marks.cloned()
+    };
+    plan_text_input(
+        document,
+        inline,
+        anchor,
+        focus,
+        text,
+        marks.as_ref(),
+        HistoryPolicy::Isolated,
+    )
+}
+
+fn input_marks(
+    document: &XiaomuDocument,
+    anchor: Option<InlinePoint>,
+    focus: InlinePoint,
+    stored_marks: Option<&MarkSet>,
+) -> Result<MarkSet, SessionError> {
+    if let Some(marks) = stored_marks {
+        return Ok(marks.clone());
+    }
+    let (start, end) = ordered_points(anchor, focus);
+    if (start.text_offset(), start.atom_index()) == (end.text_offset(), end.atom_index())
+        || !super::stored_marks::has_mark_contributing_atoms(document, start.node_id())
+    {
+        document
+            .inherited_inline_marks(start)
+            .map_err(SessionError::Core)
+    } else {
+        document
+            .inherited_inline_range_marks(start, end)
+            .map(|marks| marks.unwrap_or_else(MarkSet::empty))
+            .map_err(SessionError::Core)
+    }
+}
+
+fn ordered_points(anchor: Option<InlinePoint>, focus: InlinePoint) -> (InlinePoint, InlinePoint) {
+    let anchor = anchor.unwrap_or(focus);
+    if (anchor.text_offset(), anchor.atom_index()) <= (focus.text_offset(), focus.atom_index()) {
+        (anchor, focus)
+    } else {
+        (focus, anchor)
+    }
 }
 
 /// Builds the plan for an IME composition commit in a node with atoms.
@@ -166,30 +248,32 @@ pub(crate) fn plan_text_input(
 /// inside the range fails the commit — IME composition can never enter an
 /// atom.
 pub(crate) fn plan_ime_commit(
+    document: &XiaomuDocument,
     inline: &InlineContent,
     focus: InlinePoint,
     range: TextRange,
     text: &str,
     stored_marks: Option<&MarkSet>,
 ) -> Result<PlannedAction, SessionError> {
-    let start = range.start();
     let node = focus.node_id();
-    let at = InlinePoint::new(
-        node,
-        start,
-        if range.start() == range.end() && focus.text_offset() == start {
-            focus.atom_index()
-        } else {
-            inline.atom_count_at(start)
-        },
-        xiaomu_core::selection::CursorAffinity::Before,
-    );
+    let at = composition_start(inline, focus, range);
+    let end = InlinePoint::new(node, range.end(), 0, at.affinity());
+    let marks = if !text.is_empty() {
+        Some(input_marks(
+            document,
+            (!range.is_empty()).then_some(end),
+            at,
+            stored_marks,
+        )?)
+    } else {
+        None
+    };
     let mut transaction = edit_transaction(TransactionStep::ReplaceInlineText {
         at,
         end: range.end(),
         replacement: text.to_owned(),
     });
-    if let Some(marks) = stored_marks
+    if let Some(marks) = marks.as_ref()
         && !text.is_empty()
     {
         push_exact_insert_marks(&mut transaction, inline, node, range, text, marks)?;
@@ -209,6 +293,27 @@ pub(crate) fn plan_ime_commit(
     ))
 }
 
+/// Resolves a byte-addressed composition start without losing a collapsed
+/// focus seam. Nonempty ranges begin after same-boundary atoms so IME never
+/// consumes those atoms as a text side effect.
+pub(super) fn composition_start(
+    inline: &InlineContent,
+    focus: InlinePoint,
+    range: TextRange,
+) -> InlinePoint {
+    let start = range.start();
+    InlinePoint::new(
+        focus.node_id(),
+        start,
+        if range.is_empty() && focus.text_offset() == start {
+            focus.atom_index()
+        } else {
+            inline.atom_count_at(start)
+        },
+        focus.affinity(),
+    )
+}
+
 /// Replaces the span between two mixed-inline endpoints of one node.
 ///
 /// The selection's atoms (same-boundary atoms at or after the start gap, and
@@ -225,18 +330,7 @@ fn plan_inline_replacement(
 ) -> Result<PlannedAction, SessionError> {
     let node = focus.node_id();
     let collapsed = selection_is_collapsed(anchor, focus);
-    let (start, end) = match anchor {
-        Some(anchor) if !collapsed => {
-            let a = (anchor.text_offset().as_usize(), anchor.atom_index());
-            let f = (focus.text_offset().as_usize(), focus.atom_index());
-            if a <= f {
-                (anchor, focus)
-            } else {
-                (focus, anchor)
-            }
-        }
-        _ => (focus, focus),
-    };
+    let (start, end) = ordered_points(anchor, focus);
 
     let mut transaction = Transaction::new(TransactionOrigin::UserInput);
     if !collapsed {

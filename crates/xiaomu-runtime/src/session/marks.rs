@@ -1,12 +1,192 @@
-//! Single-node mark planners; explicit set/remove remain distinct from toggle.
+//! Mixed-inline range marks; explicit set/remove remain distinct from toggle.
 
-use xiaomu_core::document::{InlineContent, Mark, MarkKind, MarkSet};
-use xiaomu_core::selection::TextSelection;
+use xiaomu_core::document::{InlineContent, Mark, MarkKind, MarkSet, NodeId, XiaomuDocument};
+use xiaomu_core::selection::{InlinePoint, TextSelection};
 use xiaomu_core::text::TextRange;
-use xiaomu_core::transaction::TransactionStep;
+use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
 use super::intent::{PlannedAction, edit_transaction, map_existing_plan, ordered_range};
-use super::{EditPlan, SelectionUpdate, SessionError};
+use super::{
+    DocumentPosition, DocumentSelection, EditIntent, EditPlan, SelectionUpdate, SessionError,
+};
+
+/// Plans one isolated mark edit over the full mixed-inline document range.
+///
+/// Text ranges and atom marks share the toggle decision, but retain their
+/// independent canonical values. Same-byte atom ordinals delimit half-open
+/// selections precisely; literal LF remains ordinary text. Structural gaps,
+/// atomic-block endpoints and rectangular cell selections fail closed.
+pub(super) fn plan_range_mark(
+    document: &XiaomuDocument,
+    selection: DocumentSelection,
+    intent: &EditIntent,
+) -> Result<PlannedAction, SessionError> {
+    selection.validate(document)?;
+    if selection.is_collapsed() || selection.active_cell_range().is_some() {
+        return Err(SessionError::SelectionInvalid);
+    }
+    let (DocumentPosition::Inline(head), DocumentPosition::Inline(tail)) =
+        selection.ordered(document)?
+    else {
+        return Err(SessionError::SelectionInvalid);
+    };
+    // Keep the established atom-free single-node contract, including its
+    // exact no-op and one-step behavior.
+    if head.node_id() == tail.node_id() {
+        let inline = inline_of(document, head.node_id())?;
+        if inline.atoms().is_empty() {
+            let text_selection = selection
+                .as_single_node()
+                .ok_or(SessionError::SelectionInvalid)?;
+            return match intent {
+                EditIntent::ToggleMark { mark } => plan_toggle_mark(inline, text_selection, mark),
+                EditIntent::SetMark { mark } => plan_set_mark(inline, text_selection, mark),
+                EditIntent::RemoveMark { kind } => plan_remove_mark(inline, text_selection, *kind),
+                _ => Err(SessionError::SelectionInvalid),
+            };
+        }
+    }
+
+    let spans = selected_spans(document, head, tail)?;
+    let kind = match intent {
+        EditIntent::ToggleMark { mark } | EditIntent::SetMark { mark } => mark.kind(),
+        EditIntent::RemoveMark { kind } => *kind,
+        _ => return Err(SessionError::SelectionInvalid),
+    };
+    let fully_marked = spans
+        .iter()
+        .all(|span| span.all_marks(|marks| marks.contains(kind)));
+    let replacement = match intent {
+        EditIntent::ToggleMark { mark } if !fully_marked => Some(mark),
+        EditIntent::SetMark { mark } => Some(mark),
+        _ => None,
+    };
+    let unchanged =
+        |marks: &MarkSet| marks.as_slice().iter().find(|mark| mark.kind() == kind) == replacement;
+    if spans.iter().all(|span| span.all_marks(unchanged)) {
+        return Ok(PlannedAction::NoChange);
+    }
+
+    let mut transaction = Transaction::new(TransactionOrigin::UserInput);
+    for span in spans {
+        if !span.range.is_empty() && !range_all(span.inline, span.range, unchanged) {
+            transaction.push_step(match replacement {
+                Some(mark) => TransactionStep::AddMark {
+                    node: span.node,
+                    range: span.range,
+                    mark: mark.clone(),
+                },
+                None => TransactionStep::RemoveMark {
+                    node: span.node,
+                    range: span.range,
+                    mark_kind: kind,
+                },
+            });
+        }
+        for (atom, marks) in span.atoms {
+            if unchanged(marks) {
+                continue;
+            }
+            let next = marks
+                .as_slice()
+                .iter()
+                .filter(|mark| mark.kind() != kind)
+                .cloned()
+                .chain(replacement.cloned());
+            transaction.push_step(TransactionStep::SetInlineAtomMarks {
+                atom,
+                marks: MarkSet::new(next).map_err(SessionError::Core)?,
+            });
+        }
+    }
+    Ok(PlannedAction::Commit(map_existing_plan(transaction)))
+}
+
+struct SelectedSpan<'a> {
+    node: NodeId,
+    inline: &'a InlineContent,
+    range: TextRange,
+    atoms: Vec<(NodeId, &'a MarkSet)>,
+}
+
+impl SelectedSpan<'_> {
+    fn all_marks(&self, predicate: impl Fn(&MarkSet) -> bool) -> bool {
+        range_all(self.inline, self.range, &predicate)
+            && self.atoms.iter().all(|(_, marks)| predicate(marks))
+    }
+}
+
+fn inline_of(document: &XiaomuDocument, node: NodeId) -> Result<&InlineContent, SessionError> {
+    document
+        .node(node)
+        .and_then(|node| node.content().as_inline())
+        .ok_or(SessionError::SelectionInvalid)
+}
+
+fn selected_spans(
+    document: &XiaomuDocument,
+    head: InlinePoint,
+    tail: InlinePoint,
+) -> Result<Vec<SelectedSpan<'_>>, SessionError> {
+    let mut pending = vec![document.root()];
+    let mut spans = Vec::new();
+    let mut inside = false;
+    while let Some(id) = pending.pop() {
+        let node = document.node(id).ok_or(SessionError::SelectionInvalid)?;
+        if let Some(children) = node.content().as_children() {
+            pending.extend(children.iter().rev().copied());
+        }
+        let Some(inline) = node.content().as_inline() else {
+            continue;
+        };
+        inside |= id == head.node_id();
+        if !inside {
+            continue;
+        }
+        let start = if id == head.node_id() {
+            (head.text_offset(), head.atom_index())
+        } else {
+            (inline.offset_at(0).map_err(SessionError::Core)?, 0)
+        };
+        let end = if id == tail.node_id() {
+            (tail.text_offset(), tail.atom_index())
+        } else {
+            let offset = inline
+                .offset_at(inline.len_bytes())
+                .map_err(SessionError::Core)?;
+            (offset, inline.atom_count_at(offset))
+        };
+        let mut atoms = Vec::new();
+        let mut previous_offset = None;
+        let mut ordinal = 0;
+        for placement in inline.atoms() {
+            let offset = placement.text_offset();
+            if previous_offset == Some(offset) {
+                ordinal += 1;
+            } else {
+                ordinal = 0;
+                previous_offset = Some(offset);
+            }
+            if (offset, ordinal) >= start && (offset, ordinal) < end {
+                let content = document
+                    .node(placement.atom())
+                    .and_then(|node| node.content().as_inline_atom())
+                    .ok_or(SessionError::SelectionInvalid)?;
+                atoms.push((placement.atom(), content.marks()));
+            }
+        }
+        spans.push(SelectedSpan {
+            node: id,
+            inline,
+            range: TextRange::new(start.0, end.0).map_err(SessionError::Core)?,
+            atoms,
+        });
+        if id == tail.node_id() {
+            return Ok(spans);
+        }
+    }
+    Err(SessionError::SelectionInvalid)
+}
 
 /// Builds the plan for toggling one mark over a non-collapsed selection.
 pub(crate) fn plan_toggle_mark(

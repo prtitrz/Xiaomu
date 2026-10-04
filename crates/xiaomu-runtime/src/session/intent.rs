@@ -41,8 +41,9 @@ pub enum CaretMove {
 /// Text intents act inside one inline node unless their contract explicitly
 /// carries a document-level fragment. Structural intents
 /// ([`EditIntent::SplitBlock`], [`EditIntent::JoinWithPrevious`],
-/// [`EditIntent::TurnInto`]) still require a single-node text selection in
-/// this phase.
+/// [`EditIntent::TurnInto`]) retain their explicitly documented structural
+/// scope. Mixed-inline coordinates preserve atom ordinals rather than
+/// silently projecting them to text-only offsets.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EditIntent {
@@ -201,9 +202,9 @@ pub enum EditIntent {
     },
     /// Set one exact mark, replacing any mark of the same semantic kind.
     ///
-    /// A non-collapsed single-node text selection changes canonical marks in
-    /// one undo unit. A collapsed inline caret updates Runtime StoredMarks
-    /// using the explicit marks or surrounding-run inheritance. Other mark
+    /// A non-collapsed inline or document range changes selected text and
+    /// inline-atom marks in one undo unit. A collapsed inline caret updates
+    /// Runtime StoredMarks using explicit marks or exact-gap inheritance. Other mark
     /// kinds are preserved, including when setting inline code. Setting the
     /// already-effective value is a no-op, preserving typing history grouping.
     SetMark {

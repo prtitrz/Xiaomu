@@ -6,7 +6,7 @@
 
 use xiaomu_core::document::{NodeId, XiaomuDocument};
 use xiaomu_core::mapping::{ChangeMap, StepMap};
-use xiaomu_core::selection::{CursorAffinity, TextPoint};
+use xiaomu_core::selection::{CursorAffinity, InlinePoint, TextPoint};
 
 use super::intent::{EditPlan, SelectionUpdate};
 use super::{DocumentPosition, DocumentSelection, SessionError};
@@ -88,25 +88,32 @@ pub(super) fn resolve_selection(
                 .iter()
                 .rev()
                 .find_map(|step| match step {
-                    StepMap::NodeSplit { inserted, .. } => Some(*inserted),
+                    StepMap::NodeSplit { inserted, .. }
+                    | StepMap::InlineNodeSplit { inserted, .. } => Some(*inserted),
                     _ => None,
                 })
                 .ok_or(SessionError::SelectionInvalid)?;
             collapsed_caret(document, inserted, 0, affinity_of(before))
         }
         SelectionUpdate::CaretAtJoinSeam => {
-            let (first, first_len) = changes
+            let (first, first_len, atom_index) = changes
                 .steps()
                 .iter()
                 .rev()
                 .find_map(|step| match step {
                     StepMap::NodeJoined {
                         first, first_len, ..
-                    } => Some((*first, *first_len)),
+                    } => Some((*first, *first_len, 0)),
+                    StepMap::InlineNodeJoined {
+                        first,
+                        first_len,
+                        seam_atom_index,
+                        ..
+                    } => Some((*first, *first_len, *seam_atom_index)),
                     _ => None,
                 })
                 .ok_or(SessionError::SelectionInvalid)?;
-            collapsed_caret(document, first, first_len, affinity_of(before))
+            collapsed_inline_caret(document, first, first_len, atom_index, affinity_of(before))
         }
         SelectionUpdate::CaretAtInline { caret } => {
             let selection = DocumentSelection::collapsed(*caret);
@@ -167,6 +174,28 @@ pub(super) fn collapsed_caret(
     selection
         .validate(document)
         .map_err(|_| SessionError::SelectionInvalid)?;
+    Ok(selection)
+}
+
+/// Resolves a canonical atom seam without projecting its ordinal away.
+fn collapsed_inline_caret(
+    document: &XiaomuDocument,
+    node: NodeId,
+    raw: usize,
+    atom_index: usize,
+    affinity: CursorAffinity,
+) -> Result<DocumentSelection, SessionError> {
+    let inline = document
+        .node(node)
+        .ok_or(SessionError::Core(xiaomu_core::Error::UnknownNode))?
+        .content()
+        .as_inline()
+        .ok_or(SessionError::SelectionInvalid)?;
+    let offset = inline.offset_at(raw).map_err(SessionError::Core)?;
+    let selection = DocumentSelection::collapsed(DocumentPosition::Inline(InlinePoint::new(
+        node, offset, atom_index, affinity,
+    )));
+    selection.validate(document)?;
     Ok(selection)
 }
 

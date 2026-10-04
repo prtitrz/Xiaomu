@@ -1,7 +1,7 @@
 //! Typed transaction steps.
 
 use crate::document::{
-    AtomKind, InlineAtomContent, Mark, MarkKind, Node, NodeAttrs, NodeContent, NodeId,
+    AtomKind, InlineAtomContent, Mark, MarkKind, MarkSet, Node, NodeAttrs, NodeContent, NodeId,
 };
 use crate::selection::InlinePoint;
 use crate::text::{TextOffset, TextRange};
@@ -92,6 +92,18 @@ pub enum TransactionStep {
     RemoveInlineAtom {
         /// Inline-atom node to remove.
         atom: NodeId,
+    },
+    /// Replaces one inline atom's independent canonical marks.
+    ///
+    /// The target must be an inline-atom node. Its identity, semantic kind,
+    /// attributes, fallback text and placement remain unchanged. No positions
+    /// move; the inverse restores the exact previous mark set. Core does not
+    /// impose host-specific mark exclusion rules.
+    SetInlineAtomMarks {
+        /// Inline-atom node whose marks are replaced.
+        atom: NodeId,
+        /// Complete replacement mark set, including exact mark attributes.
+        marks: MarkSet,
     },
     /// Restores a previously removed inline atom with its exact identity.
     ///

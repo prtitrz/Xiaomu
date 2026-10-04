@@ -12,8 +12,8 @@ mod table;
 use std::collections::{BTreeSet, VecDeque};
 
 use crate::document::{
-    InlineContent, Node, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStore, XiaomuDocument,
-    allows_child,
+    InlineContent, MarkSet, Node, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStore,
+    XiaomuDocument, allows_child,
 };
 use crate::mapping::{ChangeMap, StepMap};
 use crate::text::TextRange;
@@ -97,6 +97,9 @@ impl ApplyContext {
                 content,
             } => self.apply_insert_inline_atom(*at, kind, attrs.clone(), content.clone()),
             TransactionStep::RemoveInlineAtom { atom } => self.apply_remove_inline_atom(*atom),
+            TransactionStep::SetInlineAtomMarks { atom, marks } => {
+                self.apply_set_inline_atom_marks(*atom, marks)
+            }
             TransactionStep::RestoreInlineAtom { at, node } => {
                 self.apply_restore_inline_atom(*at, node)
             }
@@ -202,6 +205,28 @@ impl ApplyContext {
             .get(id)
             .ok_or(Error::UnknownNode)
             .map(|node| node.attrs().clone())
+    }
+
+    fn apply_set_inline_atom_marks(
+        &mut self,
+        atom: NodeId,
+        marks: &MarkSet,
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
+        let node = self.store.get(atom).ok_or(Error::UnknownNode)?;
+        let content = node
+            .content()
+            .as_inline_atom()
+            .ok_or(Error::InvalidTransaction)?;
+        let previous = content.marks().clone();
+        let next = content.clone().with_marks(marks.clone());
+        self.rewrite_node(atom, self.attrs_of(atom)?, NodeContent::InlineAtom(next))?;
+        Ok((
+            Vec::new(),
+            vec![TransactionStep::SetInlineAtomMarks {
+                atom,
+                marks: previous,
+            }],
+        ))
     }
 
     fn apply_set_node_attrs(

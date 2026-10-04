@@ -106,7 +106,7 @@ XiaomuDocument
 
 `InlineContent` 在构造时规范化相邻且 `MarkSet` 相同的 `TextRun`。`NodeAttrs` 使用确定性 key 顺序并 preservation-first 保存未知属性值。`AttrValue::Null` 是显式空值，支持 list/object 内递归保留；`get(key) == Some(&AttrValue::Null)` 与缺失 key 的 `None` 不同，不表示删除属性。它不放宽 image 等 typed attrs 校验，也不引入浮点值；canonical document version 仍为 v1。见 [ADR 0006](adr/0006-nullable-node-attrs.md)。
 
-ADR0004 的默认 LF contract 保留：literal LF 使用普通 UTF-8 TextOffset，soft-wrap 不产生 canonical byte。为区分外部结构中的 literal LF 与独立 marked hardBreak，[ADR0009](adr/0009-typed-hard-break.md) 新增 typed builtin atom，沿用现有 NodeId/placement/ordinal，不建立第三套坐标。`AtomKind::new("hardBreak")` 仍是普通 extension，不会被字符串猜测升级。builtin 要求空 attrs、LF fallback；InlineAtomContent 的真实 MarkSet 参与 equality/inverse。当前是 canonical/wire/投影基础，Runtime/产品编辑还未完全接入。
+ADR0004 的默认 LF contract 保留：literal LF 使用普通 UTF-8 TextOffset，soft-wrap 不产生 canonical byte。为区分外部结构中的 literal LF 与独立 marked hardBreak，[ADR0009](adr/0009-typed-hard-break.md) 新增 typed builtin atom，沿用现有 NodeId/placement/ordinal，不建立第三套坐标。`AtomKind::new("hardBreak")` 仍是普通 extension，不会被字符串猜测升级。builtin 要求空 attrs、LF fallback；InlineAtomContent 的真实 MarkSet 参与 equality/inverse。Core/Runtime 已接 mixed split/join、范围格式与 exact-gap 输入继承，GPUI 全选包含末尾 inline atoms；宿主命令和真实平台验收仍单独推进。
 
 ### Canonical Node Tree 与 Snapshot
 

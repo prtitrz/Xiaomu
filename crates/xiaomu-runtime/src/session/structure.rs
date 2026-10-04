@@ -6,11 +6,13 @@
 //! apply a transaction themselves.
 
 use xiaomu_core::document::{Node, NodeAttrs, NodeContent, NodeId, NodeKind, XiaomuDocument};
-use xiaomu_core::text::TextRange;
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
 use super::SessionError;
-use super::intent::{EditPlan, PlannedAction, PrimaryEdit, SelectionUpdate, concatenated};
+use super::intent::{EditPlan, PlannedAction, SelectionUpdate};
+
+mod join;
+use join::plan_join_block_into_container_tail;
 
 /// A transaction built lazily from the snapshot its stage sees.
 pub(crate) type StagedTransaction =
@@ -96,75 +98,6 @@ pub(crate) fn plan_join_with_previous(
     }
 
     Ok(PlannedAction::NoChange)
-}
-
-/// Joins `node`'s text into the last inline block of `container`.
-///
-/// Shared by two backspace shapes: a plain block whose preceding sibling is
-/// a list appends into the list's tail, and a list item with a previous
-/// sibling item appends into that item's tail (the editor-standard "delete
-/// the bullet by merging upward"). The emptied source block is removed; an
-/// emptied parent item dissolves with it. The caret lands at the join seam
-/// via [`SelectionUpdate::CaretAfterReplacement`].
-fn plan_join_block_into_container_tail(
-    document: &XiaomuDocument,
-    node: NodeId,
-    container: NodeId,
-) -> Result<Option<EditPlan>, SessionError> {
-    let Some(target) = last_inline_descendant(document, container) else {
-        return Ok(None);
-    };
-
-    let focus_inline = document
-        .node(node)
-        .ok_or(SessionError::SelectionInvalid)?
-        .content()
-        .as_inline()
-        .ok_or(SessionError::SelectionInvalid)?;
-    let moved_text = concatenated(focus_inline);
-    let tail_inline = document
-        .node(target)
-        .ok_or(SessionError::SelectionInvalid)?
-        .content()
-        .as_inline()
-        .ok_or(SessionError::SelectionInvalid)?;
-    let seam = tail_inline
-        .offset_at(concatenated(tail_inline).len())
-        .map_err(SessionError::Core)?;
-
-    let mut transaction = user_transaction().with_step(TransactionStep::ReplaceText {
-        node: target,
-        range: TextRange::new(seam, seam).map_err(SessionError::Core)?,
-        replacement: moved_text.clone(),
-    });
-
-    // The focused block goes first; removing it may leave its own list
-    // item empty, and that item dissolves right after.
-    transaction.push_step(TransactionStep::RemoveNode { node });
-    let parent = document
-        .parent_of(node)
-        .ok_or(SessionError::SelectionInvalid)?;
-    if document
-        .node(parent)
-        .ok_or(SessionError::SelectionInvalid)?
-        .kind()
-        == &NodeKind::ListItem
-    {
-        let siblings = children_of(document, parent);
-        if siblings.len() == 1 && siblings[0] == node {
-            transaction.push_step(TransactionStep::RemoveNode { node: parent });
-        }
-    }
-
-    Ok(Some(EditPlan::new(
-        transaction,
-        SelectionUpdate::CaretAtJoinPoint,
-        Some(PrimaryEdit {
-            node: target,
-            range: TextRange::new(seam, seam).map_err(SessionError::Core)?,
-            inserted_len: moved_text.len(),
-        }),
-    )))
 }
 
 /// Merges the focused list item into its previous sibling item's tail.
@@ -651,6 +584,9 @@ pub(crate) fn subtree_payloads(document: &XiaomuDocument, root: NodeId) -> Vec<N
         };
         if let NodeContent::Children(children) = node.content() {
             queue.extend(children.iter().copied());
+        }
+        if let Some(inline) = node.content().as_inline() {
+            queue.extend(inline.atoms().iter().map(|placement| placement.atom()));
         }
         payloads.push(node.clone());
     }
