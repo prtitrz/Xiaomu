@@ -121,6 +121,16 @@ Core node-identity maps, including absorbed cells; Undo restores the original
 reverse range. Clear/marks failure tests cover canonical content, selection,
 pending marks, typing groups, history and listener counts.
 
+The public Runtime intents `MergeTableCells` and `SplitTableCell` now route
+through policy first, then their generic defaults before CellRange guards.
+They use the live selection rather than captured toolbar coordinates. Generic
+merge preserves all blank blocks; generic single-cell-range split retains the
+original top-left identity/park rather than claiming ProseMirror's reconstructed
+range. Product policy can supply an Exact selection plan. NoChange preserves
+typing groups, marks, history and listeners; failures use the ordinary atomic
+rollback. Twelve new real-session tests bring Runtime to 479 passing tests with
+strict Clippy; this does not itself activate a consumer Table profile.
+
 ### Isolated public-API layout prototype
 
 `table_layout` measures real GPUI child subtrees at a supplied same-frame content
