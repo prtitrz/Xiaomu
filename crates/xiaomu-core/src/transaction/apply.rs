@@ -8,6 +8,7 @@
 mod atom;
 mod structure;
 mod table;
+mod table_axis;
 mod table_span;
 
 use std::collections::{BTreeSet, VecDeque};
@@ -122,6 +123,22 @@ impl ApplyContext {
             }
             TransactionStep::InsertTableColumn { table, index } => {
                 self.apply_insert_table_column(*table, *index)
+            }
+            TransactionStep::InsertTableRowLogical {
+                table,
+                index,
+                cell_kinds,
+            } => self.apply_insert_table_row_logical(*table, *index, cell_kinds),
+            TransactionStep::InsertTableColumnLogical {
+                table,
+                index,
+                cell_kinds,
+            } => self.apply_insert_table_column_logical(*table, *index, cell_kinds),
+            TransactionStep::DeleteTableRowsLogical { table, start, end } => {
+                self.apply_delete_table_rows_logical(*table, *start, *end)
+            }
+            TransactionStep::DeleteTableColumnsLogical { table, start, end } => {
+                self.apply_delete_table_columns_logical(*table, *start, *end)
             }
             TransactionStep::MergeTableCells { table, rect } => {
                 self.apply_merge_table_cells(*table, *rect)

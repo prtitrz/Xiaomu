@@ -126,6 +126,21 @@ pub enum StepMap {
         /// The removed node together with every node of its subtree.
         removed: BTreeSet<NodeId>,
     },
+    /// An existing node changed structural parent without changing identity.
+    /// Descendant text/inline positions and node selections stay unchanged.
+    /// Structural gaps map through removal, then insertion, in that order.
+    NodeReparented {
+        /// Identity of the moved node, whose whole subtree remains live.
+        node: NodeId,
+        /// Parent losing the child.
+        old_parent: NodeId,
+        /// Child index immediately before removal.
+        old_index: usize,
+        /// Parent receiving the same child; may equal `old_parent`.
+        new_parent: NodeId,
+        /// Child insertion index after removal, including same-parent moves.
+        new_index: usize,
+    },
     /// One cell was absorbed into another without deleting its child blocks.
     /// Text/inline positions and descendant node selections keep their IDs.
     /// Gaps in the absorbed cell move into the survivor's appended content;
@@ -254,6 +269,7 @@ impl StepMap {
             Self::InlineAtomInserted { .. }
             | Self::InlineAtomRemoved { .. }
             | Self::NodeInserted { .. }
+            | Self::NodeReparented { .. }
             | Self::TableCellMerged { .. }
             | Self::TableCellRestored { .. } => MappedPosition::Mapped(point),
             Self::NodeSplit {
@@ -344,6 +360,24 @@ impl StepMap {
     #[must_use]
     pub fn map_node_gap(&self, gap: NodeGap, bias: MapBias) -> MappedPosition<NodeGap> {
         match self {
+            Self::NodeReparented {
+                old_parent,
+                old_index,
+                new_parent,
+                new_index,
+                ..
+            } => {
+                let mut index = gap.index();
+                if gap.parent() == *old_parent && index > *old_index {
+                    index -= 1;
+                }
+                if gap.parent() == *new_parent
+                    && (index > *new_index || (index == *new_index && bias == MapBias::End))
+                {
+                    index += 1;
+                }
+                MappedPosition::Mapped(NodeGap::new(gap.parent(), index))
+            }
             Self::TableCellMerged {
                 row,
                 index,
