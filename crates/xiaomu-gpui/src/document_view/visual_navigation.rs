@@ -17,6 +17,10 @@ use crate::inline_atom_display::InlineAtomDisplayProjection;
 
 use super::{DocumentView, navigation};
 
+#[cfg(test)]
+#[path = "horizontal_selection_tests.rs"]
+mod horizontal_selection_tests;
+
 /// One navigation step direction for the caret focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Where one navigation step lands: a mixed-inline caret or a whole atomic
@@ -42,6 +46,22 @@ pub(super) enum NavStep {
 }
 
 impl DocumentView {
+    /// Non-extending horizontal arrows collapse an existing selection to its
+    /// ordered edge before attempting any scalar, atom or block movement.
+    fn horizontal_selection_edge(&self, forward: bool) -> Option<NavTarget> {
+        let session = self.session.borrow();
+        let selection = session.selection();
+        if selection.is_collapsed() {
+            return None;
+        }
+        let (start, end) = selection.ordered(session.document()).ok()?;
+        match if forward { end } else { start } {
+            DocumentPosition::Inline(point) => Some(NavTarget::Inline(point)),
+            DocumentPosition::Atomic(node) => Some(NavTarget::Atomic(node)),
+            DocumentPosition::Gap(_) => None,
+        }
+    }
+
     /// Resolves the current focus as `(blocks, block index, InlinePoint)`.
     ///
     /// A same-boundary atom seam is a first-class caret position here; the
@@ -369,6 +389,16 @@ impl DocumentView {
             return;
         }
         if self.navigate_cell_range(&step, extend, window, cx) {
+            return;
+        }
+        if !extend
+            && matches!(step, NavStep::Left | NavStep::Right)
+            && let Some(edge) = self.horizontal_selection_edge(matches!(step, NavStep::Right))
+        {
+            match edge {
+                NavTarget::Inline(point) => self.move_focus_to(point, false, window, cx),
+                NavTarget::Atomic(node) => self.move_focus_to_atomic(node, window, cx),
+            }
             return;
         }
         // A whole atomic block selection navigates across the unit sequence.
