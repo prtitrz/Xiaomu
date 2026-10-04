@@ -123,6 +123,31 @@ pub enum EditIntent {
         /// The column to delete.
         index: usize,
     },
+    /// Merge the live, closed rectangular cell selection.
+    ///
+    /// The default command requires at least two distinct cell origins;
+    /// other selections and non-closed rectangles are no-ops. Core retains
+    /// every block, including empty paragraphs, in logical origin order.
+    /// The top-left cell survives and both range endpoints map onto it.
+    /// A change clears stored marks and forms one isolated undo unit.
+    ///
+    /// Host policy sees this logical command before default selection routing
+    /// and may replace its content and exact after-selection semantics.
+    MergeTableCells,
+    /// Split the live single-cell range or the cell containing a collapsed
+    /// caret into unit cells. Other selections and unit cells are no-ops.
+    ///
+    /// The default command keeps all content and the original identity in
+    /// the top-left unit cell. It preserves the exact caret, or the original
+    /// single-cell range and its parked position. Thus a cell range selects
+    /// only the surviving top-left unit cell afterward, not the former span's
+    /// full rectangle. Undo restores the original span and exact selection;
+    /// redo restores the allocated identities and exact after-selection.
+    /// A change clears stored marks and forms one isolated undo unit.
+    ///
+    /// Host policy may replace this with its own exact selection and cell
+    /// factory semantics before the default planner runs.
+    SplitTableCell,
     /// Commit one native IME composition over an explicit canonical range.
     /// A collapsed range at the current caret preserves its mixed-inline
     /// atom ordinal. Nonempty ranges keep boundary atoms and reject atoms

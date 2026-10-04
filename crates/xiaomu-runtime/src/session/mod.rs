@@ -38,6 +38,9 @@ mod split;
 mod stored_marks;
 mod structure;
 mod table;
+mod table_commands;
+#[cfg(test)]
+mod table_commands_tests;
 #[cfg(test)]
 mod table_geometry_tests;
 mod task_checked;
