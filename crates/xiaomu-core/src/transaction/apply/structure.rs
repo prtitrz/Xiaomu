@@ -78,7 +78,7 @@ impl ApplyContext {
                 .checked_add(1)
                 .ok_or(Error::NodeIdExhausted)?;
             self.next_node_id = self.next_node_id.max(ceiling);
-            self.store = self.store.inserted(restored.clone())?;
+            self.store.insert_node_mut(restored.clone())?;
             restored.id()
         } else {
             let kind = self
@@ -177,7 +177,7 @@ impl ApplyContext {
         )?;
         // Inline atoms are migrated, never deleted with their old parent.
         let removed = BTreeSet::from([second]);
-        self.store = self.store.without_nodes(&removed);
+        self.store.remove_nodes_mut(&removed);
 
         let map = if mixed {
             StepMap::InlineNodeJoined {

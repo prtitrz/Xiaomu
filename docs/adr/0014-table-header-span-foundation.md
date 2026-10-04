@@ -84,6 +84,16 @@ resource preflight, moved origin cells, forward/reverse gap mapping and exact
 inverse identities. This is Core semantics, not product toolbar/PM selection,
 repair-plugin or GUI parity; those adapters continue separately.
 
+Private transaction application now uses copy-on-write store mutation: the
+first `Arc::make_mut` separates the working map from existing snapshots, and
+later steps reuse that map while unchanged node payloads remain shared. Public
+snapshots remain immutable. Exchange preconditions and inverse parent-overlay
+validation run before mutation; allocator ceilings are checked before insertion.
+Seven added tests bring Core to 279 (Core+Runtime 758), with strict Clippy.
+This removes repeated whole-map cloning, not `find_parent`, subtree traversal
+or validation cost. Product planners must still bound work and batch preview
+passes; it is not a claim that every multi-step transaction is linear.
+
 ### Semantic merge/split foundation
 
 `MergeTableCells` requires a closed logical rectangle and keeps the geometric

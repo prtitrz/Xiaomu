@@ -6,6 +6,9 @@ use crate::document::{Node, NodeId, NodeKind, NodeStore};
 use crate::mapping::StepMap;
 use crate::{Error, Result};
 
+#[cfg(test)]
+mod tests;
+
 /// Opaque inverse of a merge, split, logical row/column edit, or restoration.
 ///
 /// Produced only by transaction application. Applying it requires every
@@ -36,8 +39,38 @@ pub(super) fn expected_parents(
     table: NodeId,
     expected: &[Node],
 ) -> Result<BTreeMap<NodeId, NodeId>> {
+    expected_parents_from(table, expected, |id| store.get(id))
+}
+
+/// Reads the proposed exchange without cloning or mutating the whole store.
+/// Replacement payloads win; removed-only identities are absent. Parent-chain
+/// capture may fail, so it must finish before the working map is changed.
+pub(super) fn expected_parents_after_exchange(
+    store: &NodeStore,
+    table: NodeId,
+    expected: &[Node],
+    replacement: &[Node],
+) -> Result<BTreeMap<NodeId, NodeId>> {
+    let removed: BTreeSet<_> = expected.iter().map(Node::id).collect();
+    let replacements: BTreeMap<_, _> = replacement.iter().map(|node| (node.id(), node)).collect();
+    expected_parents_from(table, replacement, |id| {
+        replacements.get(&id).copied().or_else(|| {
+            if removed.contains(&id) {
+                None
+            } else {
+                store.get(id)
+            }
+        })
+    })
+}
+
+fn expected_parents_from<'a>(
+    table: NodeId,
+    expected: &[Node],
+    get: impl Fn(NodeId) -> Option<&'a Node>,
+) -> Result<BTreeMap<NodeId, NodeId>> {
     if !matches!(
-        store.get(table).ok_or(Error::UnknownNode)?.kind(),
+        get(table).ok_or(Error::UnknownNode)?.kind(),
         NodeKind::Table
     ) {
         return Err(Error::InvalidTableStructure);
@@ -46,7 +79,7 @@ pub(super) fn expected_parents(
     let mut seen = BTreeSet::from([table]);
     let mut pending = VecDeque::from([table]);
     while let Some(parent) = pending.pop_front() {
-        let node = store.get(parent).ok_or(Error::UnknownNode)?;
+        let node = get(parent).ok_or(Error::UnknownNode)?;
         let children = node.content().as_children().into_iter().flatten().copied();
         let atoms = node
             .content()

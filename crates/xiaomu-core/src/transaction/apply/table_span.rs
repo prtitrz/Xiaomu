@@ -316,12 +316,13 @@ impl ApplyContext {
         edit: TableCellRestore,
         next_id: u64,
     ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
-        let next = self.store.exchange(&edit.expected, &edit.replacement)?;
-        let parents = crate::transaction::table_restore::expected_parents(
-            &next,
+        let parents = crate::transaction::table_restore::expected_parents_after_exchange(
+            &self.store,
             edit.table,
+            &edit.expected,
             &edit.replacement,
         )?;
+        self.store.exchange_mut(&edit.expected, &edit.replacement)?;
         let inverse = TableCellRestore {
             table: edit.table,
             expected: edit.replacement,
@@ -330,7 +331,6 @@ impl ApplyContext {
             maps: edit.inverse_maps,
             inverse_maps: edit.maps.clone(),
         };
-        self.store = next;
         self.next_node_id = next_id;
         Ok((
             edit.maps,
