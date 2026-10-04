@@ -4,6 +4,10 @@ use super::intent::{HistoryPolicy, PlannedAction};
 use super::*;
 use xiaomu_core::selection::TextSelection;
 
+#[cfg(test)]
+#[path = "cell_paste_boundary_tests.rs"]
+mod cell_paste_boundary_tests;
+
 impl DocumentSession {
     /// Applies one typed editing intent.
     ///
@@ -50,9 +54,16 @@ impl DocumentSession {
             return Err(SessionError::UnsupportedEdit);
         }
         if let EditIntent::PasteSlice { slice } = intent
-            && slice.is_closed()
+            && !slice.allows_default_fitting()
         {
-            return Err(SessionError::ClipboardClosedUnsupported);
+            // Host policy has already had its chance to provide an exact plan.
+            // A CellRange's open 1/1 Table carrier must not enter the historical
+            // table-root fitter or collapse a target rectangle first.
+            return Err(if slice.is_closed() {
+                SessionError::ClipboardClosedUnsupported
+            } else {
+                SessionError::UnsupportedTableOperation
+            });
         }
         // Policy has already seen the logical command. Normalize only inside
         // default dispatch, so hosts never need to guess a clipboard's origin.

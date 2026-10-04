@@ -106,10 +106,11 @@ impl DocumentView {
                     if self.route_code_slice_command(&slice, window, cx) {
                         return;
                     }
-                    if !slice.is_closed() {
+                    if slice.allows_default_fitting() {
                         // Preserve the original plain-code default only for
-                        // open slices. Closed whole-root data must keep its
-                        // structured meaning unless the host opts into text.
+                        // ordinary open slices. Whole roots and CellRange
+                        // carriers retain their boundary unless the host
+                        // explicitly routes them to text above.
                         let text = normalize_multiline_paste_text(slice.plain_text());
                         if !text.is_empty() {
                             self.apply_intent(EditIntent::PasteText { text }, window, cx);
@@ -148,3 +149,7 @@ mod export_tests;
 #[cfg(test)]
 #[path = "clipboard_native_tests.rs"]
 mod native_tests;
+
+#[cfg(test)]
+#[path = "cell_carrier_paste_tests.rs"]
+mod cell_carrier_paste_tests;

@@ -23,6 +23,25 @@ impl ClipboardSlice {
         self.closed || self.source_boundary.is_some() || self.text_projection.is_some()
     }
 
+    /// Whether source provenance permits the default generic paste fitter.
+    ///
+    /// This is an admission check, not a promise that a payload fits a target.
+    /// Historical open fragments and explicit ordinary Open fragments retain
+    /// their existing fitting rules. WholeRoots needs a host-aware whole-block
+    /// plan. CellRange is open 1/1 and its Table DTO is only a transport carrier;
+    /// neither Rows nor Table root form grants ordinary table-root semantics.
+    /// Frontends must apply this same check before default text flattening.
+    /// An explicit host policy/command route may handle a rejected boundary.
+    #[must_use]
+    pub const fn allows_default_fitting(&self) -> bool {
+        match self.source_boundary {
+            None | Some(ClipboardSourceBoundary::Open) => !self.closed,
+            Some(
+                ClipboardSourceBoundary::WholeRoots | ClipboardSourceBoundary::CellRange { .. },
+            ) => false,
+        }
+    }
+
     pub(crate) fn set_export(
         &mut self,
         boundary: ClipboardSourceBoundary,

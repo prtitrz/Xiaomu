@@ -35,6 +35,13 @@ CellRange 内部仍以一个有效 Table DTO 承载实际 origin rows；Rows 标
 解码要求一个完整有效的 Table carrier；错误 closed/depth/root 组合、额外 roots
 以及历史版本携带新字段均拒绝。
 
+`ClipboardSlice::allows_default_fitting` 集中处理消费端来源准入：只有历史
+open 切片和普通 Open 来源可以进入原有默认拟合。WholeRoots 沿原 closed
+门禁；CellRange 的 Rows/Table 两种形式都要求显式宿主处理，默认返回
+`UnsupportedTableOperation`。该检查先于默认 marks/history/cell-range 收敛，
+GPUI 默认 Code 文本降级也使用同一检查；显式 host Apply 或 Code router
+仍可验证完整来源后接管。Paste 拒绝不会清空已有剪贴板。
+
 ## 可重算平台文本
 
 `TextBetweenLfV1` 对应已测宿主 `Fragment.textBetween(0, size, '\n', '\n')`：
