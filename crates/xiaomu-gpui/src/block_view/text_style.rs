@@ -9,11 +9,50 @@ pub(super) use font_family::FontCatalog;
 
 use cssparser::{Color, Parser, ParserInput};
 use gpui::{
-    Font, FontStyle, FontWeight, Hsla, StrikethroughStyle, TextRun, UnderlineStyle, px, rgba,
+    Font, FontStyle, FontWeight, Hsla, Pixels, StrikethroughStyle, TextRun, UnderlineStyle, Window,
+    px, rgba,
 };
 use xiaomu_core::document::StringAttribute;
 
 use super::DisplaySegment;
+use crate::code_presentation::CodeBlockPresentation;
+
+/// Resolve block defaults once. The resulting shaped layout owns the same
+/// font size and line height for paint, selection, pointer and native IME.
+pub(super) struct BlockTextStyle {
+    pub font: Font,
+    pub font_size: Pixels,
+    pub color: Hsla,
+    pub line_height: Pixels,
+}
+
+pub(super) fn block_text_style(
+    window: &Window,
+    code: Option<&CodeBlockPresentation>,
+    fonts: &FontCatalog<'_>,
+) -> BlockTextStyle {
+    let inherited = window.text_style();
+    let mut style = BlockTextStyle {
+        font: inherited.font(),
+        font_size: inherited.font_size.to_pixels(window.rem_size()),
+        color: inherited.color,
+        line_height: window.line_height(),
+    };
+    if let Some(code) = code {
+        // Keep native fallback support for CJK/emoji. A platform with no
+        // catalog match still receives an explicit monospace family request.
+        style.font.family = "monospace".into();
+        style.font = fonts.apply(&code.font_family, &style.font);
+        // In the original CSS the 1.55 belongs to the parent `pre`. Its
+        // body-sized strut sets a minimum line box, even though `code` is
+        // .88em. Keep that minimum rather than shrinking it a second time.
+        // Native baseline/font-fallback raster parity is a separate concern.
+        style.line_height = style.font_size * CodeBlockPresentation::LINE_HEIGHT;
+        style.font_size *= CodeBlockPresentation::FONT_SCALE;
+        style.color = code.text_color.unwrap_or(style.color);
+    }
+    style
+}
 
 fn css_color(value: &str) -> Option<Hsla> {
     let mut input = ParserInput::new(value);

@@ -1,8 +1,8 @@
-//! Clipboard actions retain platform transport and route only ordinary text.
+//! Clipboard actions preserve transport identity before optional host routing.
 
 use super::DocumentView;
 use crate::block_view::{ClipboardCopy, ClipboardCut, ClipboardPaste};
-use crate::editor_commands::EditorCommand;
+use crate::editor_commands::{CodePasteSource, EditorCommand};
 use crate::input::platform_clipboard::{PlatformClipboard, PlatformClipboardContent};
 use gpui::{Context, Window};
 use xiaomu_core::document::NodeKind;
@@ -50,7 +50,20 @@ impl DocumentView {
         };
         let code_block = matches!(self.focused_node_kind(), Some(NodeKind::CodeBlock));
         match content {
-            PlatformClipboardContent::Image { format, bytes } => {
+            PlatformClipboardContent::Image {
+                format,
+                bytes,
+                plain_text,
+            } => {
+                // Hosts may explicitly prefer nonempty raw text in a code
+                // target even when the clipboard also offers image data.
+                // Default still reaches the unchanged image path below.
+                if code_block
+                    && let Some(raw) = plain_text.as_deref().filter(|raw| !raw.is_empty())
+                    && self.route_code_paste_command(raw, CodePasteSource::PlatformText, window, cx)
+                {
+                    return;
+                }
                 let selection = self.session.borrow().selection();
                 if code_block
                     || !selection.is_collapsed()
@@ -78,23 +91,31 @@ impl DocumentView {
                     Err(error) => eprintln!("xiaomu: image import failed: {error:?}"),
                 }
             }
-            PlatformClipboardContent::Structured(slice) if code_block && !slice.is_closed() => {
-                // CodeBlock is a plain-code surface. Xiaomu-native rich
-                // structure is flattened to the same interoperable text the
-                // system clipboard exposes, preserving canonical LF while
-                // discarding paragraph/list/mark semantics.
-                let text = normalize_multiline_paste_text(slice.plain_text());
-                if !text.is_empty() {
-                    self.apply_intent(EditIntent::PasteText { text }, window, cx);
-                }
-            }
             PlatformClipboardContent::Structured(slice) => {
+                if code_block {
+                    if self.route_code_slice_command(&slice, window, cx) {
+                        return;
+                    }
+                    if !slice.is_closed() {
+                        // Preserve the original plain-code default only for
+                        // open slices. Closed whole-root data must keep its
+                        // structured meaning unless the host opts into text.
+                        let text = normalize_multiline_paste_text(slice.plain_text());
+                        if !text.is_empty() {
+                            self.apply_intent(EditIntent::PasteText { text }, window, cx);
+                        }
+                        return;
+                    }
+                }
                 self.apply_intent(EditIntent::PasteSlice { slice }, window, cx);
             }
             PlatformClipboardContent::Text(text) => {
-                if !code_block
-                    && self.route_editor_command(EditorCommand::PlainTextPaste(&text), window, cx)
-                {
+                let consumed = if code_block {
+                    self.route_code_paste_command(&text, CodePasteSource::PlatformText, window, cx)
+                } else {
+                    self.route_editor_command(EditorCommand::PlainTextPaste(&text), window, cx)
+                };
+                if consumed {
                     return;
                 }
                 let text = if code_block {

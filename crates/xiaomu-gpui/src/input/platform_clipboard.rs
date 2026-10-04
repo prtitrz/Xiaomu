@@ -17,7 +17,13 @@ pub(crate) enum PlatformClipboardContent {
     /// Foreign, stale, malformed, or ordinary plain text.
     Text(String),
     /// Encoded pixels, imported by the host before any document edit.
-    Image { format: AssetFormat, bytes: Vec<u8> },
+    Image {
+        format: AssetFormat,
+        bytes: Vec<u8>,
+        /// Preserve coexisting text for an opt-in code-target route. Merely
+        /// retaining it does not change the default image-first precedence.
+        plain_text: Option<String>,
+    },
 }
 
 /// Clipboard adapter backed by the GPUI app clipboard.
@@ -64,6 +70,10 @@ impl<'a> PlatformClipboard<'a> {
 
     /// Reads structured Xiaomu content when valid, otherwise plain text.
     pub(crate) fn read_content(&self) -> Option<PlatformClipboardContent> {
+        #[cfg(test)]
+        if let Some(content) = mixed_tests::take_content() {
+            return Some(content);
+        }
         let item = self.app.read_from_clipboard()?;
         decode_item(item)
     }
@@ -105,7 +115,15 @@ fn decode_item(item: gpui::ClipboardItem) -> Option<PlatformClipboardContent> {
     {
         return Some(PlatformClipboardContent::Structured(slice));
     }
-    for entry in item.into_entries() {
+    decode_fallback(text, item.into_entries())
+}
+
+/// Retains image-first transport while keeping any accompanying raw text.
+fn decode_fallback(
+    text: Option<String>,
+    entries: impl IntoIterator<Item = gpui::ClipboardEntry>,
+) -> Option<PlatformClipboardContent> {
+    for entry in entries {
         if let gpui::ClipboardEntry::Image(image) = entry {
             let format = match image.format {
                 gpui::ImageFormat::Png => AssetFormat::Png,
@@ -115,6 +133,7 @@ fn decode_item(item: gpui::ClipboardItem) -> Option<PlatformClipboardContent> {
             return Some(PlatformClipboardContent::Image {
                 format,
                 bytes: image.bytes,
+                plain_text: text,
             });
         }
     }
@@ -133,11 +152,55 @@ mod tests {
         ] {
             let item =
                 gpui::ClipboardItem::new_image(&gpui::Image::from_bytes(input, vec![1, 2, 3]));
-            let Some(PlatformClipboardContent::Image { format, bytes }) = decode_item(item) else {
+            let Some(PlatformClipboardContent::Image {
+                format,
+                bytes,
+                plain_text,
+            }) = decode_item(item)
+            else {
                 panic!("image lost")
             };
             assert_eq!(format, expected);
             assert_eq!(bytes, [1, 2, 3]);
+            assert_eq!(plain_text, None);
+        }
+    }
+
+    #[test]
+    fn mixed_image_fallback_retains_exact_nonempty_empty_and_absent_text() {
+        for format in [gpui::ImageFormat::Png, gpui::ImageFormat::Jpeg] {
+            for text in [None, Some(""), Some(" "), Some("甲\r\n乙\r丙\n丁\t")] {
+                let entries = [gpui::ClipboardEntry::Image(gpui::Image::from_bytes(
+                    format,
+                    vec![1, 2, 3],
+                ))];
+                let Some(PlatformClipboardContent::Image {
+                    plain_text, bytes, ..
+                }) = decode_fallback(text.map(str::to_owned), entries)
+                else {
+                    panic!("mixed transport must still default to image");
+                };
+                assert_eq!(plain_text.as_deref(), text);
+                assert_eq!(bytes, [1, 2, 3]);
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_mixed_image_keeps_original_text_fallback() {
+        for text in [None, Some(""), Some("raw\r\ntext")] {
+            let entries = [gpui::ClipboardEntry::Image(gpui::Image::from_bytes(
+                gpui::ImageFormat::Svg,
+                vec![1],
+            ))];
+            let content = decode_fallback(text.map(str::to_owned), entries);
+            match (text, content) {
+                (None, None) => {}
+                (Some(expected), Some(PlatformClipboardContent::Text(actual))) => {
+                    assert_eq!(actual, expected)
+                }
+                _ => panic!("unsupported pixels must not invent or discard text"),
+            }
         }
     }
 
@@ -298,3 +361,7 @@ mod cut_tests {
         assert_eq!(session.document().node(image), Some(&before_node));
     }
 }
+
+#[cfg(test)]
+#[path = "platform_clipboard_mixed_tests.rs"]
+mod mixed_tests;

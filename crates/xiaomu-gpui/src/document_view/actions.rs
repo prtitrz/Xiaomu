@@ -17,7 +17,7 @@ use crate::block_view::{
 };
 
 use crate::block_view::ParagraphView;
-use crate::editor_commands::EditorCommand;
+use crate::editor_commands::{EditorCommand, EnterSource, PrimaryModifierEnter};
 
 use super::{DocumentView, NavStep, markers, navigation};
 
@@ -127,6 +127,9 @@ impl DocumentView {
     }
 
     pub(crate) fn down(&mut self, _: &Down, window: &mut Window, cx: &mut Context<Self>) {
+        if self.route_arrow_down(window, cx) {
+            return;
+        }
         self.navigate(NavStep::Down, false, window, cx);
     }
 
@@ -233,6 +236,9 @@ impl DocumentView {
     }
 
     pub(crate) fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        if self.route_enter_command(EnterSource::Plain, window, cx) {
+            return;
+        }
         let plan = self
             .focused_node_kind()
             .as_ref()
@@ -252,7 +258,21 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.route_enter_command(EnterSource::Shift, window, cx) {
+            return;
+        }
         self.apply_intent(EditIntent::insert_line_break(), window, cx);
+    }
+
+    pub(crate) fn primary_modifier_enter(
+        &mut self,
+        _: &PrimaryModifierEnter,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.route_enter_command(EnterSource::PrimaryModifier, window, cx) {
+            cx.propagate();
+        }
     }
 
     pub(crate) fn tab_indent(

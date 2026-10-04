@@ -27,12 +27,13 @@ use crate::block_view::{
     SelectRight, SelectUp, SharedSession, ShiftTabIndent, TabIndent, ToggleBold, ToggleCode,
     ToggleItalic, ToggleStrike, ToggleUnderline, Undo, Up,
 };
+use crate::code_presentation::CodeBlockPresentation;
 use crate::document_view::{
     DocumentView,
     actions::HardBreak,
     cell_selection::{EscapeCellRange, SelectCell},
 };
-use crate::editor_commands::EditorCommandRouter;
+use crate::editor_commands::{EditorCommandRouter, PrimaryModifierEnter};
 use crate::image_block::SharedImageAssetService;
 use crate::inline_atom::InlineAtomRendererRegistry;
 use crate::list_marker::ListMarkerLabelProvider;
@@ -71,6 +72,7 @@ pub struct EditorInstance {
     atom_capability: Option<SharedAtomCapability>,
     asset_service: Option<SharedImageAssetService>,
     command_router: Option<Rc<dyn EditorCommandRouter>>,
+    code_block_presentation: Option<CodeBlockPresentation>,
     list_marker_provider: Option<Rc<dyn ListMarkerLabelProvider>>,
 }
 
@@ -116,6 +118,7 @@ impl EditorInstance {
             atom_capability: hooks.atom_capability,
             asset_service: hooks.asset_service,
             command_router: None,
+            code_block_presentation: None,
             list_marker_provider: None,
         }
     }
@@ -124,6 +127,16 @@ impl EditorInstance {
     #[must_use]
     pub fn with_command_router(mut self, router: Rc<dyn EditorCommandRouter>) -> Self {
         self.command_router = Some(router);
+        self
+    }
+
+    /// Installs optional visual code-block presentation for this instance.
+    ///
+    /// The default remains Xiaomu's original appearance. Only CodeBlock
+    /// rendering changes; canonical content and sibling instances are untouched.
+    #[must_use]
+    pub fn with_code_block_presentation(mut self, presentation: CodeBlockPresentation) -> Self {
+        self.code_block_presentation = Some(presentation);
         self
     }
 
@@ -160,6 +173,7 @@ impl EditorInstance {
             view.set_asset_service(service.clone());
         }
         view.set_command_router(self.command_router.clone());
+        view.set_code_block_presentation(self.code_block_presentation.clone());
         view.set_list_marker_provider(self.list_marker_provider.clone());
         view
     }
@@ -217,6 +231,19 @@ pub fn bind_default_editor_keys(cx: &mut App) {
         KeyBinding::new("ctrl-y", Redo, None),
         KeyBinding::new("cmd-s", SaveDocument, None),
         KeyBinding::new("ctrl-s", SaveDocument, None),
+    ]);
+}
+
+/// Opts editor views into Ctrl/Cmd-Enter command routing.
+///
+/// This is deliberately separate from [`bind_default_editor_keys`]. Hosts
+/// install it only when they want `EditorCommandRouter::route_enter` to see
+/// primary-modifier Enter. A router returning `Default`, or no router, lets
+/// the action propagate to outer handlers without changing the document.
+pub fn bind_primary_modifier_enter_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("ctrl-enter", PrimaryModifierEnter, Some("XiaomuDocument")),
+        KeyBinding::new("cmd-enter", PrimaryModifierEnter, Some("XiaomuDocument")),
     ]);
 }
 
