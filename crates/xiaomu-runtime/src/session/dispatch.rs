@@ -34,6 +34,11 @@ impl DocumentSession {
         if matches!(intent, EditIntent::InsertLineBreak) {
             return self.apply_default_intent(&EditIntent::PasteText { text: "\n".into() });
         }
+        // An explicitly addressed checkbox never edits or collapses the
+        // current selection, including rectangular and structural selections.
+        if let EditIntent::SetTaskChecked { item, checked } = intent {
+            return self.set_task_checked(*item, *checked);
+        }
         if let Some(outcome) = self.apply_cell_range_intent(intent)? {
             return Ok(outcome);
         }
@@ -313,6 +318,7 @@ impl DocumentSession {
             | EditIntent::ToggleMark { .. }
             | EditIntent::SetMark { .. }
             | EditIntent::RemoveMark { .. }
+            | EditIntent::SetTaskChecked { .. }
             | EditIntent::InsertLineBreak
             | EditIntent::MoveToNextCell
             | EditIntent::MoveToPreviousCell
