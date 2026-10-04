@@ -39,6 +39,8 @@ pub enum SessionError {
     /// Task-containing clipboard slices require an explicit task-aware policy
     /// plan; default fitting must not downgrade them to ordinary text/lists.
     UnsupportedEdit,
+    /// Legacy physical-cell commands cannot safely address merged table cells.
+    UnsupportedTableOperation,
     /// An optional input-rule reversal exceeds the bounded session budget,
     /// or contains a new Core payload shape this Runtime cannot account for.
     ///
@@ -85,6 +87,9 @@ impl fmt::Display for SessionError {
             }
             Self::UnsupportedEdit => {
                 f.write_str("edit requires an explicit semantics-preserving planner")
+            }
+            Self::UnsupportedTableOperation => {
+                f.write_str("table operation requires a span-aware planner")
             }
             Self::InputRuleUndoBudgetExceeded => {
                 f.write_str("input-rule reversal exceeds the supported session payload budget")

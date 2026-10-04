@@ -220,7 +220,7 @@ pub(crate) fn allows_child(parent: &NodeKind, child: &NodeKind) -> bool {
         NodeKind::BulletList | NodeKind::OrderedList => matches!(child, NodeKind::ListItem),
         NodeKind::TaskList => matches!(child, NodeKind::TaskItem),
         NodeKind::Table => matches!(child, NodeKind::TableRow),
-        NodeKind::TableRow => matches!(child, NodeKind::TableCell),
+        NodeKind::TableRow => child.is_table_cell(),
         NodeKind::TaskItem => !matches!(
             child,
             NodeKind::Document
@@ -228,18 +228,23 @@ pub(crate) fn allows_child(parent: &NodeKind, child: &NodeKind) -> bool {
                 | NodeKind::TaskItem
                 | NodeKind::TableRow
                 | NodeKind::TableCell
+                | NodeKind::TableHeader
                 | NodeKind::InlineAtom(_)
         ),
-        NodeKind::Document | NodeKind::Quote | NodeKind::ListItem | NodeKind::TableCell => {
-            !matches!(
-                child,
-                NodeKind::Document
-                    | NodeKind::ListItem
-                    | NodeKind::TaskItem
-                    | NodeKind::TableRow
-                    | NodeKind::InlineAtom(_)
-            )
-        }
+        NodeKind::Document
+        | NodeKind::Quote
+        | NodeKind::ListItem
+        | NodeKind::TableCell
+        | NodeKind::TableHeader => !matches!(
+            child,
+            NodeKind::Document
+                | NodeKind::ListItem
+                | NodeKind::TaskItem
+                | NodeKind::TableRow
+                | NodeKind::TableCell
+                | NodeKind::TableHeader
+                | NodeKind::InlineAtom(_)
+        ),
         NodeKind::Custom(_) => !matches!(child, NodeKind::InlineAtom(_)),
         NodeKind::Paragraph
         | NodeKind::Heading(_)

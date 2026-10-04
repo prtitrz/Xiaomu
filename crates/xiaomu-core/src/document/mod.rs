@@ -16,6 +16,8 @@ mod node_id;
 mod snapshot;
 mod store;
 mod string_attribute;
+mod table_attrs;
+mod table_grid;
 mod text_run;
 mod text_style;
 mod version;
@@ -36,6 +38,12 @@ pub use node_id::NodeId;
 pub use snapshot::XiaomuDocument;
 pub use store::{NodeStore, NodeStoreBuilder};
 pub use string_attribute::StringAttribute;
+pub use table_attrs::{TableAttribute, TableCellAttrs, TableColumnWidths};
+pub(crate) use table_grid::TableGridBudget;
+pub use table_grid::{
+    CellPlacement, TABLE_MAX_GRID_BYTES, TABLE_MAX_LOGICAL_SLOTS, TABLE_MAX_PHYSICAL_CELLS,
+    TableGrid, TableRect,
+};
 pub use text_run::TextRun;
 pub use text_style::{TextStyleAttributes, TextStyleMark};
 pub use version::{DocumentRevision, DocumentVersion};

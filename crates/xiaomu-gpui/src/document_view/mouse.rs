@@ -139,6 +139,9 @@ impl DocumentView {
         let registry = self.registry.borrow();
         let mut nearest: Option<(NodeId, (Pixels, Pixels))> = None;
         for (node, bounds) in registry.iter() {
+            if navigation::spanning_table_ancestor(session.document(), *node).is_some() {
+                continue;
+            }
             if let Some(cell) = hit_cell
                 && !navigation::node_is_within(session.document(), *node, cell)
             {
@@ -192,7 +195,7 @@ impl DocumentView {
         }
 
         let session = self.session.borrow();
-        let blocks = navigation::text_blocks(session.document());
+        let blocks = super::table_guard::rendered_text_blocks(session.document());
         drop(session);
         let block = blocks.iter().find(|block| block.node == node)?;
         let clamped = raw.min(block.text().len());

@@ -308,6 +308,24 @@ impl ParagraphView {
             .unwrap_or_default()
     }
 
+    /// Reject a late native callback aimed at content this table renderer hides.
+    /// The handler can outlive child syncing or a host-restored selection.
+    pub(super) fn input_is_hidden_by_table(&self) -> bool {
+        let session = self.session.borrow();
+        crate::document_view::table_guard::selection_has_hidden_table_endpoint(
+            session.document(),
+            session.selection(),
+        ) || crate::document_view::navigation::spanning_table_ancestor(
+            session.document(),
+            self.node,
+        )
+        .is_some_and(|table| {
+            !self.range_input
+                || table != self.node
+                || session.selection().as_node_selection() != Some(self.node)
+        })
+    }
+
     fn apply_intent(&mut self, intent: EditIntent, cx: &mut Context<Self>) {
         self.apply_intent_with_selection(intent, None, cx);
     }
@@ -318,6 +336,10 @@ impl ParagraphView {
         selection: Option<xiaomu_runtime::session::DocumentSelection>,
         cx: &mut Context<Self>,
     ) {
+        if self.input_is_hidden_by_table() {
+            self.cancel_if_composing(cx);
+            return;
+        }
         let outcome = {
             let mut session = self.session.borrow_mut();
             match selection {

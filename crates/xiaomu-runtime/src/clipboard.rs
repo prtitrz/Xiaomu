@@ -15,7 +15,7 @@ pub use fragment::{
 };
 pub use wire::{ClipboardMetadataError, decode_metadata, encode_metadata};
 
-pub(crate) use fragment::validate_roots;
+pub(crate) use fragment::{require_unit_tables, validate_roots};
 pub(crate) use projection::slice_selection;
 
 /// Plain-text read/write seam between the editing layer and the platform.

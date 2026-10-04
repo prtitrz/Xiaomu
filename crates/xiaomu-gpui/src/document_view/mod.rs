@@ -25,6 +25,9 @@ pub(crate) mod mouse;
 pub(crate) mod navigation;
 mod node_selection;
 mod table_block;
+pub(crate) mod table_guard;
+#[cfg(test)]
+mod table_guard_tests;
 mod task_checkbox;
 mod vertical_geometry;
 mod visual_navigation;
@@ -234,6 +237,9 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.selection_has_hidden_table_endpoint() {
+            return;
+        }
         if self.focused_child_composing(window, cx) {
             #[cfg(debug_assertions)]
             eprintln!("xiaomu: editing action ignored during composition");
@@ -466,7 +472,7 @@ impl DocumentView {
         self.sync_range_input(cx);
         let nodes: Vec<NodeId> = {
             let session = self.session.borrow();
-            navigation::text_blocks(session.document())
+            table_guard::rendered_text_blocks(session.document())
                 .into_iter()
                 .map(|block| block.node)
                 .collect()
@@ -516,8 +522,11 @@ impl Render for DocumentView {
         // A host policy may commit into another node/All/cell range. Capture
         // ownership before syncing drops the old proxy, and transfer focus
         // only if that proxy owned it, including range-to-range transitions.
-        let restore_focus = self.range_input_is_focused(window, cx)
-            && self.range_input.as_ref().map(|(anchor, _)| *anchor) != self.range_input_anchor();
+        let restore_focus = (self.selection_has_hidden_table_endpoint()
+            && self.focused_child(window, cx).is_some())
+            || (self.range_input_is_focused(window, cx)
+                && self.range_input.as_ref().map(|(anchor, _)| *anchor)
+                    != self.range_input_anchor());
         self.sync_children(cx);
         if restore_focus {
             self.route_focus(window, cx);

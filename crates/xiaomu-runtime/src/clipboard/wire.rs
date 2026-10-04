@@ -50,6 +50,9 @@ const VERSION_TYPED_ATOMS: u32 = 10;
 const VERSION_CLOSED_ROOTS: u32 = 11;
 // Typed task containers preserve checked state and an explicit boundary flag.
 const VERSION_TASK_LISTS: u32 = 12;
+// Header identity and geometry attributes are semantic. Older readers must
+// reject them rather than reinterpret physical origin rows as unit cells.
+const VERSION_TABLE_GEOMETRY: u32 = 13;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -99,7 +102,9 @@ impl std::error::Error for ClipboardMetadataError {}
 ///
 /// The plain-text fallback is deliberately not duplicated in the metadata;
 /// callers put [`ClipboardSlice::plain_text`] in the platform text flavor.
-/// Task list/item fragments encode as v12 with an explicit open/closed flag.
+/// TableHeader or explicit colspan/rowspan/colwidth attributes encode as v13,
+/// preserving physical origin rows and an explicit open/closed flag.
+/// Otherwise, task list/item fragments encode as v12 with that boundary flag.
 /// Otherwise, explicit whole-root source selections encode as v11 with closed boundaries.
 /// Otherwise, built-in hard breaks or independently marked inline atoms encode as v10,
 /// preserving typed kind identity and the complete mark set. Otherwise,
@@ -121,7 +126,9 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
         .iter()
         .map(WireNode::from_node)
         .collect::<Result<Vec<_>, _>>()?;
-    let version = if roots.iter().any(WireNode::carries_tasks) {
+    let version = if roots.iter().any(WireNode::carries_table_geometry) {
+        VERSION_TABLE_GEOMETRY
+    } else if roots.iter().any(WireNode::carries_tasks) {
         VERSION_TASK_LISTS
     } else if slice.is_closed() {
         VERSION_CLOSED_ROOTS
@@ -144,7 +151,7 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
         format: FORMAT.to_owned(),
         version,
         roots,
-        closed: if version == VERSION_TASK_LISTS {
+        closed: if version >= VERSION_TASK_LISTS {
             Some(slice.is_closed())
         } else {
             slice.is_closed().then_some(true)
@@ -165,7 +172,7 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
 /// paste the supplied plain text normally. An older envelope carrying a
 /// newer feature (v4 tables, v5 row attributes, pre-v7 null attributes, or
 /// pre-v8 extended link marks, pre-v9 text-style marks, pre-v10 typed/marked atoms,
-/// or pre-v12 task nodes)
+/// pre-v12 task nodes, or pre-v13 header/table geometry)
 /// is also rejected. Unknown attribute variants reject the entire fragment
 /// rather than silently dropping values. Historical v1-v3 envelopes remain
 /// unsupported, as before the null-attribute extension. All versions are
@@ -190,13 +197,19 @@ pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlic
                 | VERSION_TYPED_ATOMS
                 | VERSION_CLOSED_ROOTS
                 | VERSION_TASK_LISTS
+                | VERSION_TABLE_GEOMETRY
         )
     {
         return None;
     }
-    if (envelope.version == VERSION_TASK_LISTS && envelope.closed.is_none())
+    if (envelope.version >= VERSION_TASK_LISTS && envelope.closed.is_none())
         || (envelope.version == VERSION_CLOSED_ROOTS && envelope.closed != Some(true))
         || (envelope.version < VERSION_CLOSED_ROOTS && envelope.closed.is_some())
+    {
+        return None;
+    }
+    if envelope.version < VERSION_TABLE_GEOMETRY
+        && envelope.roots.iter().any(WireNode::carries_table_geometry)
     {
         return None;
     }
@@ -241,7 +254,7 @@ pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlic
     } else {
         match &roots[..] {
             [root] if root.content().as_table().is_some() => {
-                ClipboardSlice::from_table(root.clone())
+                ClipboardSlice::from_table(root.clone()).ok()?
             }
             _ => ClipboardSlice::from_roots(roots),
         }
@@ -279,6 +292,24 @@ struct WireNode {
 }
 
 impl WireNode {
+    fn carries_table_geometry(&self) -> bool {
+        if matches!(self.kind, WireKind::TableHeader)
+            || (matches!(self.kind, WireKind::TableCell)
+                && ["colspan", "rowspan", "colwidth"]
+                    .iter()
+                    .any(|key| self.attrs.contains_key(*key)))
+        {
+            return true;
+        }
+        match &self.content {
+            WireContent::Children { children } => children.iter().any(Self::carries_table_geometry),
+            WireContent::Table { rows, .. } => {
+                rows.iter().flatten().any(Self::carries_table_geometry)
+            }
+            WireContent::Inline { .. } | WireContent::Atomic => false,
+        }
+    }
+
     fn carries_tasks(&self) -> bool {
         if matches!(self.kind, WireKind::TaskList | WireKind::TaskItem) {
             return true;
@@ -504,7 +535,7 @@ enum WireContent {
     Children {
         children: Vec<WireNode>,
     },
-    /// Rectangular table payload (v5): rows of cell nodes, reading order.
+    /// Physical origin rows (v5+); v13 permits headers and spanning origins.
     Table {
         rows: Vec<Vec<WireNode>>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -535,6 +566,7 @@ enum WireKind {
     Table,
     TableRow,
     TableCell,
+    TableHeader,
     Custom(String),
 }
 
@@ -555,6 +587,7 @@ impl WireKind {
             NodeKind::Table => Ok(Self::Table),
             NodeKind::TableRow => Ok(Self::TableRow),
             NodeKind::TableCell => Ok(Self::TableCell),
+            NodeKind::TableHeader => Ok(Self::TableHeader),
             NodeKind::Custom(key) => Ok(Self::Custom(key.clone())),
             NodeKind::Document | _ => Err(ClipboardMetadataError::unsupported()),
         }
@@ -578,6 +611,7 @@ impl WireKind {
             Self::Table => Ok(NodeKind::Table),
             Self::TableRow => Ok(NodeKind::TableRow),
             Self::TableCell => Ok(NodeKind::TableCell),
+            Self::TableHeader => Ok(NodeKind::TableHeader),
             Self::Custom(key) => {
                 NodeKind::custom(key).map_err(|_| ClipboardMetadataError::invalid())
             }

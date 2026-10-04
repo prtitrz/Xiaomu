@@ -64,10 +64,12 @@ pub enum NodeKind {
     Image,
     /// Table container of table rows (P5.1).
     Table,
-    /// One row of a table; children are table cells.
+    /// One row of a table; children are body or header cells.
     TableRow,
     /// One cell of a table row; children are ordinary blocks.
     TableCell,
+    /// A semantic header cell; children have the same shape as body cells.
+    TableHeader,
     /// Inline atom with a typed built-in identity or stable extension key.
     InlineAtom(AtomKind),
     /// Extension-defined block kind preserved by its stable key.
@@ -75,6 +77,12 @@ pub enum NodeKind {
 }
 
 impl NodeKind {
+    /// Returns whether this kind is a body or header table cell.
+    #[must_use]
+    pub const fn is_table_cell(&self) -> bool {
+        matches!(self, Self::TableCell | Self::TableHeader)
+    }
+
     /// Creates an extension-defined node kind from a non-empty stable key.
     pub fn custom(key: impl Into<String>) -> Result<Self> {
         let key = key.into();

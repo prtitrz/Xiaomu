@@ -313,7 +313,8 @@ impl Budget {
             | NodeKind::Image
             | NodeKind::Table
             | NodeKind::TableRow
-            | NodeKind::TableCell => Ok(()),
+            | NodeKind::TableCell
+            | NodeKind::TableHeader => Ok(()),
             _ => Err(refused()),
         }
     }

@@ -214,11 +214,11 @@ pub enum ClipboardNodeContent {
     /// An atomic block captured whole: kind and attrs carry the semantics,
     /// there is no editable interior payload.
     Atomic,
-    /// A rectangular table selection (P5.5): rows of cell fragments in
-    /// reading order. Row wrappers are implied — every inner node is one
-    /// cell captured with its whole block content.
+    /// Table rows of physical cell origins in canonical reading order.
+    /// Row wrappers are implied; spans are carried by each origin's attrs.
+    /// Logical covered slots do not duplicate their origin node.
     Table {
-        /// The rectangle's rows, each holding exactly one fragment per cell.
+        /// Physical origin rows, each holding one fragment per canonical cell.
         rows: Vec<Vec<ClipboardNode>>,
         /// Attributes of each row, in the same order. Empty means legacy
         /// clipboard rows without attributes; otherwise one entry per row.
@@ -245,7 +245,7 @@ impl ClipboardNodeContent {
         }
     }
 
-    /// Returns the rectangular rows when this fragment node is a table.
+    /// Returns physical origin rows when this fragment node is a table.
     #[must_use]
     pub const fn as_table(&self) -> Option<&Vec<Vec<ClipboardNode>>> {
         match self {
@@ -392,39 +392,59 @@ impl ClipboardSlice {
     /// The plain-text fallback is TSV: cells joined by tabs, rows joined by
     /// newlines; a cell's internal block boundaries flatten to single spaces
     /// so the TSV grid stays machine-readable.
-    pub(crate) fn from_table(table: ClipboardNode) -> Self {
-        let rows = table.content().as_table().cloned().unwrap_or_default();
+    pub(crate) fn from_table(table: ClipboardNode) -> Result<Self> {
+        // Reuse Core's bounded occupancy map. Physical rows may be ragged
+        // when earlier cells cover them; they are never logical TSV columns.
+        let document = fragment_document(std::slice::from_ref(&table))?;
+        let table_id = document
+            .node(document.root())
+            .and_then(|node| node.content().as_children())
+            .and_then(|children| children.first())
+            .copied()
+            .ok_or(xiaomu_core::Error::InvalidTableStructure)?;
+        let grid = document.table_grid(table_id)?;
+        let rows = table
+            .content()
+            .as_table()
+            .ok_or(xiaomu_core::Error::InvalidTableStructure)?;
         let mut blocks = Vec::new();
-        for row in &rows {
+        for row in rows {
             for cell in row {
                 flatten_blocks(std::slice::from_ref(cell), &mut blocks);
             }
         }
-        let plain_text = rows
-            .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|cell| {
-                        let mut cell_blocks = Vec::new();
-                        flatten_blocks(std::slice::from_ref(cell), &mut cell_blocks);
-                        let mut parts = cell_blocks
-                            .iter()
-                            .map(|block| block.inline().plain_text())
-                            .collect::<Vec<_>>();
-                        parts.extend(collect_image_urls(std::slice::from_ref(cell)));
-                        parts.join(" ").replace(['\t', '\r', '\n'], " ")
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\t")
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        Self {
-            plain_text,
+        let mut output = Vec::with_capacity(grid.rows());
+        for (row, row_cells) in rows.iter().enumerate().take(grid.rows()) {
+            let mut cells = Vec::with_capacity(grid.columns());
+            for column in 0..grid.columns() {
+                let id = grid
+                    .slot(row, column)
+                    .ok_or(xiaomu_core::Error::InvalidTableStructure)?;
+                let origin = grid
+                    .placement(id)
+                    .ok_or(xiaomu_core::Error::InvalidTableStructure)?;
+                if origin.row() != row || origin.column() != column {
+                    cells.push(String::new());
+                    continue;
+                }
+                let cell = &row_cells[origin.physical_index()];
+                let mut cell_blocks = Vec::new();
+                flatten_blocks(std::slice::from_ref(cell), &mut cell_blocks);
+                let mut parts = cell_blocks
+                    .iter()
+                    .map(|block| block.inline().plain_text())
+                    .collect::<Vec<_>>();
+                parts.extend(collect_image_urls(std::slice::from_ref(cell)));
+                cells.push(parts.join(" ").replace(['\t', '\r', '\n'], " "));
+            }
+            output.push(cells.join("\t"));
+        }
+        Ok(Self {
+            plain_text: output.join("\n"),
             roots: vec![table],
             blocks,
             closed: false,
-        }
+        })
     }
 
     pub(crate) fn from_closed_roots(roots: Vec<ClipboardNode>) -> Self {
@@ -516,6 +536,10 @@ fn project_node(
 /// Detached atoms are inserted as fresh canonical inline-atom nodes, so the
 /// rebuilt tree passes full document validation exactly like a paste would.
 pub(crate) fn validate_roots(roots: &[ClipboardNode]) -> Result<()> {
+    fragment_document(roots).map(|_| ())
+}
+
+fn fragment_document(roots: &[ClipboardNode]) -> Result<XiaomuDocument> {
     let mut builder = NodeStoreBuilder::new();
     let children = roots
         .iter()
@@ -526,7 +550,37 @@ pub(crate) fn validate_roots(roots: &[ClipboardNode]) -> Result<()> {
         NodeAttrs::empty(),
         NodeContent::children(children),
     )?;
-    XiaomuDocument::new(root, builder.finish()).map(|_| ())
+    XiaomuDocument::new(root, builder.finish())
+}
+
+/// Reject merged source cells before any generic rich-fragment fitting.
+/// Internal slices bypass the wire decoder, so inspect every nested origin,
+/// including tables represented by ordinary Children rather than Table DTOs.
+pub(crate) fn require_unit_tables(
+    nodes: &[ClipboardNode],
+) -> std::result::Result<(), SessionError> {
+    for node in nodes {
+        if node.kind().is_table_cell() {
+            let attrs = xiaomu_core::document::TableCellAttrs::read(node.attrs())
+                .map_err(SessionError::Core)?;
+            attrs.validate_geometry().map_err(SessionError::Core)?;
+            if attrs.effective_colspan().map_err(SessionError::Core)? > 1
+                || attrs.effective_rowspan().map_err(SessionError::Core)? > 1
+            {
+                return Err(SessionError::UnsupportedTableOperation);
+            }
+        }
+        match node.content() {
+            ClipboardNodeContent::Children(children) => require_unit_tables(children)?,
+            ClipboardNodeContent::Table { rows, .. } => {
+                for row in rows {
+                    require_unit_tables(row)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn insert_fragment(builder: &mut NodeStoreBuilder, node: &ClipboardNode) -> Result<NodeId> {
