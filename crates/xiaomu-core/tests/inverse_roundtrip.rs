@@ -92,6 +92,47 @@ fn assert_round_trips(document: &XiaomuDocument, transaction: Transaction) {
 }
 
 #[test]
+fn deleting_marked_prefix_clears_new_right_neighbor_marks_on_undo() {
+    let (document, paragraph) = marked_fixture();
+    assert_round_trips(
+        &document,
+        Transaction::new(TransactionOrigin::UserInput).with_step(replace_text(paragraph, 0, 6, "")),
+    );
+}
+
+#[test]
+fn all_marked_run_boundary_replacements_restore_exact_marks_and_redo_identity() {
+    let (document, paragraph) = marked_fixture();
+    for start in [0, 3, 6, 9, 12, 14, 16] {
+        for end in [0, 3, 6, 9, 12, 14, 16]
+            .into_iter()
+            .filter(|end| *end >= start)
+        {
+            for text in ["", "x", "🙂中"] {
+                let transaction = Transaction::new(TransactionOrigin::UserInput)
+                    .with_step(replace_text(paragraph, start, end, text));
+                let applied = transaction.apply_with_changes(&document).unwrap();
+                let undone = applied
+                    .inverse()
+                    .apply_with_changes(applied.document())
+                    .unwrap();
+                assert_eq!(
+                    undone.document().store(),
+                    document.store(),
+                    "{start}..{end} {text:?}"
+                );
+                let redone = undone.inverse().apply(undone.document()).unwrap();
+                assert_eq!(
+                    redone.store(),
+                    applied.document().store(),
+                    "redo {start}..{end} {text:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn replace_text_at_run_end_boundary_round_trips() {
     // Regression: a non-empty replacement starting exactly at a run boundary
     // inherits the preceding run's marks; the inverse must strip exactly
