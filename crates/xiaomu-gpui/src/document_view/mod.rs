@@ -60,7 +60,7 @@ use gpui::{
     prelude::*, px,
 };
 
-use xiaomu_core::document::{ImageAttrs, ImageSource, NodeId, XiaomuDocument};
+use xiaomu_core::document::{ImageAttrs, ImageSource, NodeAttrs, NodeId, XiaomuDocument};
 use xiaomu_core::selection::InlinePoint;
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
@@ -159,6 +159,22 @@ impl DocumentView {
     /// Hosts changing a mounted view should notify its context afterward.
     pub fn set_measured_table_layout(&mut self, enabled: bool) {
         self.table_capability.borrow_mut().set_enabled(enabled);
+    }
+
+    /// Allows exact, visually inert metadata entries on measured table rows.
+    ///
+    /// The default empty map rejects every row attribute. Each actual row
+    /// entry must match an allowed key and value exactly; absent entries are
+    /// fine. The host owns their interpretation and wire encoding. This never
+    /// interprets, removes or rewrites canonical attributes and does not relax
+    /// table/cell presentation rules or enable measured layout by itself.
+    /// Every call revokes this instance's existing measurement admission and
+    /// requires a fresh layout, including for retained native input handlers.
+    /// Hosts changing a mounted view should notify its context afterward.
+    pub fn set_measured_table_row_metadata(&mut self, metadata: NodeAttrs) {
+        self.table_capability
+            .borrow_mut()
+            .set_row_metadata(metadata);
     }
 
     /// Captures this editor's current measured-table presentation admission.

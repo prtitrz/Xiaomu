@@ -24,12 +24,17 @@ use cache::CapabilityCache;
 #[path = "table_capability/cache_tests.rs"]
 mod cache_tests;
 
+#[cfg(test)]
+#[path = "table_capability/row_metadata_tests.rs"]
+mod row_metadata_tests;
+
 /// One shared state object retained by the document and every input handler.
 pub(crate) type SharedTableCapability = Rc<RefCell<TableCapability>>;
 
 /// Exact admission inputs, deliberately excluding revision and inline content.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TableCapabilityKey {
+    configuration: u64,
     root: NodeId,
     grid: TableGrid,
     presentation: Vec<(NodeId, NodeKind, NodeAttrs)>,
@@ -39,6 +44,8 @@ pub(crate) struct TableCapabilityKey {
 #[derive(Debug, Default)]
 pub(crate) struct TableCapability {
     enabled: bool,
+    row_metadata: NodeAttrs,
+    configuration: u64,
     cache: RefCell<CapabilityCache>,
 }
 
@@ -51,6 +58,16 @@ impl TableCapability {
     /// Even a repeated setting requires a fresh successful measurement.
     pub(crate) fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
+        self.invalidate_configuration();
+    }
+
+    pub(crate) fn set_row_metadata(&mut self, metadata: NodeAttrs) {
+        self.row_metadata = metadata;
+        self.invalidate_configuration();
+    }
+
+    fn invalidate_configuration(&mut self) {
+        self.configuration = self.configuration.wrapping_add(1);
         *self.cache.get_mut() = CapabilityCache::default();
     }
 
@@ -60,7 +77,9 @@ impl TableCapability {
         document: &XiaomuDocument,
         table: NodeId,
     ) -> Result<Rc<TableCapabilityKey>, TableLayoutError> {
-        self.cache.borrow_mut().key(document, table)
+        self.cache
+            .borrow_mut()
+            .key(document, table, &self.row_metadata, self.configuration)
     }
 
     /// Geometry is sufficient to materialize children before first measurement.
@@ -77,7 +96,9 @@ impl TableCapability {
         if !self.enabled {
             return legacy_permits(document, table);
         }
-        self.cache.borrow_mut().permits(document, table)
+        self.cache
+            .borrow_mut()
+            .permits(document, table, &self.row_metadata, self.configuration)
     }
 
     pub(crate) fn permits_document(&self, document: &XiaomuDocument) -> bool {
@@ -95,6 +116,11 @@ impl TableCapability {
 
     /// A failed measurement revokes the previous success, even for the same key.
     pub(crate) fn record(&mut self, table: NodeId, key: Rc<TableCapabilityKey>, success: bool) {
+        // A layout prepared before a configuration change can neither grant
+        // admission nor revoke a newer successful measurement.
+        if key.configuration != self.configuration {
+            return;
+        }
         if success && self.enabled && key.grid.table() == table {
             self.cache.get_mut().record(table, key);
         } else {
@@ -175,6 +201,8 @@ impl TableCapability {
 fn build_key(
     document: &XiaomuDocument,
     table: NodeId,
+    row_metadata: &NodeAttrs,
+    configuration: u64,
 ) -> Result<TableCapabilityKey, TableLayoutError> {
     let grid = document.table_grid(table)?;
     let mut presentation = Vec::with_capacity(1 + grid.rows() + grid.origins().len());
@@ -184,7 +212,12 @@ fn build_key(
     {
         let node = document.node(id).ok_or(xiaomu_core::Error::UnknownNode)?;
         match node.kind() {
-            NodeKind::Table | NodeKind::TableRow if node.attrs().is_empty() => {}
+            NodeKind::Table if node.attrs().is_empty() => {}
+            NodeKind::TableRow
+                if node
+                    .attrs()
+                    .iter()
+                    .all(|(key, value)| row_metadata.get(key) == Some(value)) => {}
             NodeKind::TableCell | NodeKind::TableHeader => {
                 validate_cell_presentation(node.attrs())?;
             }
@@ -197,6 +230,7 @@ fn build_key(
     let plan = TableLayoutPlan::from_document(document, table, TableLayoutOptions::default())?;
     plan.layout(0.0, &vec![0.0; plan.cells().len()])?;
     Ok(TableCapabilityKey {
+        configuration,
         root: document.root(),
         grid,
         presentation,
