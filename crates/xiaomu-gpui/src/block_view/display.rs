@@ -147,6 +147,12 @@ impl ParagraphView {
         let session = self.session.borrow();
         let selection = session.selection();
         let document = session.document();
+        if selection.is_all(document) {
+            return SelectionProjection::Highlight {
+                start: 0,
+                end: projection.display_text().len(),
+            };
+        }
         let endpoint = |position: DocumentPosition| match position {
             DocumentPosition::Inline(point) => Some(point),
             DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => None,

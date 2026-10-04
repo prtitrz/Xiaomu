@@ -1,5 +1,7 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-04：[显式全篇选择](adr/0010-explicit-root-selection.md) 修复host CtrlA与普通全文text range混淆的问题。每实例opt-in root gaps、closed clipboard v11、原生range输入/焦点与失败保护已具844全库测试/strictClippy证据；真实产品GUI待复验。旧默认router和普通open剪贴板拟合保持原边界。
+
 > Status: **EARLY / INDEPENDENT PROJECT**
 >
 > Updated: 2026-10-01

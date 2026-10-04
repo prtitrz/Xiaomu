@@ -129,6 +129,7 @@ impl DocumentSession {
             .clone();
 
         let after_selection = match staged.selection_update {
+            SelectionUpdate::AllDocument => DocumentSelection::all(&current),
             SelectionUpdate::PreserveFocus => preserved_focus(before_selection, &current)?,
             SelectionUpdate::PreserveSelection => preserved_selection(before_selection, &current)?,
             SelectionUpdate::CaretAtSplitTail => {

@@ -41,6 +41,9 @@ pub enum SessionError {
     /// into more than one block fails closed instead of silently
     /// downgrading the fragment to its plain-text fallback.
     ClipboardAtomsUnsupported,
+    /// Whole-root clipboard boundaries require a host-aware closed-slice fit.
+    /// Generic text fitting rejects these rather than discarding block shells.
+    ClipboardClosedUnsupported,
     /// A structured paste would have to place an atomic block into a
     /// context the planner cannot address yet.
     ///
@@ -71,6 +74,9 @@ impl fmt::Display for SessionError {
             }
             Self::ClipboardAtomicUnsupported => {
                 f.write_str("clipboard fragment places an atomic block in an unsupported context")
+            }
+            Self::ClipboardClosedUnsupported => {
+                f.write_str("closed clipboard boundaries require an explicit paste planner")
             }
             Self::ClipboardAtomsUnsupported => {
                 f.write_str("pasting inline atoms is only supported into one inline block")

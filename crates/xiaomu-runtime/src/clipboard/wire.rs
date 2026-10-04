@@ -46,6 +46,8 @@ const VERSION_TEXT_STYLE: u32 = 9;
 // Built-in atom identity and independent atom marks need an explicit tagged
 // kind, never a string projection that could turn a built-in into an extension.
 const VERSION_TYPED_ATOMS: u32 = 10;
+// Explicit whole-root source boundaries must never degrade into text fitting.
+const VERSION_CLOSED_ROOTS: u32 = 11;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -95,7 +97,8 @@ impl std::error::Error for ClipboardMetadataError {}
 ///
 /// The plain-text fallback is deliberately not duplicated in the metadata;
 /// callers put [`ClipboardSlice::plain_text`] in the platform text flavor.
-/// Built-in hard breaks or independently marked inline atoms encode as v10,
+/// Explicit whole-root source selections encode as v11 with closed boundaries.
+/// Otherwise, built-in hard breaks or independently marked inline atoms encode as v10,
 /// preserving typed kind identity and the complete mark set. Otherwise,
 /// text-style marks encode as v9, preserving all three missing/null/string
 /// attributes without interpreting CSS. Otherwise, links outside the classic
@@ -115,7 +118,9 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
         .iter()
         .map(WireNode::from_node)
         .collect::<Result<Vec<_>, _>>()?;
-    let version = if roots.iter().any(WireNode::carries_typed_atoms) {
+    let version = if slice.is_closed() {
+        VERSION_CLOSED_ROOTS
+    } else if roots.iter().any(WireNode::carries_typed_atoms) {
         VERSION_TYPED_ATOMS
     } else if roots.iter().any(WireNode::carries_text_style) {
         VERSION_TEXT_STYLE
@@ -134,6 +139,7 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
         format: FORMAT.to_owned(),
         version,
         roots,
+        closed: slice.is_closed().then_some(true),
     })
     .map_err(|_| ClipboardMetadataError::serialization())?;
     if !strict_json::validate(&metadata) {
@@ -172,7 +178,13 @@ pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlic
                 | VERSION_LINK_ATTRIBUTES
                 | VERSION_TEXT_STYLE
                 | VERSION_TYPED_ATOMS
+                | VERSION_CLOSED_ROOTS
         )
+    {
+        return None;
+    }
+    if (envelope.version == VERSION_CLOSED_ROOTS && envelope.closed != Some(true))
+        || (envelope.version < VERSION_CLOSED_ROOTS && envelope.closed.is_some())
     {
         return None;
     }
@@ -209,9 +221,15 @@ pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlic
     {
         return None;
     }
-    let slice = match &roots[..] {
-        [root] if root.content().as_table().is_some() => ClipboardSlice::from_table(root.clone()),
-        _ => ClipboardSlice::from_roots(roots),
+    let slice = if envelope.closed == Some(true) {
+        ClipboardSlice::from_closed_roots(roots)
+    } else {
+        match &roots[..] {
+            [root] if root.content().as_table().is_some() => {
+                ClipboardSlice::from_table(root.clone())
+            }
+            _ => ClipboardSlice::from_roots(roots),
+        }
     };
     (slice.plain_text() == plain_text).then_some(slice)
 }
@@ -222,6 +240,19 @@ struct WireEnvelope {
     format: String,
     version: u32,
     roots: Vec<WireNode>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "closed_boundary"
+    )]
+    closed: Option<bool>,
+}
+
+// Missing is legacy; an explicit null is malformed, never an absent flag.
+fn closed_boundary<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(deserializer).map(Some)
 }
 
 #[derive(Serialize, Deserialize)]

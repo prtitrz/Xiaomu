@@ -17,6 +17,11 @@ impl DocumentSession {
         &mut self,
         intent: &EditIntent,
     ) -> Result<SessionOutcome, SessionError> {
+        if let EditIntent::PasteSlice { slice } = intent
+            && slice.is_closed()
+        {
+            return Err(SessionError::ClipboardClosedUnsupported);
+        }
         // Policy has already seen the logical command. Normalize only inside
         // default dispatch, so hosts never need to guess a clipboard's origin.
         if matches!(intent, EditIntent::InsertLineBreak) {

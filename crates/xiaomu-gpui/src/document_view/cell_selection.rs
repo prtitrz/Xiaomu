@@ -23,19 +23,36 @@ fn children(document: &XiaomuDocument, node: NodeId) -> &[NodeId] {
 }
 
 impl DocumentView {
+    pub(super) fn uses_range_input(&self) -> bool {
+        let session = self.session.borrow();
+        let selection = session.selection();
+        selection.active_cell_range().is_some() || selection.is_all(session.document())
+    }
+
     pub(super) fn sync_range_input(&mut self, cx: &mut Context<Self>) {
-        let anchor = self
-            .session
-            .borrow()
-            .selection()
-            .active_cell_range()
-            .map(|range| range.anchor());
+        let anchor = {
+            let session = self.session.borrow();
+            let selection = session.selection();
+            selection
+                .active_cell_range()
+                .map(|range| range.anchor())
+                .or_else(|| {
+                    selection
+                        .is_all(session.document())
+                        .then_some(session.document().root())
+                })
+        };
         if self.range_input.as_ref().map(|(cell, _)| *cell) == anchor {
             return;
         }
         self.range_input = anchor.map(|cell| {
             let view = cx.new(|cx| {
-                ParagraphView::for_cell_range(self.session.clone(), self.epoch.clone(), cell, cx)
+                ParagraphView::for_document_range(
+                    self.session.clone(),
+                    self.epoch.clone(),
+                    cell,
+                    cx,
+                )
             });
             view.update(cx, |view, _| {
                 view.attach_scroll_handle(self.scroll_handle.clone())

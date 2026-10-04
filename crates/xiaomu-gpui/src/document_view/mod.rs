@@ -14,6 +14,7 @@
 //! bar with muted text, list items indent per nesting depth and show a projected bullet or ordinal marker.
 
 pub(crate) mod actions;
+mod block_tree;
 pub(crate) mod cache_key;
 pub(crate) mod cell_selection;
 mod clipboard;
@@ -28,6 +29,8 @@ mod visual_navigation;
 
 #[cfg(test)]
 mod command_composition_tests;
+#[cfg(test)]
+mod explicit_all_selection_tests;
 #[cfg(all(test, target_os = "linux"))]
 mod host_form_order_tests;
 #[cfg(test)]
@@ -41,11 +44,11 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    App, Context, Entity, Focusable as _, MouseButton, MouseDownEvent, Pixels, ScrollHandle,
-    Window, div, prelude::*, px,
+    App, Context, Entity, Focusable as _, MouseButton, Pixels, ScrollHandle, Window, div,
+    prelude::*, px,
 };
 
-use xiaomu_core::document::{ImageAttrs, ImageSource, NodeContent, NodeId, NodeKind};
+use xiaomu_core::document::{ImageAttrs, ImageSource, NodeId};
 use xiaomu_core::selection::InlinePoint;
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
@@ -55,10 +58,7 @@ use xiaomu_runtime::persistence::DocumentPersistence;
 use crate::accessibility::{AccessibilityProjection, project_accessibility};
 use crate::atom_capability::SharedAtomCapability;
 use crate::block_view::{BlockBoundsRegistry, ParagraphView, SharedSession};
-use crate::image_block::{
-    ImageBlockPresentation, ImageLoadCache, ImageLoadState, SharedImageLoadCache,
-    render_image_block, sync_image_loads,
-};
+use crate::image_block::{ImageLoadCache, ImageLoadState, SharedImageLoadCache, sync_image_loads};
 use crate::inline_atom::InlineAtomRendererRegistry;
 use visual_navigation::NavStep;
 
@@ -488,123 +488,11 @@ impl DocumentView {
         }
         // Stale entries dropped with `pool`.
     }
-
-    /// Renders the document tree with kind-driven styling.
-    fn render_block_tree(
-        &self,
-        id: NodeId,
-        in_quote: bool,
-        list_depth: usize,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) -> gpui::AnyElement {
-        let node_data = {
-            let session = self.session.borrow();
-            session
-                .document()
-                .node(id)
-                .map(|node| (node.kind().clone(), node.content().clone()))
-        };
-        let Some((kind, content)) = node_data else {
-            return div().into_any_element();
-        };
-
-        match content {
-            NodeContent::Inline(_) => {
-                let Some((_, view)) = self.children.iter().find(|(child, _)| *child == id) else {
-                    return div().into_any_element();
-                };
-                let marker = {
-                    let session = self.session.borrow();
-                    markers::marker_for_block(
-                        session.document(),
-                        id,
-                        self.list_marker_provider.as_deref(),
-                    )
-                };
-                markers::style_block(
-                    view.clone(),
-                    &kind,
-                    in_quote,
-                    list_depth,
-                    marker.as_ref(),
-                    index,
-                )
-                .into_any_element()
-            }
-            NodeContent::Children(_) if matches!(kind, NodeKind::Table) => {
-                self.render_table(id, index, cx)
-            }
-            NodeContent::Children(children) => {
-                let next_quote = in_quote || matches!(kind, NodeKind::Quote);
-                let next_depth = list_depth
-                    + usize::from(matches!(kind, NodeKind::BulletList | NodeKind::OrderedList));
-                let mut column = div().flex().flex_col();
-                if matches!(kind, NodeKind::Quote) {
-                    column = column.border_l_2().border_color(gpui::black()).pl_4();
-                }
-                for (child_index, child) in children.into_iter().enumerate() {
-                    column = column.child(self.render_block_tree(
-                        child,
-                        next_quote,
-                        next_depth,
-                        index + child_index,
-                        cx,
-                    ));
-                }
-                column.into_any_element()
-            }
-            NodeContent::Atomic if matches!(kind, NodeKind::Image) => {
-                let selected = self.session.borrow().selection().as_atomic_node() == Some(id);
-                let (label, state_color) = self.image_placeholder_presentation(id);
-                let source = self.image_render_source(id);
-                let presentation = ImageBlockPresentation {
-                    selected,
-                    label,
-                    state_color,
-                    source,
-                };
-                render_image_block(id, index, &presentation, cx)
-            }
-            NodeContent::Atomic => {
-                // Atomic blocks are whole-node selectable: the rule renders
-                // thicker while its node selection is active, and a plain
-                // click selects it instead of placing a text caret.
-                let selected = self.session.borrow().selection().as_atomic_node() == Some(id);
-                let (height, color) = if selected {
-                    (px(5.0), gpui::rgba(0x2b6cb8ff))
-                } else {
-                    (px(3.0), gpui::rgba(0xccccccff))
-                };
-                div()
-                    .id(("atomic-block", index))
-                    .h(height)
-                    .w_full()
-                    .my_3()
-                    .bg(color)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                            cx.stop_propagation();
-                            this.select_atomic_block(id, window, cx);
-                        }),
-                    )
-                    .into_any_element()
-            }
-            _ => div().into_any_element(),
-        }
-    }
 }
 
 impl Render for DocumentView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let restore_focus = self.range_input_is_focused(window, cx)
-            && self
-                .session
-                .borrow()
-                .selection()
-                .active_cell_range()
-                .is_none();
+        let restore_focus = self.range_input_is_focused(window, cx) && !self.uses_range_input();
         self.sync_children(cx);
         if restore_focus {
             self.route_focus(window, cx);

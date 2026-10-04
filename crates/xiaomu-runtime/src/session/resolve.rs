@@ -20,6 +20,7 @@ pub(super) fn resolve_selection(
     document: &XiaomuDocument,
 ) -> Result<DocumentSelection, SessionError> {
     match plan.selection_update() {
+        SelectionUpdate::AllDocument => Ok(DocumentSelection::all(document)),
         SelectionUpdate::CaretAfterReplacement | SelectionUpdate::CaretAtEditStart => {
             let edit = plan.primary_edit().ok_or(SessionError::SelectionInvalid)?;
             let raw = match plan.selection_update() {

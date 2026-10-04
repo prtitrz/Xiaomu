@@ -193,6 +193,9 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.route_select_all(window, cx) {
+            return;
+        }
         let session = self.session.borrow();
         let blocks = navigation::text_blocks(session.document());
         drop(session);
@@ -516,12 +519,7 @@ impl DocumentView {
 
     /// Moves platform focus to the block holding the selection focus.
     pub(crate) fn route_focus(&self, window: &mut Window, cx: &App) {
-        if self
-            .session
-            .borrow()
-            .selection()
-            .active_cell_range()
-            .is_some()
+        if self.uses_range_input()
             && let Some((_, input)) = &self.range_input
         {
             window.focus(&input.read(cx).focus_handle(cx));
