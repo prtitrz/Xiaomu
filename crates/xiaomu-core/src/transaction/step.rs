@@ -152,6 +152,22 @@ pub enum TransactionStep {
         /// Number of columns; must be at least one and is shared by all rows.
         columns: usize,
     },
+    /// Inserts a complete captured table tree with entirely fresh identities.
+    ///
+    /// Header/body kinds, spans, raw attributes, nested tables, rich blocks,
+    /// inline-atom order and independent marks are preserved. Source canonical
+    /// IDs never enter the target. Core checks the parent/index, whole fresh-ID
+    /// range and combined destination/template table budgets before one batch
+    /// insertion. The map names the real new table root. Undo removes it; Redo
+    /// restores that same newly allocated tree exactly.
+    InsertTableTree {
+        /// Existing structural parent receiving the table.
+        parent: NodeId,
+        /// Number of existing children before the insertion point.
+        index: usize,
+        /// Bounded immutable template captured from a validated source table.
+        tree: super::TableTreeTemplate,
+    },
     /// Inserts one row into `table` at `index`, matching its established
     /// column count.
     ///

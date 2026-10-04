@@ -7,6 +7,8 @@ use crate::{Error, Result};
 
 use super::{InlineAtomContent, InlineAtomPlacement, NodeId, TextRun};
 
+mod remap;
+
 /// Normalized mixed inline content for paragraph-like nodes.
 ///
 /// Text remains a sequence of normalized [`TextRun`] values. Inline atoms are
