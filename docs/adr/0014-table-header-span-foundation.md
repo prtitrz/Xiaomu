@@ -138,6 +138,16 @@ all-fixed table's exact width sum are explicit prototype policies, not browser
 `table-layout:auto` equivalence. Same-frame viewport integration, full-cell hit
 registration, native resize/IME and intrinsic width comparison remain next work.
 
+The separate `table_viewport` adapter now has three passing mounted-Entity
+virtual tests and strict GPUI Clippy. It builds the complete scroll subtree in
+prepaint using this frame's actual parent bounds, including insets, sibling
+flow and nested widths. Window resize/scroll tests assert real child bounds,
+scroll extents and one builder call per host render without a notify loop.
+The first bare-Element test harness failed in GPUI's scroll-listener paint
+because there was no owning rendered Entity; mounting a real Host corrected
+the harness without deleting listeners or patching GPUI. This adapter still
+does not activate DocumentView span rendering or establish native GUI parity.
+
 Core236, Runtime452 and ten new GPUI virtual tests passed; workspace/all-target
 tests total1034 and strict Clippy pass. Tests cover Header inverse, aggregate
 budgets/overflow, covered empty rows, rejected mutation state, metadata versions,
