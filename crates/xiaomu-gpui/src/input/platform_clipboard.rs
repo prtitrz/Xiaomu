@@ -218,12 +218,11 @@ mod cut_tests {
 
     #[test]
     fn cut_stops_before_clipboard_write_and_delete_when_metadata_cannot_round_trip() {
-        // This valid canonical payload serializes, but exceeds the JSON
-        // decoder's nesting budget. A plain-text fallback cannot retain it.
+        // This valid canonical payload exceeds the symmetric wire budget.
+        // A plain-text fallback cannot retain its extension payload.
         let (mut session, image) = atomic_session(160);
         let slice = session.clipboard_slice().unwrap().unwrap();
-        let metadata = encode_metadata(&slice).unwrap();
-        assert!(decode_metadata(slice.plain_text(), &metadata).is_none());
+        assert!(encode_metadata(&slice).is_err());
         let before_document = format!("{:?}", session.document());
         let before_selection = session.selection();
         let before_history = session.history_depths();

@@ -12,6 +12,8 @@
 
 mod display;
 mod element;
+#[cfg(test)]
+mod hard_break_display_tests;
 mod ime;
 #[cfg(test)]
 mod ime_atom_tests;

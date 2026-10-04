@@ -91,6 +91,14 @@ impl InlineAtomRenderer for FallbackAtomRenderer {
     }
 }
 
+struct HardBreakRenderer;
+
+impl InlineAtomRenderer for HardBreakRenderer {
+    fn display_text(&self, _: &InlineAtomView) -> String {
+        "\n".to_owned()
+    }
+}
+
 /// Registry of renderers keyed by stable atom kind.
 ///
 /// Hosts register renderers before building a view; lookup is by the
@@ -98,7 +106,7 @@ impl InlineAtomRenderer for FallbackAtomRenderer {
 /// [`FallbackAtomRenderer`], never to a panic or a dropped atom.
 #[derive(Default)]
 pub struct InlineAtomRendererRegistry {
-    renderers: BTreeMap<String, Rc<dyn InlineAtomRenderer>>,
+    renderers: BTreeMap<AtomKind, Rc<dyn InlineAtomRenderer>>,
 }
 
 impl InlineAtomRendererRegistry {
@@ -109,16 +117,22 @@ impl InlineAtomRendererRegistry {
         Self::default()
     }
 
-    /// Registers `renderer` for `kind`, replacing any previous entry.
+    /// Registers an extension renderer, replacing any previous entry.
+    /// Built-in hard breaks have intrinsic layout and cannot be overridden.
     pub fn register(&mut self, kind: &AtomKind, renderer: Rc<dyn InlineAtomRenderer>) {
-        self.renderers.insert(kind.as_str().to_owned(), renderer);
+        if !kind.is_hard_break() {
+            self.renderers.insert(kind.clone(), renderer);
+        }
     }
 
     /// Resolves the renderer for `kind`, or the deterministic fallback.
     #[must_use]
     pub fn renderer_for(&self, kind: &AtomKind) -> Rc<dyn InlineAtomRenderer> {
+        if kind.is_hard_break() {
+            return Rc::new(HardBreakRenderer);
+        }
         self.renderers
-            .get(kind.as_str())
+            .get(kind)
             .cloned()
             .unwrap_or_else(|| Rc::new(FallbackAtomRenderer))
     }
@@ -126,7 +140,7 @@ impl InlineAtomRendererRegistry {
     /// Returns whether a specific renderer is registered for `kind`.
     #[must_use]
     pub fn has_custom_renderer(&self, kind: &AtomKind) -> bool {
-        self.renderers.contains_key(kind.as_str())
+        self.renderers.contains_key(kind)
     }
 }
 

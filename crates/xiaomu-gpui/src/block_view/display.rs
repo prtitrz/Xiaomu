@@ -26,7 +26,7 @@ fn project_atom_display_content(
         push_styled_text(inline, canonical_cursor, anchor, &mut segments);
         let display_range = atom.display_range().clone();
         let rendered = &projection.display_text()[display_range];
-        segments.push(DisplaySegment::from_marks(0, rendered, &MarkSet::empty()));
+        segments.push(DisplaySegment::from_marks(0, rendered, atom.marks()));
         canonical_cursor = anchor;
     }
 

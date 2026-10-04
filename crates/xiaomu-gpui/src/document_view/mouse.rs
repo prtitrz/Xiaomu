@@ -185,6 +185,7 @@ impl DocumentView {
             // hits click beside the chip.
             let chip = projection
                 .atom_at_display_offset(raw)
+                .filter(|span| !span.is_hard_break())
                 .map(|span| span.atom())
                 .and_then(|atom| self.chip_for(atom));
             return Some(MouseHit { point, chip });

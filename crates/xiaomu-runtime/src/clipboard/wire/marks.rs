@@ -56,7 +56,7 @@ impl WireRun {
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-enum WireMark {
+pub(super) enum WireMark {
     Bold {},
     Italic {},
     Code {},
@@ -70,7 +70,7 @@ enum WireMark {
 }
 
 impl WireMark {
-    fn from_mark(mark: &Mark) -> Result<Self, ClipboardMetadataError> {
+    pub(super) fn from_mark(mark: &Mark) -> Result<Self, ClipboardMetadataError> {
         Ok(match mark {
             Mark::Bold => Self::Bold {},
             Mark::Italic => Self::Italic {},
@@ -93,7 +93,7 @@ impl WireMark {
         })
     }
 
-    fn into_mark(self) -> Result<Mark, ClipboardMetadataError> {
+    pub(super) fn into_mark(self) -> Result<Mark, ClipboardMetadataError> {
         Ok(match self {
             Self::Bold {} => Mark::Bold,
             Self::Italic {} => Mark::Italic,
@@ -114,7 +114,7 @@ impl WireMark {
 /// All three exact slots are required, even if their values are Missing.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct WireTextStyleAttributes {
+pub(super) struct WireTextStyleAttributes {
     color: WireStringAttribute,
     font_family: WireStringAttribute,
     font_size: WireStringAttribute,
@@ -141,7 +141,7 @@ impl WireTextStyleAttributes {
 /// serde default. Omission, unknown fields and invalid types all fail closed.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct WireLinkAttributes {
+pub(super) struct WireLinkAttributes {
     href: WireStringAttribute,
     target: WireStringAttribute,
     rel: WireStringAttribute,

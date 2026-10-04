@@ -237,6 +237,20 @@ impl BlockTextLayout {
                 size(width, self.line_height),
             ));
         }
+        // A selected logical LF occupies no shaped glyph width. Still give
+        // that caret unit a visible EOL marker, including consecutive/empty
+        // lines; soft-wrap boundaries have no LF and never enter this loop.
+        let mut logical_start = 0usize;
+        for line in self.lines.iter().take(self.lines.len().saturating_sub(1)) {
+            let newline = logical_start + line.len();
+            if range.start <= newline
+                && newline < range.end
+                && let Some(position) = self.position_for_index(newline)
+            {
+                rects.push(Bounds::new(position, size(px(4.0), self.line_height)));
+            }
+            logical_start = newline + 1;
+        }
         rects
     }
 

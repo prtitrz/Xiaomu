@@ -96,7 +96,7 @@ fn write_block(
             out.push_str("---\n");
         }
         NodeKind::Image => write_image(node, &pad, out)?,
-        NodeKind::CodeBlock => write_code_block(node, &pad, out)?,
+        NodeKind::CodeBlock => write_code_block(document, node, &pad, out)?,
         NodeKind::Quote => {
             require_known_attrs(node, "Quote", &[])?;
             let children = children_of(node)?;
@@ -187,7 +187,12 @@ fn write_image(node: &Node, pad: &str, out: &mut String) -> Result<()> {
     Ok(())
 }
 
-fn write_code_block(node: &Node, pad: &str, out: &mut String) -> Result<()> {
+fn write_code_block(
+    document: &XiaomuDocument,
+    node: &Node,
+    pad: &str,
+    out: &mut String,
+) -> Result<()> {
     require_known_attrs(node, "CodeBlock", &[CODE_BLOCK_ATTR_LANGUAGE])?;
     let language = match node.attrs().get(CODE_BLOCK_ATTR_LANGUAGE) {
         None => None,
@@ -200,6 +205,13 @@ fn write_code_block(node: &Node, pad: &str, out: &mut String) -> Result<()> {
     };
 
     let inline = inline_content(node)?;
+    if !inline.atoms().is_empty() {
+        let kind = document
+            .node(inline.atoms()[0].atom())
+            .map(|atom| describe_kind(atom.kind()))
+            .unwrap_or_else(|| "InlineAtom".to_owned());
+        return Err(MarkdownCodecError::UnsupportedNodeKind { kind });
+    }
     let mut body = String::new();
     for run in inline.runs() {
         if let Some(mark) = run.marks().as_slice().first() {

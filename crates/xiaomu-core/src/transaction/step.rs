@@ -252,6 +252,9 @@ pub enum TransactionStep {
     /// after it. Splitting inside a run gives both halves that run's marks;
     /// splitting exactly at a run boundary leaves each whole run on one
     /// side. Either resulting half may be empty.
+    ///
+    /// This legacy text-only step rejects any atom-bearing node; use
+    /// [`TransactionStep::SplitInlineNode`] to address an exact atom seam.
     SplitNode {
         /// Inline-bearing node being split; must not be the document root.
         node: NodeId,
@@ -260,14 +263,43 @@ pub enum TransactionStep {
         /// inclusive).
         at: TextOffset,
     },
+    /// Splits an inline-bearing node at an exact mixed-inline caret gap.
+    ///
+    /// Text before `at.text_offset()` and same-boundary atoms before
+    /// `at.atom_index()` remain in the original node. The remaining text and
+    /// atoms move to a freshly allocated following sibling with the same
+    /// kind and attributes. Atom identities and payloads never change;
+    /// moved placements subtract the split byte offset. Either side may
+    /// contain no text or no atoms. Affinity does not affect the split.
+    SplitInlineNode {
+        /// Validated UTF-8 boundary and atom ordinal of the split.
+        at: InlinePoint,
+    },
+    /// Restores a sibling absorbed by [`TransactionStep::JoinNodes`].
+    ///
+    /// This inverse-oriented split restores the exact absent identity,
+    /// kind, and attributes of `node`. Its inline content must equal the
+    /// suffix currently following `at`, including atom identities and
+    /// placements. The suffix atoms stay live and change parent; this step
+    /// cannot duplicate, replace, or resurrect an atom payload. As with
+    /// [`TransactionStep::RestoreSubtree`], callers cannot mint node IDs.
+    /// Invalid identity, content, seam, or parent shape fails atomically.
+    RestoreJoinedNode {
+        /// Exact gap in the surviving inline node where the sibling began.
+        at: InlinePoint,
+        /// Previously absorbed inline-bearing sibling from the old snapshot.
+        node: Node,
+    },
     /// Merges two adjacent inline-bearing siblings into one.
     ///
     /// `second` must be the child immediately following `first`. The merged
     /// node keeps `first`'s identity, kind, and attributes; its inline
-    /// content is the normalized concatenation of both contents. `second`
-    /// leaves the document together with its whole subtree, so undo can
-    /// restore it with its exact identity via
-    /// [`TransactionStep::RestoreSubtree`].
+    /// content is the normalized concatenation of both contents. Atoms keep
+    /// their identities and payloads; `second`'s placements shift by the
+    /// byte length of `first` and follow its end-anchored atoms. Only the
+    /// absorbed inline node leaves the document. Undo restores its exact
+    /// identity, kind, attributes, and content via
+    /// [`TransactionStep::RestoreJoinedNode`].
     JoinNodes {
         /// Surviving sibling whose child position stays put.
         first: NodeId,
