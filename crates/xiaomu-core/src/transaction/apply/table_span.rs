@@ -130,6 +130,7 @@ impl ApplyContext {
             TableCellRestore {
                 table,
                 expected: expected.into_values().collect(),
+                expected_parents: BTreeMap::new(),
                 replacement: replacement.into_values().collect(),
                 maps,
                 inverse_maps,
@@ -269,6 +270,7 @@ impl ApplyContext {
             TableCellRestore {
                 table,
                 expected,
+                expected_parents: BTreeMap::new(),
                 replacement,
                 maps,
                 inverse_maps,
@@ -281,39 +283,17 @@ impl ApplyContext {
         &mut self,
         restore: &TableCellRestore,
     ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
-        // Check current table membership/occupancy, not just opacity of the
-        // payload. Exact row/cell preconditions and absent IDs are checked by
-        // exchange; full-tree validation checks the resulting references.
-        let grid =
-            TableGrid::from_store(&self.store, restore.table, &mut TableGridBudget::default())?;
-        let rows: BTreeSet<_> = (0..grid.rows())
-            .filter_map(|row| grid.row_id(row))
-            .collect();
-        let mut cell_children = BTreeSet::new();
-        for node in &restore.expected {
-            if node.kind().is_table_cell() {
-                if grid.placement(node.id()).is_none() {
-                    return Err(Error::InvalidTransaction);
-                }
-                cell_children.extend(
-                    node.content()
-                        .as_children()
-                        .ok_or(Error::InvalidTransaction)?
-                        .iter()
-                        .copied(),
-                );
-            }
-        }
-        for node in &restore.expected {
-            let belongs = match node.kind() {
-                NodeKind::TableRow => rows.contains(&node.id()),
-                NodeKind::TableCell | NodeKind::TableHeader => grid.placement(node.id()).is_some(),
-                NodeKind::Paragraph => cell_children.contains(&node.id()),
-                _ => false,
-            };
-            if !belongs {
-                return Err(Error::InvalidTransaction);
-            }
+        // Check the target grid and exact affected parent chains. Rich nested
+        // subtrees are legitimate axis payloads, but moving an affected row
+        // into a nested table cannot make an old inverse target that table.
+        TableGrid::from_store(&self.store, restore.table, &mut TableGridBudget::default())?;
+        let parents = crate::transaction::table_restore::expected_parents(
+            &self.store,
+            restore.table,
+            &restore.expected,
+        )?;
+        if parents != restore.expected_parents {
+            return Err(Error::InvalidTransaction);
         }
         let next_id = restore
             .replacement
@@ -331,15 +311,21 @@ impl ApplyContext {
         self.commit_table_edit(restore.clone(), next_id)
     }
 
-    fn commit_table_edit(
+    pub(super) fn commit_table_edit(
         &mut self,
         edit: TableCellRestore,
         next_id: u64,
     ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         let next = self.store.exchange(&edit.expected, &edit.replacement)?;
+        let parents = crate::transaction::table_restore::expected_parents(
+            &next,
+            edit.table,
+            &edit.replacement,
+        )?;
         let inverse = TableCellRestore {
             table: edit.table,
             expected: edit.replacement,
+            expected_parents: parents,
             replacement: edit.expected,
             maps: edit.inverse_maps,
             inverse_maps: edit.maps.clone(),

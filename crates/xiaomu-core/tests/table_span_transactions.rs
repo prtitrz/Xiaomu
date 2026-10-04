@@ -709,3 +709,104 @@ fn inverse_rejects_affected_row_moved_to_another_valid_table() {
     same_snapshot(moved.document(), &before);
     round_trip(&document, &split);
 }
+
+#[test]
+fn inverse_rejects_affected_row_or_ancestor_moved_into_a_nested_table() {
+    for vertical in [false, true] {
+        let mut builder = NodeStoreBuilder::new();
+        let p = paragraph(&mut builder, "span");
+        let attributes = if vertical {
+            attrs(&[("rowspan", AttrValue::Integer(2))])
+        } else {
+            attrs(&[("colspan", AttrValue::Integer(2))])
+        };
+        let a = cell(&mut builder, NodeKind::TableCell, attributes, &[p]);
+        let mut top_cells = vec![a];
+        if vertical {
+            let p = paragraph(&mut builder, "top-right");
+            top_cells.push(cell(
+                &mut builder,
+                NodeKind::TableCell,
+                NodeAttrs::empty(),
+                &[p],
+            ));
+        }
+        let moved_row = row(&mut builder, &top_cells);
+        let mut nested_cells = Vec::new();
+        for _ in 0..2 {
+            let p = paragraph(&mut builder, "nested");
+            nested_cells.push(cell(
+                &mut builder,
+                NodeKind::TableCell,
+                NodeAttrs::empty(),
+                &[p],
+            ));
+        }
+        let nested_row = row(&mut builder, &nested_cells);
+        let nested = builder
+            .insert(
+                NodeKind::Table,
+                NodeAttrs::empty(),
+                NodeContent::children([nested_row]),
+            )
+            .unwrap();
+        let holder = cell(
+            &mut builder,
+            NodeKind::TableCell,
+            NodeAttrs::empty(),
+            &[nested],
+        );
+        let mut lower_cells = vec![holder];
+        if !vertical {
+            let p = paragraph(&mut builder, "lower-right");
+            lower_cells.push(cell(
+                &mut builder,
+                NodeKind::TableCell,
+                NodeAttrs::empty(),
+                &[p],
+            ));
+        }
+        let lower = row(&mut builder, &lower_cells);
+        let (document, table) = finish(builder, &[moved_row, lower]);
+        let split = apply(
+            &document,
+            TransactionStep::SplitTableCell { table, cell: a },
+        );
+        // In the vertical case, the top row itself was not rewritten by split:
+        // the affected cell's ancestor edge must still bind it to this table.
+        let mut nodes = vec![split.document().node(moved_row).unwrap().clone()];
+        for cell in children(split.document(), moved_row) {
+            nodes.push(split.document().node(cell).unwrap().clone());
+            nodes.extend(
+                children(split.document(), cell)
+                    .into_iter()
+                    .map(|id| split.document().node(id).unwrap().clone()),
+            );
+        }
+        let moved = Transaction::new(TransactionOrigin::UserInput)
+            .with_step(TransactionStep::RemoveNode { node: moved_row })
+            .with_step(TransactionStep::RestoreSubtree {
+                parent: nested,
+                index: 1,
+                root: moved_row,
+                nodes,
+            })
+            .apply_with_changes(split.document())
+            .unwrap();
+        assert_eq!(
+            moved.document().node(moved_row),
+            split.document().node(moved_row)
+        );
+        assert_eq!(moved.document().parent_of(moved_row), Some(nested));
+        moved.document().table_grid(table).unwrap();
+        moved.document().table_grid(nested).unwrap();
+        assert_eq!(
+            split
+                .inverse()
+                .apply_with_changes(moved.document())
+                .unwrap_err(),
+            Error::InvalidTransaction
+        );
+        round_trip(&document, &split);
+    }
+}

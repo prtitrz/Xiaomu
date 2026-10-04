@@ -180,6 +180,66 @@ pub enum TransactionStep {
         /// in every row.
         index: usize,
     },
+    /// Inserts a logical row, extending every rowspan crossing its boundary.
+    ///
+    /// Uncovered columns receive fresh unit cells and empty paragraphs. New
+    /// cells have empty attrs; host-specific defaults, type borrowing and width
+    /// reconciliation are explicit caller policy. Existing content and cell
+    /// identities survive. A fully covered new row may be physically empty.
+    InsertTableRowLogical {
+        /// Existing checked table, including spanning tables.
+        table: NodeId,
+        /// Logical row boundary in `0..=row_count`.
+        index: usize,
+        /// One Cell/Header kind per logical column, including covered slots.
+        /// The vector must match logical width; non-cell kinds are rejected.
+        cell_kinds: Vec<crate::document::NodeKind>,
+    },
+    /// Inserts a logical column, extending every colspan crossing its boundary.
+    ///
+    /// A crossing cell's explicit width list receives zero at the new column;
+    /// missing/null widths stay unchanged. Each uncovered row receives a fresh
+    /// unit cell with empty attrs and one empty paragraph. Existing cell and
+    /// descendant identities survive. Type/default/repair policy is external.
+    InsertTableColumnLogical {
+        /// Existing checked table, including spanning tables.
+        table: NodeId,
+        /// Logical column boundary in `0..=column_count`.
+        index: usize,
+        /// One Cell/Header kind per logical row, including covered slots.
+        /// The vector must match logical height; non-cell kinds are rejected.
+        cell_kinds: Vec<crate::document::NodeKind>,
+    },
+    /// Deletes a nonempty proper half-open range of logical rows.
+    ///
+    /// Intersecting rowspans shrink by the removed overlap. If an origin row
+    /// disappears while its cell still covers surviving rows, that original
+    /// cell and all content move to the first surviving row below the range.
+    /// Fully removed cells lose their whole subtrees, captured in the exact
+    /// inverse. Empty or all-row deletion is rejected without changing state;
+    /// hosts may expose it as an unhandled/no-op product command.
+    DeleteTableRowsLogical {
+        /// Existing checked table.
+        table: NodeId,
+        /// Inclusive first logical row to remove.
+        start: usize,
+        /// Exclusive last logical row to remove; at most the row count.
+        end: usize,
+    },
+    /// Deletes a nonempty proper half-open range of logical columns.
+    ///
+    /// Intersecting colspans and explicit width lists lose just the overlap;
+    /// surviving cell identities, non-geometric attrs and content remain.
+    /// Fully covered cells and their subtrees are removed with an exact inverse.
+    /// Empty or all-column deletion is rejected atomically.
+    DeleteTableColumnsLogical {
+        /// Existing checked table.
+        table: NodeId,
+        /// Inclusive first logical column to remove.
+        start: usize,
+        /// Exclusive last logical column to remove; at most the column count.
+        end: usize,
+    },
     /// Merges a closed logical rectangle containing at least two cell origins.
     ///
     /// The geometric top-left cell keeps its identity, kind and non-geometric
