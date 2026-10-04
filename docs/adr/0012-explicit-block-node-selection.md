@@ -50,7 +50,25 @@ targets, exact attrs/atoms, atomic selection rollback, mapping, moves, Undo/Redo
 checkbox identity updates and unchanged legacy selection paths. The complete
 workspace/all-targets suite passed 943 tests and strict Clippy.
 
-No node-selection GPUI highlight, input proxy, caret navigation, Cut/Delete or
-host HR command completion is claimed. Those must read explicit provenance,
-preserve IME event ordering and avoid rebuilding the tag as an ordinary gap
-range. Existing Atomic/All behavior is not evidence of new-container UI parity.
+The subsequent GPUI integration renders the selected complete subtree and
+anchors an empty native input proxy at that block. `DocumentView::select_node`
+validates before focus; NoChange can explicitly reclaim focus. Node-only
+navigation and atomic-pointer selection are optional host router methods with
+default None. Generic node navigation consumes without inventing a caret;
+atomic pointer None retains the previous Atomic semantics. Invalid host targets
+preserve document/selection/marks/focus and do not fall through.
+
+Only an owned focused proxy transfers focus when a successful edit changes to
+another node/All/cell proxy. Background panes never take focus. Explicit node
+selection/navigation uses real wrapper bounds to reveal the target. Deferred
+scrolling rechecks focus, node, manual offset, viewport and document revision;
+stale geometry is remeasured. Ordinary caret scrolling keeps its prior path.
+
+Eighteen GPUI tests cover bounds, Copy, pointer opt-in/default/failure,
+IME cancel/commit/rejection/double unmark, range-to-range focus, same-window
+background panes and offscreen reveal. Combined workspace/all-targets tests
+pass 992 with strict Clippy, including the separate transient rule API.
+These are virtual-platform tests, not native GUI or inactive OS-window proof.
+Generic node edits still need a host policy; no complete HR product is implied.
+Cut still writes clipboard before Delete, so a rejected Delete can leave the
+new clipboard content. It is not a two-resource atomic operation.

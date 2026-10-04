@@ -195,7 +195,7 @@ impl ParagraphView {
         }
     }
 
-    /// Reuses native input/IME for a cell rectangle or complete root range.
+    /// Reuses native input/IME for a cell, whole-block or complete root range.
     /// The identity is only a layout anchor; no document node is added.
     pub(crate) fn for_document_range(
         session: SharedSession,
@@ -282,6 +282,7 @@ impl ParagraphView {
             let active = selection
                 .active_cell_range()
                 .is_some_and(|range| range.anchor() == self.node)
+                || selection.as_node_selection() == Some(self.node)
                 || (selection.is_all(session.document()) && self.node == session.document().root());
             return active.then(InlineContent::empty);
         }

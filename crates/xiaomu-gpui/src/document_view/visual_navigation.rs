@@ -415,6 +415,9 @@ impl DocumentView {
         if self.focused_child_composing(window, cx) {
             return;
         }
+        if self.navigate_node_selection(&step, extend, window, cx) {
+            return;
+        }
         if self.navigate_cell_range(&step, extend, window, cx) {
             return;
         }

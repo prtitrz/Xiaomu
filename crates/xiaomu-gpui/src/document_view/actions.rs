@@ -127,7 +127,13 @@ impl DocumentView {
     }
 
     pub(crate) fn down(&mut self, _: &Down, window: &mut Window, cx: &mut Context<Self>) {
-        if self.route_arrow_down(window, cx) {
+        let node_selection = self
+            .session
+            .borrow()
+            .selection()
+            .as_node_selection()
+            .is_some();
+        if !node_selection && self.route_arrow_down(window, cx) {
             return;
         }
         self.navigate(NavStep::Down, false, window, cx);
