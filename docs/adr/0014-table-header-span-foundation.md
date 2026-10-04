@@ -53,6 +53,28 @@ not inherit these temporary frontend restrictions.
 
 ## Evidence and continuation
 
+### Semantic merge/split foundation
+
+`MergeTableCells` requires a closed logical rectangle and keeps the geometric
+top-left cell's identity and kind. Content block identities move in row-major
+order; Core retains every block, including empty paragraphs. A product wanting
+ProseMirror's blank-cell filtering must perform that policy explicitly and test
+its complete command against the original factory. `SplitTableCell` retains the
+origin's content and allocates new unit cells/paragraphs after aggregate limits
+and the full identity range have been checked. Width entries are sliced by
+column, and unrelated attributes are retained.
+
+The opaque inverse records affected payloads, expected absence and maps. Apply
+checks exact live payloads and their current membership in the specified table
+before a batch exchange; moving an otherwise unchanged row to another valid
+table invalidates the old inverse. Whole-tree validation still precedes
+publication. Batch store exchange avoids cloning the entire node map per newly
+allocated cell; these checks do not constitute a total execution-memory sandbox.
+
+This increment passed 251 Core tests and strict Core all-target Clippy, including
+15 new merge/split/budget/mapping and stale-inverse cases. It has no product
+toolbar, row/column-span commands, native GUI or visual-parity claim yet.
+
 Core236, Runtime452 and ten new GPUI virtual tests passed; workspace/all-target
 tests total1034 and strict Clippy pass. Tests cover Header inverse, aggregate
 budgets/overflow, covered empty rows, rejected mutation state, metadata versions,

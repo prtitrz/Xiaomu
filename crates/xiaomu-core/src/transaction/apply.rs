@@ -8,6 +8,7 @@
 mod atom;
 mod structure;
 mod table;
+mod table_span;
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -121,6 +122,15 @@ impl ApplyContext {
             }
             TransactionStep::InsertTableColumn { table, index } => {
                 self.apply_insert_table_column(*table, *index)
+            }
+            TransactionStep::MergeTableCells { table, rect } => {
+                self.apply_merge_table_cells(*table, *rect)
+            }
+            TransactionStep::SplitTableCell { table, cell } => {
+                self.apply_split_table_cell(*table, *cell)
+            }
+            TransactionStep::RestoreTableCells { restore } => {
+                self.apply_restore_table_cells(restore)
             }
             TransactionStep::RestoreSubtree {
                 parent,

@@ -2,6 +2,7 @@
 
 use crate::document::{
     AtomKind, InlineAtomContent, Mark, MarkKind, MarkSet, Node, NodeAttrs, NodeContent, NodeId,
+    TableRect,
 };
 use crate::selection::InlinePoint;
 use crate::text::{TextOffset, TextRange};
@@ -178,6 +179,42 @@ pub enum TransactionStep {
         /// Number of existing cells (columns) before the insertion point
         /// in every row.
         index: usize,
+    },
+    /// Merges a closed logical rectangle containing at least two cell origins.
+    ///
+    /// The geometric top-left cell keeps its identity, kind and non-geometric
+    /// attributes. All blocks move, without copying or filtering, into it in
+    /// logical origin order. Spans become the rectangle's dimensions; a width
+    /// list retains the survivor's entries and appends unspecified zeros.
+    /// Missing/null width attributes remain distinct. Partial intersecting
+    /// spans and out-of-grid rectangles fail atomically. Product-specific
+    /// empty-block filtering and width reconciliation belong outside Core.
+    MergeTableCells {
+        /// Existing table containing the entire rectangle.
+        table: NodeId,
+        /// Nonempty half-open rectangle in logical row/column coordinates.
+        rect: TableRect,
+    },
+    /// Splits one spanning cell into unit cells over its current rectangle.
+    ///
+    /// The top-left cell keeps its identity and all content. Each other slot
+    /// receives a freshly allocated cell and empty paragraph. Every cell keeps
+    /// the original kind and non-geometric attrs; width lists are sliced by
+    /// column. A unit cell is rejected as a no-op. Core does not repair other
+    /// cells' widths or rewrite missing/null attributes into defaults.
+    SplitTableCell {
+        /// Existing table containing the cell origin.
+        table: NodeId,
+        /// Existing physical cell to split, including Header cells.
+        cell: NodeId,
+    },
+    /// Applies a guarded exact inverse produced by a semantic table-cell edit.
+    ///
+    /// Stale affected payloads or live identities to be restored cause atomic
+    /// rejection. Existing moved block identities and payloads are preserved.
+    RestoreTableCells {
+        /// Engine-produced inverse payload; callers cannot construct one.
+        restore: super::TableCellRestore,
     },
     /// Removes `node` together with its whole subtree from the document.
     ///
