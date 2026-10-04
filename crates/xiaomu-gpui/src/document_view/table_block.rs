@@ -25,6 +25,19 @@ impl DocumentView {
         index: usize,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
+        if navigation::table_needs_placeholder(self.session.borrow().document(), table) {
+            // The legacy flex-row renderer is only correct for unit cells.
+            // Never paint a ragged physical row as a different logical table.
+            // No product profile admits these tables until the span renderer
+            // and its geometry/selection/IME tests are connected.
+            return div()
+                .debug_selector(move || format!("unsupported-spanning-table-{table:?}"))
+                .border_1()
+                .p_2()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child("Merged-cell table layout is not yet enabled")
+                .into_any_element();
+        }
         let rows: Vec<NodeId> = {
             let session = self.session.borrow();
             session

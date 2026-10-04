@@ -4,7 +4,10 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::{Error, Result};
 
-use super::{DocumentRevision, DocumentVersion, Node, NodeId, NodeKind, NodeStore, allows_child};
+use super::{
+    DocumentRevision, DocumentVersion, Node, NodeId, NodeKind, NodeStore, TableGrid,
+    TableGridBudget, allows_child,
+};
 
 /// Immutable canonical Xiaomu document snapshot.
 ///
@@ -125,6 +128,14 @@ impl XiaomuDocument {
         &self.store
     }
 
+    /// Builds a checked logical grid for one table in this snapshot.
+    ///
+    /// Covered slots repeat cell identities; use `TableGrid::origins` for
+    /// unique physical cells. The grid belongs to this document revision.
+    pub fn table_grid(&self, table: NodeId) -> Result<TableGrid> {
+        TableGrid::new(self, table)
+    }
+
     /// Returns the number of canonical nodes.
     #[must_use]
     pub fn node_count(&self) -> usize {
@@ -160,16 +171,12 @@ fn validate_tree(root: NodeId, store: &NodeStore) -> Result<()> {
     let mut visited = BTreeSet::new();
     let mut active = BTreeSet::new();
     let mut parent_counts: BTreeMap<NodeId, usize> = BTreeMap::new();
-    // Per-table frame: the column count every visited row must share.
-    let mut table_columns: Vec<Option<usize>> = Vec::new();
+    let mut table_budget = TableGridBudget::default();
     let mut stack = vec![(root, true)];
 
     while let Some((id, entering)) = stack.pop() {
         if !entering {
             active.remove(&id);
-            if matches!(store.get(id).map(Node::kind), Some(NodeKind::Table)) {
-                table_columns.pop();
-            }
             continue;
         }
 
@@ -188,37 +195,11 @@ fn validate_tree(root: NodeId, store: &NodeStore) -> Result<()> {
         node.validate()?;
 
         if let Some(children) = node.content().as_children() {
-            match node.kind() {
-                NodeKind::Table => {
-                    if children.is_empty() {
-                        return Err(Error::InvalidTableStructure);
-                    }
-                    table_columns.push(None);
-                }
-                NodeKind::TableRow => {
-                    if children.is_empty()
-                        || !children.iter().all(|cell| {
-                            store
-                                .get(*cell)
-                                .is_some_and(|cell| matches!(cell.kind(), NodeKind::TableCell))
-                        })
-                    {
-                        return Err(Error::InvalidTableStructure);
-                    }
-                    let columns = match table_columns.last_mut() {
-                        Some(frame) => frame,
-                        None => return Err(Error::InvalidTableStructure),
-                    };
-                    match columns {
-                        None => *columns = Some(children.len()),
-                        Some(expected) if *expected == children.len() => {}
-                        Some(_) => return Err(Error::InvalidTableStructure),
-                    }
-                }
-                NodeKind::TableCell if children.is_empty() => {
-                    return Err(Error::InvalidTableStructure);
-                }
-                _ => {}
+            if matches!(node.kind(), NodeKind::Table) {
+                TableGrid::from_store(store, id, &mut table_budget)?;
+            }
+            if node.kind().is_table_cell() && children.is_empty() {
+                return Err(Error::InvalidTableStructure);
             }
             for child_id in children.iter().rev() {
                 let child = store.get(*child_id).ok_or(Error::UnknownNode)?;

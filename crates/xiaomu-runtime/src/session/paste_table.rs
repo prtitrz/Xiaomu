@@ -15,6 +15,7 @@ pub(crate) fn plan_table_paste(
     selection: DocumentSelection,
     slice: &ClipboardSlice,
 ) -> Result<PlannedAction, SessionError> {
+    crate::clipboard::require_unit_tables(slice.roots())?;
     let [table] = slice.roots() else {
         return Err(SessionError::ClipboardTableUnsupported);
     };
@@ -37,13 +38,14 @@ pub(crate) fn plan_table_paste(
         for (targets, source) in rect.iter().zip(rows) {
             for (cell, payload) in targets.iter().zip(source) {
                 displaced.extend(children_of(document, *cell));
-                attrs.push((*cell, payload.attrs().clone()));
+                attrs.push((*cell, payload.kind().clone(), payload.attrs().clone()));
                 staged = append_cell_blocks(staged, NodePath::new(*cell), 0, payload)?;
             }
         }
         staged = staged.stage(move |_| {
             let mut transaction = user_transaction();
-            for (node, attrs) in attrs {
+            for (node, kind, attrs) in attrs {
+                transaction.push_step(TransactionStep::SetNodeKind { node, kind });
                 transaction.push_step(TransactionStep::SetNodeAttrs { node, attrs });
             }
             for node in displaced {
@@ -62,8 +64,20 @@ pub(crate) fn plan_table_paste(
         return Err(SessionError::ClipboardTableUnsupported);
     };
     if let Some(cell) = focused_cell(document, point.node_id()) {
+        let row = document
+            .parent_of(cell)
+            .ok_or(SessionError::SelectionInvalid)?;
+        let table = document
+            .parent_of(row)
+            .ok_or(SessionError::SelectionInvalid)?;
+        super::table::require_unit_grid(document, table)?;
         if rows.len() != 1 || rows[0].len() != 1 {
             return Err(SessionError::ClipboardTableUnsupported);
+        }
+        // This route appends only cell content; do not silently downgrade a
+        // source header (or ordinary cell) into a different destination kind.
+        if document.node(cell).map(|node| node.kind()) != Some(rows[0][0].kind()) {
+            return Err(SessionError::UnsupportedTableOperation);
         }
         // A caret may live under a quote/list inside the cell. Append after
         // that direct child, not after an assumed direct paragraph.
@@ -104,7 +118,7 @@ pub(crate) fn plan_table_paste(
 fn focused_cell(document: &XiaomuDocument, node: NodeId) -> Option<NodeId> {
     let mut current = Some(node);
     while let Some(id) = current {
-        if matches!(document.node(id)?.kind(), NodeKind::TableCell) {
+        if document.node(id)?.kind().is_table_cell() {
             return Some(id);
         }
         current = document.parent_of(id);
@@ -119,13 +133,15 @@ pub(super) fn plan_fill_range(
     range: super::CellRange,
     blocks: &[ClipboardNode],
 ) -> Result<PlannedAction, SessionError> {
+    let cells = range.cells(document)?;
+    crate::clipboard::require_unit_tables(blocks)?;
     crate::clipboard::validate_roots(blocks).map_err(SessionError::Core)?;
     if blocks.is_empty() {
         return Ok(PlannedAction::NoChange);
     }
     let mut staged = StagedPlan::new(SelectionUpdate::MapExisting);
     let mut displaced = Vec::new();
-    for cell in range.cells(document)?.into_iter().flatten() {
+    for cell in cells.into_iter().flatten() {
         displaced.extend(children_of(document, cell));
         for (index, block) in blocks.iter().cloned().enumerate() {
             staged = append_node(staged, NodePath::new(cell), index, block)?;

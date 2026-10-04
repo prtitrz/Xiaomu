@@ -31,6 +31,7 @@ pub(crate) fn plan_paste_slice(
     selection: DocumentSelection,
     slice: &ClipboardSlice,
 ) -> Result<PlannedAction, SessionError> {
+    crate::clipboard::require_unit_tables(slice.roots())?;
     selection
         .validate(document)
         .map_err(|_| SessionError::SelectionInvalid)?;

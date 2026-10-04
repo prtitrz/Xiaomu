@@ -69,7 +69,29 @@ pub(crate) fn block_index(blocks: &[TextBlock], node: NodeId) -> Option<usize> {
 pub(crate) fn table_cell_ancestor(document: &XiaomuDocument, node: NodeId) -> Option<NodeId> {
     let mut current = Some(node);
     while let Some(id) = current {
-        if matches!(document.node(id)?.kind(), NodeKind::TableCell) {
+        if document.node(id)?.kind().is_table_cell() {
+            return Some(id);
+        }
+        current = document.parent_of(id);
+    }
+    None
+}
+
+/// The physical-row renderer admits only a checked unit-cell grid.
+pub(super) fn table_needs_placeholder(document: &XiaomuDocument, node: NodeId) -> bool {
+    document
+        .node(node)
+        .is_some_and(|node| node.kind() == &NodeKind::Table)
+        && !document
+            .table_grid(node)
+            .is_ok_and(|grid| !grid.has_spans())
+}
+
+/// The old physical-column navigation must not interpret a spanning grid.
+pub(crate) fn spanning_table_ancestor(document: &XiaomuDocument, node: NodeId) -> Option<NodeId> {
+    let mut current = Some(node);
+    while let Some(id) = current {
+        if table_needs_placeholder(document, id) {
             return Some(id);
         }
         current = document.parent_of(id);

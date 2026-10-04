@@ -2,7 +2,7 @@
 
 use crate::{Error, Result};
 
-use super::{AttrValue, NodeAttrs, NodeContent, NodeId, NodeKind};
+use super::{AttrValue, NodeAttrs, NodeContent, NodeId, NodeKind, TableCellAttrs};
 
 /// Immutable canonical document node.
 ///
@@ -61,6 +61,9 @@ impl Node {
     /// Reuses the construction invariants during full-snapshot validation.
     pub(crate) fn validate(&self) -> Result<()> {
         validate_content_shape(&self.kind, &self.content)?;
+        if self.kind.is_table_cell() {
+            TableCellAttrs::read(&self.attrs)?.validate_geometry()?;
+        }
         if matches!(self.kind, NodeKind::TaskItem)
             && !matches!(
                 self.attrs.get("checked"),
@@ -96,7 +99,8 @@ fn validate_content_shape(kind: &NodeKind, content: &NodeContent) -> Result<()> 
         | NodeKind::TaskItem
         | NodeKind::Table
         | NodeKind::TableRow
-        | NodeKind::TableCell => matches!(content, NodeContent::Children(_)),
+        | NodeKind::TableCell
+        | NodeKind::TableHeader => matches!(content, NodeContent::Children(_)),
         NodeKind::Paragraph | NodeKind::Heading(_) | NodeKind::CodeBlock => {
             matches!(content, NodeContent::Inline(_))
         }

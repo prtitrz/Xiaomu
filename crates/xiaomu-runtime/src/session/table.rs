@@ -120,6 +120,7 @@ impl DocumentSession {
         let Some(cell) = self.focused_table_cell() else {
             return Ok(SessionOutcome::NoChange);
         };
+        self.require_unit_cell_table(cell)?;
         match self.next_cell(cell) {
             Some(next) => self.install_caret_in_cell(next),
             None => {
@@ -140,6 +141,7 @@ impl DocumentSession {
         let Some(cell) = self.focused_table_cell() else {
             return Ok(SessionOutcome::NoChange);
         };
+        self.require_unit_cell_table(cell)?;
         match self.previous_cell(cell) {
             Some(previous) => self.install_caret_in_cell(previous),
             None => Ok(SessionOutcome::NoChange),
@@ -157,11 +159,23 @@ impl DocumentSession {
             DocumentPosition::Gap(_) => return None,
         };
         loop {
-            if matches!(self.document.node(current)?.kind(), NodeKind::TableCell) {
+            if self.document.node(current)?.kind().is_table_cell() {
                 return Some(current);
             }
             current = self.document.parent_of(current)?;
         }
+    }
+
+    fn require_unit_cell_table(&self, cell: NodeId) -> Result<(), SessionError> {
+        let row = self
+            .document
+            .parent_of(cell)
+            .ok_or(SessionError::SelectionInvalid)?;
+        let table = self
+            .document
+            .parent_of(row)
+            .ok_or(SessionError::SelectionInvalid)?;
+        require_unit_grid(&self.document, table)
     }
 
     /// The cell after `cell` in reading order, if any.
@@ -246,6 +260,7 @@ impl DocumentSession {
     /// Core reports the actual inserted row. Runtime resolves its first
     /// inline descendant after commit; redo restores the same target identity.
     fn append_row_and_enter(&mut self, table: NodeId) -> Result<SessionOutcome, SessionError> {
+        require_unit_grid(&self.document, table)?;
         self.history.break_group();
         self.clear_stored_marks();
         let index = self.children_of(table).map_or(0, |rows| rows.len());
@@ -410,6 +425,7 @@ impl DocumentSession {
         ) {
             return Err(SessionError::SelectionInvalid);
         }
+        require_unit_grid(&self.document, table)?;
         self.children_of(table)
             .ok_or(SessionError::SelectionInvalid)
     }
@@ -433,6 +449,23 @@ impl DocumentSession {
         }
         false
     }
+}
+
+/// The legacy commands below interpret physical child indexes as columns.
+/// Check geometry before planning any transaction, even one that Core could
+/// validate after deleting the wrong (but still rectangular) physical subset.
+pub(super) fn require_unit_grid(
+    document: &xiaomu_core::document::XiaomuDocument,
+    table: NodeId,
+) -> Result<(), SessionError> {
+    if document
+        .table_grid(table)
+        .map_err(SessionError::Core)?
+        .has_spans()
+    {
+        return Err(SessionError::UnsupportedTableOperation);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

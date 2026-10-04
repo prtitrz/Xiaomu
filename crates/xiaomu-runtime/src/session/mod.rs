@@ -38,6 +38,8 @@ mod split;
 mod stored_marks;
 mod structure;
 mod table;
+#[cfg(test)]
+mod table_geometry_tests;
 mod task_checked;
 
 pub use history::HistoryStack;

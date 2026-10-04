@@ -24,6 +24,9 @@ impl EntityInputHandler for ParagraphView {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<String> {
+        if self.input_is_hidden_by_table() {
+            return None;
+        }
         let text = self.display_content().0;
         let start = utf16::utf8_offset(&text, range_utf16.start);
         let end = utf16::utf8_offset(&text, range_utf16.end);
@@ -37,6 +40,9 @@ impl EntityInputHandler for ParagraphView {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
+        if self.input_is_hidden_by_table() {
+            return None;
+        }
         let text = self.display_content().0;
         if let Some(state) = self.composition.as_ref() {
             let range = state.selected_range_virtual_utf16(&self.canonical_text());
@@ -67,12 +73,19 @@ impl EntityInputHandler for ParagraphView {
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
+        if self.input_is_hidden_by_table() {
+            return None;
+        }
         self.composition
             .as_ref()
             .map(|state| state.marked_range_virtual_utf16(&self.canonical_text()))
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        if self.input_is_hidden_by_table() {
+            self.cancel_if_composing(cx);
+            return;
+        }
         // Stock GPUI's Linux mouse path unmarks the old input handler before
         // dispatching MouseDown. Unlike Zed's in-buffer preedit, our overlay
         // is not canonical yet: removing its marker must retain the text the
@@ -103,6 +116,10 @@ impl EntityInputHandler for ParagraphView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.input_is_hidden_by_table() {
+            self.cancel_if_composing(cx);
+            return;
+        }
         if self.rejected_composition {
             self.cancel_composition(cx);
             return;
@@ -158,6 +175,9 @@ impl EntityInputHandler for ParagraphView {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
+        if self.input_is_hidden_by_table() {
+            return None;
+        }
         let layout = self.last_layout.as_ref()?;
         let text = self.display_content().0;
         let start = utf16::utf8_offset(&text, range_utf16.start);
@@ -181,6 +201,9 @@ impl EntityInputHandler for ParagraphView {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<usize> {
+        if self.input_is_hidden_by_table() {
+            return None;
+        }
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
         let text = self.display_content().0;

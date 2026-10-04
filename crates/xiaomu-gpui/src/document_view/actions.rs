@@ -133,6 +133,9 @@ impl DocumentView {
             .selection()
             .as_node_selection()
             .is_some();
+        if self.selection_has_hidden_table_endpoint() {
+            return;
+        }
         if !node_selection && self.route_arrow_down(window, cx) {
             return;
         }
@@ -206,7 +209,7 @@ impl DocumentView {
             return;
         }
         let session = self.session.borrow();
-        let blocks = navigation::text_blocks(session.document());
+        let blocks = super::table_guard::rendered_text_blocks(session.document());
         drop(session);
         let (Some(first), Some(last)) = (blocks.first(), blocks.last()) else {
             return;
@@ -287,6 +290,9 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.selection_has_hidden_table_endpoint() {
+            return;
+        }
         if self.route_editor_command(EditorCommand::Tab { reverse: false }, window, cx) {
             return;
         }
@@ -356,6 +362,9 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.selection_has_hidden_table_endpoint() {
+            return;
+        }
         if self.route_editor_command(EditorCommand::Tab { reverse: true }, window, cx) {
             return;
         }
@@ -514,7 +523,7 @@ impl DocumentView {
 
     // ---- focus routing ----
 
-    fn focused_child(&self, window: &Window, cx: &App) -> Option<Entity<ParagraphView>> {
+    pub(super) fn focused_child(&self, window: &Window, cx: &App) -> Option<Entity<ParagraphView>> {
         if let Some((_, input)) = &self.range_input
             && input.read(cx).focus_handle(cx).is_focused(window)
         {
@@ -545,6 +554,12 @@ impl DocumentView {
 
     /// Moves platform focus to the block holding the selection focus.
     pub(crate) fn route_focus(&self, window: &mut Window, cx: &App) {
+        if self.selection_has_hidden_table_endpoint() {
+            if let Some(handle) = &self.focus_handle {
+                window.focus(handle);
+            }
+            return;
+        }
         if self.uses_range_input()
             && let Some((_, input)) = &self.range_input
         {

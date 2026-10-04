@@ -35,6 +35,7 @@ pub(crate) fn plan_paste_hierarchy(
     selection: DocumentSelection,
     slice: &ClipboardSlice,
 ) -> Result<PlannedAction, SessionError> {
+    crate::clipboard::require_unit_tables(slice.roots())?;
     let last_offset = slice
         .blocks()
         .last()

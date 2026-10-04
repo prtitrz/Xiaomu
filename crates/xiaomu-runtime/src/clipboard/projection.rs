@@ -211,11 +211,14 @@ fn slice_cell_range(
         .ok_or(SessionError::SelectionInvalid)?
         .attrs()
         .clone();
-    Ok(Some(ClipboardSlice::from_table(ClipboardNode::new(
-        NodeKind::Table,
-        attrs,
-        ClipboardNodeContent::Table { rows, row_attrs },
-    ))))
+    Ok(Some(
+        ClipboardSlice::from_table(ClipboardNode::new(
+            NodeKind::Table,
+            attrs,
+            ClipboardNodeContent::Table { rows, row_attrs },
+        ))
+        .map_err(SessionError::Core)?,
+    ))
 }
 
 /// Captures a complete canonical subtree, including containers and atomic

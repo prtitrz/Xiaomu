@@ -32,6 +32,9 @@ impl DocumentView {
     pub(super) fn range_input_anchor(&self) -> Option<NodeId> {
         let session = self.session.borrow();
         let selection = session.selection();
+        if self.selection_has_hidden_table_endpoint() {
+            return None;
+        }
         selection
             .active_cell_range()
             .map(|range| range.anchor())
@@ -66,11 +69,15 @@ impl DocumentView {
     }
 
     pub(super) fn cell_at_position(&self, position: Point<Pixels>) -> Option<NodeId> {
+        let session = self.session.borrow();
         self.cell_registry
             .borrow()
             .iter()
             .rev()
-            .find(|(_, bounds)| bounds.contains(&position))
+            .find(|(cell, bounds)| {
+                bounds.contains(&position)
+                    && navigation::spanning_table_ancestor(session.document(), *cell).is_none()
+            })
             .map(|(cell, _)| *cell)
     }
 
@@ -83,6 +90,15 @@ impl DocumentView {
     ) {
         if self.focused_child_composing(window, cx) {
             return;
+        }
+        {
+            let session = self.session.borrow();
+            if [anchor, focus]
+                .into_iter()
+                .any(|cell| navigation::spanning_table_ancestor(session.document(), cell).is_some())
+            {
+                return;
+            }
         }
         // Dragging an outer range over a nested cell addresses its ancestor
         // in the anchor's table. A nested range never escapes its own table.
@@ -125,6 +141,9 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if navigation::spanning_table_ancestor(self.session.borrow().document(), cell).is_some() {
+            return;
+        }
         let anchor = if extend {
             self.session
                 .borrow()
@@ -184,7 +203,7 @@ impl DocumentView {
             let Some(range) = session.selection().active_cell_range() else {
                 return;
             };
-            navigation::nav_units(session.document())
+            super::table_guard::rendered_nav_units(session.document())
                 .into_iter()
                 .find(|unit| {
                     let node = match unit {
@@ -217,6 +236,13 @@ impl DocumentView {
         let Some(range) = self.session.borrow().selection().active_cell_range() else {
             return false;
         };
+        if navigation::spanning_table_ancestor(self.session.borrow().document(), range.focus())
+            .is_some()
+        {
+            // Consume the old physical-column gesture without guessing a new
+            // logical cell. A future span-aware route replaces this boundary.
+            return true;
+        }
         if !extend {
             self.exit_cell_range(window, cx);
             return true;
