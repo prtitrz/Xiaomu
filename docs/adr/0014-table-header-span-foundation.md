@@ -88,6 +88,23 @@ Core node-identity maps, including absorbed cells; Undo restores the original
 reverse range. Clear/marks failure tests cover canonical content, selection,
 pending marks, typing groups, history and listener counts.
 
+### Isolated public-API layout prototype
+
+`table_layout` measures real GPUI child subtrees at a supplied same-frame content
+width, solves shared column edges and rowspan height constraints, and uses those
+same coordinates in prepaint and paint. Header identity, fixed/automatic/mixed
+widths and covered physical rows are represented. Errors show a noninteractive
+visible placeholder without prepainting failed children; an element instance is
+single-layout-use and repeated requests fail explicitly.
+
+Thirteen new tests, including five virtual GPUI lifecycle/child-bound/input-query
+tests, passed within 300 GPUI all-target tests and strict Clippy. This module is
+not wired to DocumentView and does not relax protected-span input. Virtual tests
+are not native font/IME verification. Equal automatic-width sharing and an
+all-fixed table's exact width sum are explicit prototype policies, not browser
+`table-layout:auto` equivalence. Same-frame viewport integration, full-cell hit
+registration, native resize/IME and intrinsic width comparison remain next work.
+
 Core236, Runtime452 and ten new GPUI virtual tests passed; workspace/all-target
 tests total1034 and strict Clippy pass. Tests cover Header inverse, aggregate
 budgets/overflow, covered empty rows, rejected mutation state, metadata versions,
