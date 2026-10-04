@@ -166,6 +166,10 @@ impl ApplyContext {
         let content = self.inline_content(node)?;
         let spans = inverse::spans_within(&content, range)?;
         let next = inline::replace_text(&content, range, replacement)?;
+        // Undo inserts into the post-edit text. Deleting a prefix may expose
+        // a differently marked right run, so its inherited marks cannot be
+        // inferred from the original content.
+        let inverse_steps = inverse::replace_text_inverse(node, range, replacement, &next, &spans);
         self.rewrite_node(node, self.attrs_of(node)?, NodeContent::Inline(next))?;
 
         let step_map = StepMap::TextReplaced {
@@ -173,8 +177,6 @@ impl ApplyContext {
             range,
             replacement_len: replacement.len(),
         };
-        let inverse_steps =
-            inverse::replace_text_inverse(node, range, replacement, &content, &spans);
         Ok((vec![step_map], inverse_steps))
     }
 
