@@ -72,3 +72,31 @@ body 必须通过有界 duplicate-key 检查；不得先用 JSON last-wins 决�
 真实 fresh IDs、精确选择映射和单 history Undo/Redo；重复铺排、grow、
 非闭合 clipping、caret paste、外部 HTML 与未知 attrs 准入分别验收。
 宿主工厂 Node oracle、Rust 测试和真实产品 GUI 是独立证据。
+# Exact rectangle replacement foundation
+
+`TransactionStep::ReplaceTableRect { table, rect, tree }` replaces a closed
+destination rectangle with the same logical dimensions from a validated
+`TableTreeTemplate`. It keeps destination Table/row IDs and attributes plus all
+outside cell forests. The template's outer Table and direct row wrappers are
+not allocated; every incoming cell descendant, nested Table/row and inline atom
+receives a fresh identity. `TableTreeTemplate::node_count()` still reports all
+captured nodes, not this operation's smaller fresh-ID count.
+
+The final aggregate table budget subtracts removed nested grids before charging
+incoming nested grids. The entire identity range is checked before allocation.
+An exact opaque `TableCellRestore` inverse includes rich descendants, position
+maps and expected parent edges through the destination table. Stale payloads,
+reparented rows/descendants, occupied identities and later transaction failure
+are rejected without publishing a changed snapshot or consuming allocator IDs.
+
+This is a semantic Core transaction, not automatic clipboard fitting. Runtime's
+default native CellRange-carrier gate remains closed. A product policy must
+explicitly validate provenance, styles, width-repair requirements and its final
+selection before publishing an `Apply` plan. Core does not guess ProseMirror
+selection, normalize widths, repeat/clip source cells, grow a destination table
+or copy source wrapper attributes onto destination rows.
+
+The foundation passed 13 focused rectangle tests, the seven existing TableTree
+tests, all310 Core and511 Runtime tests, strict Core Clippy and source/dependency
+guards. Consumer virtual views additionally check copy/paste, exact Undo/Redo
+and isolated SQLite readback; that is not native desktop rectangle acceptance.

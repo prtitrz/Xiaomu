@@ -10,6 +10,7 @@ mod structure;
 mod subtree_restore;
 mod table;
 mod table_axis;
+mod table_rect;
 mod table_span;
 mod table_tree;
 
@@ -129,6 +130,9 @@ impl ApplyContext {
                 index,
                 tree,
             } => self.apply_insert_table_tree(*parent, *index, tree),
+            TransactionStep::ReplaceTableRect { table, rect, tree } => {
+                self.apply_replace_table_rect(*table, *rect, tree)
+            }
             TransactionStep::InsertTableRow { table, index } => {
                 self.apply_insert_table_row(*table, *index)
             }

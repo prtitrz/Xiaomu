@@ -9,7 +9,8 @@ use crate::{Error, Result};
 #[cfg(test)]
 mod tests;
 
-/// Opaque inverse of a merge, split, logical row/column edit, or restoration.
+/// Opaque inverse of a merge, split, logical row/column edit, rectangle
+/// replacement, or restoration.
 ///
 /// Produced only by transaction application. Applying it requires every
 /// affected live payload to match its recorded post-edit state and every

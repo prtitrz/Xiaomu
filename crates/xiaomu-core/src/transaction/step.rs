@@ -168,6 +168,27 @@ pub enum TransactionStep {
         /// Bounded immutable template captured from a validated source table.
         tree: super::TableTreeTemplate,
     },
+    /// Replaces a closed logical rectangle with a captured table's cell forest.
+    ///
+    /// The source logical dimensions must equal the rectangle. The target
+    /// table, row identities, attributes and row list stay intact; cells outside
+    /// the rectangle and their descendants are unchanged. Source outer table
+    /// and row wrappers are omitted, while every cell and descendant receives
+    /// a fresh identity, including nested table wrappers and inline atoms.
+    /// Cell kinds, raw attributes, content and independent marks are preserved.
+    ///
+    /// Invalid/nonclosed bounds, mismatched dimensions, exhausted identities
+    /// and excessive final aggregate grids fail atomically. Maps delete every
+    /// removed descendant and record actual physical cell insertion positions.
+    /// Undo restores the exact old tree; Redo reuses the first fresh identities.
+    ReplaceTableRect {
+        /// Existing table whose logical rectangle is replaced.
+        table: NodeId,
+        /// Nonempty closed rectangle in the target's logical coordinates.
+        rect: TableRect,
+        /// Complete immutable table template supplying cells and descendants.
+        tree: super::TableTreeTemplate,
+    },
     /// Inserts one row into `table` at `index`, matching its established
     /// column count.
     ///
