@@ -3,8 +3,9 @@
 //! Clipboard nodes deliberately carry no canonical `NodeId`. A fragment is a
 //! value tree that preserves selected container semantics while allowing paste
 //! to allocate fresh identities in the destination document. Inline atoms are
-//! captured as detached payloads ([`ClipboardAtom`]: kind, attrs, and
-//! `fallback_text`) anchored at fragment text boundaries, so an atom never
+//! captured as detached payloads ([`ClipboardAtom`]: typed kind, attrs, and
+//! complete content including independent marks) anchored at fragment text
+//! boundaries, so an atom never
 //! drags its source identity across the clipboard.
 
 use std::collections::BTreeMap;
@@ -140,8 +141,9 @@ impl ClipboardInline {
     /// Returns the plain-text fallback with `fallback_text` spliced in at
     /// every atom anchor.
     ///
-    /// External applications see the same content a reader would: atoms
-    /// appear as their host-neutral fallback text.
+    /// Atoms appear as their host-neutral fallback text. This is deliberately
+    /// lossy: a hard-break atom and literal LF text both contribute LF, so the
+    /// fallback alone cannot recover typed atom identity or independent marks.
     #[must_use]
     pub fn plain_text(&self) -> String {
         let mut plain = String::new();

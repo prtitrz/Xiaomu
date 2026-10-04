@@ -3,6 +3,11 @@
 Status: Accepted
 Date: 2026-08-29
 
+2026-10-04: the exclusive canonical-representation decision is superseded by
+[ADR0009](0009-typed-hard-break.md). The default host-neutral LF command remains
+compatible; independently marked structured hard breaks now have a typed atom
+foundation. Full Runtime/product editing integration is still in progress.
+
 ## Context
 
 P3.1 已将 GPUI 文本布局升级为 visual-line / soft-wrap 模型，但 canonical inline content 仍只有 `TextRun`。普通 block 的 `Enter` 目前执行结构 split，`Shift+Enter` 尚无文档语义；`CodeBlock` 也仍沿用 paragraph 式单行编辑，因此 Enter 会错误地拆成两个 block，plain-text paste 中的换行也会被折叠为空格。

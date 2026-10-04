@@ -24,13 +24,14 @@ impl Node {
         attrs: NodeAttrs,
         content: NodeContent,
     ) -> Result<Self> {
-        validate_content_shape(&kind, &content)?;
-        Ok(Self {
+        let node = Self {
             id,
             kind,
             attrs,
             content,
-        })
+        };
+        node.validate()?;
+        Ok(node)
     }
 
     /// Returns this node's stable identity.
@@ -55,6 +56,19 @@ impl Node {
     #[must_use]
     pub const fn content(&self) -> &NodeContent {
         &self.content
+    }
+
+    /// Reuses the construction invariants during full-snapshot validation.
+    pub(crate) fn validate(&self) -> Result<()> {
+        validate_content_shape(&self.kind, &self.content)?;
+        if let (NodeKind::InlineAtom(kind), NodeContent::InlineAtom(content)) =
+            (&self.kind, &self.content)
+            && kind.is_hard_break()
+            && (!self.attrs.is_empty() || content.fallback_text() != "\n")
+        {
+            return Err(Error::InvalidHardBreak);
+        }
+        Ok(())
     }
 
     #[cfg(test)]

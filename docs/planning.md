@@ -12,6 +12,8 @@
 
 2026-10-03 本地宿主迁移增量：[混合字号原型](mixed-font-size-prototype.md) 已通过纯解析/内核检查，仍为 `cfg(test)`，尚未接入生产排版。真实字体否证与下一公共 API 原型边界见该文档，不改变上述正式阶段完成口径。
 
+2026-10-04：[typed HardBreak foundation](adr/0009-typed-hard-break.md) 已具 canonical marks/identity、v10 剪贴板、seam-aware Core split/join 与 GPUI LF 投影，774 自动测试及严格 Clippy 通过。下一步是 Runtime 编辑、宿主 codec/policy 和真实几何/IME 验证；尚未开放产品 hardBreak 可写能力，不以安全拒绝或底层通过替代完整功能。
+
 ## 1. 项目定位
 
 晓木解决的是 Rust 原生应用缺少成熟结构化富文本编辑基础设施的问题。

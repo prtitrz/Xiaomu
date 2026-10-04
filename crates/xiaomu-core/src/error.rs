@@ -43,6 +43,8 @@ pub enum Error {
     InvalidAtomKind,
     /// An inline atom has no textual fallback for clipboard/accessibility.
     InvalidAtomFallback,
+    /// A built-in hard break has a fallback other than LF or non-empty attributes.
+    InvalidHardBreak,
     /// The same inline-atom node is referenced more than once by one parent.
     DuplicateInlineAtomReference,
     /// An inline placement references a node that is not an inline atom.
@@ -105,6 +107,9 @@ impl fmt::Display for Error {
             Self::InvalidCustomNodeKind => f.write_str("custom node kind key must not be empty"),
             Self::InvalidAtomKind => f.write_str("inline atom kind key must not be empty"),
             Self::InvalidAtomFallback => f.write_str("inline atom fallback text must not be empty"),
+            Self::InvalidHardBreak => {
+                f.write_str("built-in hard break requires an LF fallback and empty attributes")
+            }
             Self::DuplicateInlineAtomReference => {
                 f.write_str("inline content contains a duplicate atom reference")
             }

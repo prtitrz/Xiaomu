@@ -156,7 +156,7 @@ fn mixed_v8_runs_keep_old_links_and_new_fields_distinct() {
     assert_eq!(attrs["target"], json!({"type":"null"}));
     assert_eq!(attrs["class"], json!({"type":"string","value":""}));
     assert_eq!(attrs["href"]["value"], "https://example.test/路径");
-    for version in [1, 2, 3, 4, 5, 6, 7, 10, 999] {
+    for version in [1, 2, 3, 4, 5, 6, 7, 11, 999] {
         let mut changed = wire.clone();
         changed["version"] = version.into();
         assert!(
@@ -251,7 +251,7 @@ fn conditional_versions_cover_tables_row_attrs_null_and_deep_links() {
 fn legacy_links_keep_v4_through_v7_title_semantics_and_historical_rejections() {
     let slice = slice(LinkMark::new("https://old.test", None));
     let original = wire(&slice);
-    for version in 1..=10 {
+    for version in 1..=11 {
         for omitted in [false, true] {
             let mut wire = original.clone();
             wire["version"] = version.into();
@@ -262,7 +262,7 @@ fn legacy_links_keep_v4_through_v7_title_semantics_and_historical_rejections() {
                     .remove("title");
             }
             let decoded = decode_metadata(slice.plain_text(), &wire.to_string());
-            assert_eq!(decoded.is_some(), (4..=9).contains(&version));
+            assert_eq!(decoded.is_some(), (4..=10).contains(&version));
             if let Some(decoded) = decoded {
                 assert_eq!(decoded, slice);
             }

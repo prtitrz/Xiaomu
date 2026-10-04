@@ -21,7 +21,7 @@
 use std::collections::BTreeSet;
 
 use crate::document::NodeId;
-use crate::selection::{NodeGap, NodeSelection, TextPoint, TextSelection};
+use crate::selection::{InlinePoint, NodeGap, NodeSelection, TextPoint, TextSelection};
 use crate::text::{TextOffset, TextRange};
 
 /// How an ambiguous position is resolved during mapping.
@@ -141,6 +141,36 @@ pub enum StepMap {
         /// Identity allocated for the tail sibling.
         inserted: NodeId,
     },
+    /// An inline node was split at an exact text/atom gap. Atom identities
+    /// survive; points after the gap move to the tail and subtract its byte
+    /// offset and, at the split boundary only, its atom ordinal.
+    InlineNodeSplit {
+        /// Parent whose child list gained the tail sibling.
+        parent: NodeId,
+        /// Index of the inserted tail sibling.
+        index: usize,
+        /// Exact split gap in the original inline node.
+        at: InlinePoint,
+        /// Fresh or restored identity of the tail sibling.
+        inserted: NodeId,
+    },
+    /// Two mixed-inline siblings were joined. Only `second` is removed;
+    /// its atoms keep their identities and migrate into `first`.
+    InlineNodeJoined {
+        /// Parent whose child list lost the absorbed sibling.
+        parent: NodeId,
+        /// Former child index of `second`.
+        index: usize,
+        /// Surviving inline-bearing node.
+        first: NodeId,
+        /// Absorbed inline-bearing node, whose identity was removed.
+        second: NodeId,
+        /// UTF-8 text byte length of `first` before the join.
+        first_len: usize,
+        /// Number of end-anchored atoms in `first` before the join. Points
+        /// at `second`'s zero byte boundary add this to their atom ordinal.
+        seam_atom_index: usize,
+    },
     /// Two adjacent inline-bearing siblings were merged into one; the
     /// absorbed node left the document together with its whole subtree.
     NodeJoined {
@@ -169,7 +199,10 @@ impl StepMap {
     /// is the insertion boundary and also resolves by `bias`. Affinity is
     /// preserved. Atom-only edits do not move text coordinates, and the
     /// mixed-inline replacement maps text coordinates exactly like the
-    /// text-only one because atoms never consume bytes.
+    /// text-only one because atoms never consume bytes. A text point has
+    /// ordinal zero for a mixed split. Mixed joins project the resulting
+    /// text byte coordinate; use [`StepMap::map_inline_point`] whenever a
+    /// seam ordinal must survive.
     #[must_use]
     pub fn map_text_point(&self, point: TextPoint, bias: MapBias) -> MappedPosition<TextPoint> {
         match self {
@@ -211,7 +244,34 @@ impl StepMap {
                     point.affinity(),
                 ))
             }
+            Self::InlineNodeSplit { at, inserted, .. } => {
+                if point.node_id() != at.node_id() {
+                    return MappedPosition::Mapped(point);
+                }
+                let old = point.offset().as_usize();
+                let split = at.text_offset().as_usize();
+                // A TextPoint denotes ordinal zero. At a later atom gap,
+                // that point is strictly before the split, regardless of bias.
+                let to_tail =
+                    old > split || (old == split && at.atom_index() == 0 && bias == MapBias::End);
+                let (node, offset) = if to_tail {
+                    (*inserted, old - split)
+                } else {
+                    (point.node_id(), old)
+                };
+                MappedPosition::Mapped(TextPoint::new(
+                    node,
+                    TextOffset::from_validated_byte_index(offset),
+                    point.affinity(),
+                ))
+            }
             Self::NodeJoined {
+                first,
+                second,
+                first_len,
+                ..
+            }
+            | Self::InlineNodeJoined {
                 first,
                 second,
                 first_len,
@@ -252,7 +312,9 @@ impl StepMap {
             | Self::InlineTextReplaced { .. }
             | Self::InlineAtomInserted { .. }
             | Self::InlineAtomRemoved { .. } => MappedPosition::Mapped(gap),
-            Self::NodeInserted { parent, index, .. } | Self::NodeSplit { parent, index, .. } => {
+            Self::NodeInserted { parent, index, .. }
+            | Self::NodeSplit { parent, index, .. }
+            | Self::InlineNodeSplit { parent, index, .. } => {
                 if gap.parent() != *parent || gap.index() < *index {
                     return MappedPosition::Mapped(gap);
                 }
@@ -264,6 +326,20 @@ impl StepMap {
                     gap.index()
                 };
                 MappedPosition::Mapped(NodeGap::new(gap.parent(), index))
+            }
+            Self::InlineNodeJoined {
+                parent,
+                index,
+                second,
+                ..
+            } => {
+                if gap.parent() == *second {
+                    MappedPosition::Deleted
+                } else if gap.parent() == *parent && gap.index() > *index {
+                    MappedPosition::Mapped(NodeGap::new(gap.parent(), gap.index() - 1))
+                } else {
+                    MappedPosition::Mapped(gap)
+                }
             }
             Self::NodeRemoved {
                 parent,
@@ -294,7 +370,10 @@ impl StepMap {
     #[must_use]
     pub fn map_node_selection(&self, selection: NodeSelection) -> MappedPosition<NodeSelection> {
         match self {
-            Self::InlineAtomRemoved { removed, .. } => {
+            Self::InlineAtomRemoved { removed, .. }
+            | Self::InlineNodeJoined {
+                second: removed, ..
+            } => {
                 if selection.node_id() == *removed {
                     MappedPosition::Deleted
                 } else {

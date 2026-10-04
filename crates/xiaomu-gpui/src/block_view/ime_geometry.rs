@@ -179,6 +179,7 @@ impl ParagraphView {
         projection
             .atoms()
             .iter()
+            .filter(|atom| !atom.is_hard_break())
             .filter_map(|atom| {
                 let range = atom.display_range().clone();
                 let Some((base, state)) = &splice else {
