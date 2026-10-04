@@ -256,6 +256,8 @@ JoinNodes          → 删除追加文本 + RestoreSubtree
 
 宿主结构规划可返回 `SelectionUpdate::PreserveSelection`，把原 anchor、focus、affinity 与 cell range 完整保留，并在最终文档上验证；不做自动位置映射或退化成 caret。失效选区在普通/staged 发布前失败，保留原 marks、typing group、history 与 listener 状态。既有 `PreserveFocus` / `MapExisting` 语义不变。相关门禁是 Runtime 8 项、GPUI 外部 12 项和内部 4 项新增自动测试；这不等于某宿主列表产品行为或原生 GUI 已验收。
 
+宿主把文本 LF 转成零字节 inline atom（或反向转换）时，可使用 `SelectionUpdate::Exact { selection }` 提供最终快照坐标，保留正反范围、双端 affinity 和 atom ordinal。普通与 staged commit 都只在最终快照上验证该选区，非法 UTF-8 边界、已删节点、越界 ordinal 或非 collapsed 选区搭配显式 stored marks 时整体拒绝；不得借中间快照的合法性提前发布。Undo 保留原选区，Redo 恢复精确后选区。新增 11 项 integration 和 3 项 staged unit 回归覆盖后续 typing grouping、redo 与 listener 原子性。此公开 enum 新增 variant，外部穷尽匹配须更新；原 selection policies 不变。
+
 范围剪贴板按真实树叶序选择 Inline 与 Atomic 节点，保留覆盖范围中的图片等原子块及其 attrs、marks 和最小容器；只有真正 collapsed Atomic 选区走单块复制捷径，Atomic 作为前后范围端点不再截断后续内容。未知被选叶节点和 Gap 端点明确拒绝，未选内容不被顺带复制。Cut 在写系统剪贴板及删除之前，先验证结构 metadata 能 encode/decode 且与原 slice 全等，失败不写、不删；普通 Copy 的既有纯文本 fallback 不变。新门禁含 7 项 Runtime 范围/回滚测试与 2 项 lossless-write helper 测试，不能宣称已测试真实 OS Cut。通用 mixed inline/atomic paste 仍明确拒绝，宿主可以通过 policy 接受完整 detached roots 并提供自己的事务规划。通用跨块删除与 Ctrl+A 的首尾原子块范围仍是独立待完善项。
 
 `EditIntent::insert_line_break()` 返回独立 `InsertLineBreak`，让 policy 明确区分键盘换行与同字节 `PasteText("\n")`。只有 policy 返回 Continue 后的私有默认 dispatch 才将它转换为既有 isolated LF 插入；不会二次调用 policy，但最终 candidate 验证仍照常执行。无 policy 的 canonical/marks/selection/Undo 行为保留。**外部自定义 policy 若以前只按 PasteText 匹配换行，必须显式识别新 variant**，不能假定公共 constructor 永远展开为 PasteText。这里仍是命令来源区分，并未把 canonical LF 改成精确保真 TipTap hardBreak 节点。

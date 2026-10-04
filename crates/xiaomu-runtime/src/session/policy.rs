@@ -90,6 +90,10 @@ impl<'a> SessionContext<'a> {
 
 /// A policy's decision before the default intent planner runs.
 #[derive(Clone, Debug)]
+// Exact final selections make EditPlan 232 bytes. Keep the established Apply
+// API and stack-owned one-shot plans rather than allocating every edit merely
+// to reduce the size of the two empty decision variants.
+#[allow(clippy::large_enum_variant)]
 pub enum IntentDisposition {
     /// Use the existing host-neutral intent behavior.
     Continue,

@@ -6,7 +6,7 @@ use xiaomu_core::document::{NodeId, NodeKind, XiaomuDocument};
 ///
 /// Endpoints are cell identities, so row/column insertions never move the
 /// rectangle — it only shrinks when an endpoint cell's subtree is removed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CellRange {
     anchor: NodeId,
     focus: NodeId,
