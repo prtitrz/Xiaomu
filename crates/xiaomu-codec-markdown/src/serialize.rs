@@ -129,6 +129,8 @@ fn write_block(
         NodeKind::InlineAtom(_)
         | NodeKind::Custom(_)
         | NodeKind::ListItem
+        | NodeKind::TaskList
+        | NodeKind::TaskItem
         | NodeKind::Document
         | _ => {
             return Err(MarkdownCodecError::UnsupportedNodeKind {
@@ -552,6 +554,8 @@ pub(crate) fn describe_kind(kind: &NodeKind) -> String {
         NodeKind::BulletList => "BulletList".to_owned(),
         NodeKind::OrderedList => "OrderedList".to_owned(),
         NodeKind::ListItem => "ListItem".to_owned(),
+        NodeKind::TaskList => "TaskList".to_owned(),
+        NodeKind::TaskItem => "TaskItem".to_owned(),
         NodeKind::CodeBlock => "CodeBlock".to_owned(),
         NodeKind::HorizontalRule => "HorizontalRule".to_owned(),
         NodeKind::Image => "Image".to_owned(),

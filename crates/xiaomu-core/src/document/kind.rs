@@ -46,6 +46,16 @@ pub enum NodeKind {
     OrderedList,
     /// List item container.
     ListItem,
+    /// Task list container whose children are task items.
+    TaskList,
+    /// Task item containing ordinary blocks.
+    ///
+    /// Empty items and any valid leading block are allowed by Core; a host
+    /// codec or session policy may impose a stricter final-document schema.
+    ///
+    /// The `checked` attribute is missing, null, or boolean. Missing and null
+    /// display as unchecked without rewriting the preserved attribute value.
+    TaskItem,
     /// Code block.
     CodeBlock,
     /// Horizontal rule atomic block.

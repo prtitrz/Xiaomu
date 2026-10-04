@@ -98,6 +98,8 @@ XiaomuDocument
 
 `HeadingLevel` 校验 built-in heading 范围 `1..=6`。`NodeKind` 提供 built-in structural semantics，并支持 extension-defined custom key。
 
+`NodeKind::TaskList` / `TaskItem` 是独立 builtin 容器，不转换成普通列表。TaskList 只接 TaskItem；TaskItem 接普通 block（可嵌套 task/ordinary list、Code、Image、Quote、Table）。Core 允许空容器与任意合法首 block；宿主持久化的 paragraph-first/nonempty 规则归 codec / final SessionPolicy 校验。`checked` 仅存在 NodeAttrs，missing / null / false / true 原样保存，错误类型由 `InvalidTaskItemChecked` 拒绝；读取不补默认值，未知 Core attrs 仍保留。Task clipboard 条件写 v12，显式保存 open/closed，遍历包括 table-cell payload；旧非 Task wire 不变，旧版本拒绝新 kind。默认 PasteSlice 在 policy 之后、任何 fitting/state 改动之前返回 `UnsupportedEdit`，防止 task wrapper 被单段 paste 静默丢失；generic Markdown 明确拒绝 Task。此为 canonical/clipboard 基础，未包含 task 命令、checkbox UI 或原生验收。见 [ADR 0011](adr/0011-typed-task-lists.md)。
+
 `MarkSet` 使用确定性顺序，完全相同的重复 mark 自动规范化，同一 semantic kind 的冲突值被拒绝。`TextRun` 将非空 `TextBuffer` 与 normalized `MarkSet` 绑定。Run segmentation 不属于 document coordinate。
 
 `LinkMark` 以 typed `LinkAttributes` 保存 href / target / rel / class / title，每字段使用 `StringAttribute::Missing / Null / Value(String)`，空字符串不等同于缺失或 null。旧 `new(href,title)` 保留经典含义，`from_attributes` / `attributes` 提供精确保真；`href()` 返回 `Option<&str>`，不以空字符串伪装缺失。`classic_parts()` 只在旧 href/title 两字段无损时返回投影。所有字段参与 mark equality、same-kind conflict 和普通 transaction/inverse；Core 不推断宿主默认值、不执行 URI。详见 [ADR 0007](adr/0007-exact-link-attributes.md)。

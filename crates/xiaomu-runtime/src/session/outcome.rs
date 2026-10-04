@@ -34,6 +34,11 @@ pub enum SessionError {
     SelectionDeleted,
     /// The resolved selection is not valid for the new snapshot.
     SelectionInvalid,
+    /// The default planner cannot preserve the requested edit semantics.
+    ///
+    /// Task-containing clipboard slices require an explicit task-aware policy
+    /// plan; default fitting must not downgrade them to ordinary text/lists.
+    UnsupportedEdit,
     /// A structured paste would have to drop detached inline atoms.
     ///
     /// Multi-block and hierarchical paste cannot address freshly inserted
@@ -71,6 +76,9 @@ impl fmt::Display for SessionError {
             }
             Self::SelectionInvalid => {
                 f.write_str("selection is invalid for the resulting snapshot")
+            }
+            Self::UnsupportedEdit => {
+                f.write_str("edit requires an explicit semantics-preserving planner")
             }
             Self::ClipboardAtomicUnsupported => {
                 f.write_str("clipboard fragment places an atomic block in an unsupported context")

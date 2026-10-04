@@ -348,6 +348,20 @@ pub struct ClipboardSlice {
 }
 
 impl ClipboardSlice {
+    pub(crate) fn contains_tasks(&self) -> bool {
+        fn contains(node: &ClipboardNode) -> bool {
+            if matches!(node.kind(), NodeKind::TaskList | NodeKind::TaskItem) {
+                return true;
+            }
+            match node.content() {
+                ClipboardNodeContent::Children(children) => children.iter().any(contains),
+                ClipboardNodeContent::Table { rows, .. } => rows.iter().flatten().any(contains),
+                _ => false,
+            }
+        }
+        self.roots.iter().any(contains)
+    }
+
     pub(crate) fn from_roots(roots: Vec<ClipboardNode>) -> Self {
         let mut blocks = Vec::new();
         flatten_blocks(&roots, &mut blocks);
