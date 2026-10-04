@@ -116,10 +116,12 @@ fn list_nesting_depth(document: &XiaomuDocument, list_id: NodeId) -> usize {
     let mut depth = 1;
     let mut current = list_id;
     while let Some(parent) = document.parent_of(current) {
-        if document
-            .node(parent)
-            .is_some_and(|node| matches!(node.kind(), NodeKind::BulletList | NodeKind::OrderedList))
-        {
+        if document.node(parent).is_some_and(|node| {
+            matches!(
+                node.kind(),
+                NodeKind::BulletList | NodeKind::OrderedList | NodeKind::TaskList
+            )
+        }) {
             depth += 1;
         }
         current = parent;

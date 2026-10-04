@@ -24,6 +24,7 @@ pub(crate) mod markers;
 pub(crate) mod mouse;
 pub(crate) mod navigation;
 mod table_block;
+mod task_checkbox;
 mod vertical_geometry;
 mod visual_navigation;
 
@@ -39,6 +40,10 @@ mod host_intent_tests;
 mod list_marker_tests;
 #[cfg(test)]
 mod select_all_inline_atoms_tests;
+#[cfg(test)]
+mod task_checkbox_tests;
+#[cfg(test)]
+mod task_layout_tests;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
