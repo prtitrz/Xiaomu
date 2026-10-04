@@ -120,12 +120,25 @@ pub(super) fn resolve_selection(
         // outdent); staged list commands resolve the same policy in
         // `commit_staged`.
         SelectionUpdate::PreserveFocus => preserved_focus(before, document),
+        SelectionUpdate::PreserveSelection => preserved_selection(before, document),
         SelectionUpdate::CaretAtGap { gap } => {
             gap.validate(document)
                 .map_err(|_| SessionError::SelectionInvalid)?;
             Ok(DocumentSelection::collapsed(*gap))
         }
     }
+}
+
+/// Retains the full selection only when every coordinate remains valid in
+/// the final snapshot, irrespective of temporary removals in the change map.
+pub(super) fn preserved_selection(
+    before: DocumentSelection,
+    document: &XiaomuDocument,
+) -> Result<DocumentSelection, SessionError> {
+    before
+        .validate(document)
+        .map_err(|_| SessionError::SelectionInvalid)?;
+    Ok(before)
 }
 
 /// Focus affinity of `selection`, defaulting to Before at a gap.
