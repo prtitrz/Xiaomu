@@ -24,24 +24,27 @@ fn children(document: &XiaomuDocument, node: NodeId) -> &[NodeId] {
 
 impl DocumentView {
     pub(super) fn uses_range_input(&self) -> bool {
+        self.range_input_anchor().is_some()
+    }
+
+    /// The identity of the virtual input surface for the current selection.
+    /// It can change without leaving range-selection mode.
+    pub(super) fn range_input_anchor(&self) -> Option<NodeId> {
         let session = self.session.borrow();
         let selection = session.selection();
-        selection.active_cell_range().is_some() || selection.is_all(session.document())
+        selection
+            .active_cell_range()
+            .map(|range| range.anchor())
+            .or_else(|| selection.as_node_selection())
+            .or_else(|| {
+                selection
+                    .is_all(session.document())
+                    .then_some(session.document().root())
+            })
     }
 
     pub(super) fn sync_range_input(&mut self, cx: &mut Context<Self>) {
-        let anchor = {
-            let session = self.session.borrow();
-            let selection = session.selection();
-            selection
-                .active_cell_range()
-                .map(|range| range.anchor())
-                .or_else(|| {
-                    selection
-                        .is_all(session.document())
-                        .then_some(session.document().root())
-                })
-        };
+        let anchor = self.range_input_anchor();
         if self.range_input.as_ref().map(|(cell, _)| *cell) == anchor {
             return;
         }

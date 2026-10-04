@@ -11,6 +11,54 @@ use gpui::{Context, Window};
 use std::rc::Rc;
 
 impl DocumentView {
+    /// Offers a native atomic-block pointer gesture without first changing
+    /// canonical selection or marks. Rejection never falls through to Atomic.
+    pub(super) fn route_atomic_selection(
+        &mut self,
+        node: xiaomu_core::document::NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(router) = &self.command_router else {
+            return false;
+        };
+        if self.focused_child_composing(window, cx) {
+            return true;
+        }
+        let result = {
+            let session = self.session.borrow();
+            // A rendered pointer target may have disappeared since paint.
+            // Do not offer a stale/non-atomic source to a host callback.
+            if let Err(error) = xiaomu_runtime::session::DocumentSelection::collapsed(
+                xiaomu_runtime::session::DocumentPosition::Atomic(node),
+            )
+            .validate(session.document())
+            {
+                eprintln!("xiaomu: atomic pointer target rejected: {error}");
+                return true;
+            }
+            router.select_atomic(EditorCommandContext::from_session(&session), node)
+        };
+        match result {
+            Ok(None) => return false,
+            Ok(Some(selection)) => {
+                let outcome = self.session.borrow_mut().set_document_selection(selection);
+                match outcome {
+                    Ok(_) => {
+                        self.desired_x = None;
+                        self.sync_children(cx);
+                        self.route_focus(window, cx);
+                        self.request_focus_scroll(cx);
+                        cx.notify();
+                    }
+                    Err(error) => eprintln!("xiaomu: atomic pointer selection rejected: {error}"),
+                }
+            }
+            Err(error) => eprintln!("xiaomu: host atomic pointer rejected: {error}"),
+        }
+        true
+    }
+
     /// Sets an optional pure command router; `None` restores default routing.
     ///
     /// Changes only this view. Existing sibling views remain independent.

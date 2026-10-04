@@ -4,11 +4,23 @@
 //! focused block computes caret bounds from its wrapped layout and requests
 //! the smallest vertical viewport adjustment needed to keep the focus visible.
 
-use gpui::{Bounds, Pixels, Window};
+use gpui::{Bounds, Pixels, Point, Window};
 
 use super::ParagraphView;
 
 impl ParagraphView {
+    /// Keeps a whole selected block visible without inventing a text caret.
+    /// Oversized containers reveal their leading viewport-sized portion.
+    pub(crate) fn take_selected_node_scroll_offset(
+        &self,
+        bounds: &Bounds<Pixels>,
+    ) -> Option<Point<Pixels>> {
+        let scroll = self.scroll_handle.as_ref()?;
+        let mut visible = *bounds;
+        visible.size.height = visible.size.height.min(scroll.bounds().size.height);
+        self.take_keep_visible_offset(&visible)
+    }
+
     /// Marks the next focused-caret prepaint as needing a keep-visible check.
     ///
     /// Passive viewport scrolling never sets this flag. This distinction lets
@@ -24,15 +36,25 @@ impl ParagraphView {
     /// after the current frame so every child of the tracked viewport observes
     /// one consistent scroll offset during prepaint and paint.
     pub(crate) fn keep_caret_visible(&self, caret: &Bounds<Pixels>, window: &mut Window) {
-        if !self.scroll_caret_pending.get() {
-            return;
-        }
-        let Some(scroll_handle) = self.scroll_handle.as_ref() else {
+        let Some(offset) = self.take_keep_visible_offset(caret) else {
             return;
         };
+        let scroll_handle = self
+            .scroll_handle
+            .as_ref()
+            .expect("validated scroll handle")
+            .clone();
+        window.on_next_frame(move |_, _| scroll_handle.set_offset(offset));
+    }
+
+    fn take_keep_visible_offset(&self, caret: &Bounds<Pixels>) -> Option<Point<Pixels>> {
+        if !self.scroll_caret_pending.get() {
+            return None;
+        }
+        let scroll_handle = self.scroll_handle.as_ref()?;
         let viewport = scroll_handle.bounds();
         if viewport.size.height <= Pixels::ZERO {
-            return;
+            return None;
         }
 
         // A valid viewport has observed this request, even if the caret is
@@ -55,11 +77,6 @@ impl ParagraphView {
             offset.y = minimum_y;
         }
 
-        if offset.y == original_y {
-            return;
-        }
-
-        let scroll_handle = scroll_handle.clone();
-        window.on_next_frame(move |_, _| scroll_handle.set_offset(offset));
+        (offset.y != original_y).then_some(offset)
     }
 }

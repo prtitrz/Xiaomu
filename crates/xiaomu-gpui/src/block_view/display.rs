@@ -127,6 +127,11 @@ impl ParagraphView {
     /// Returns the current canonical-to-visual atom projection for this block.
     #[must_use]
     pub(crate) fn atom_display_projection(&self) -> Option<InlineAtomDisplayProjection> {
+        // A range proxy is always an empty virtual input surface, even when
+        // its anchor happens to be a real inline block containing atoms.
+        if self.is_range_input() {
+            return None;
+        }
         let session = self.session.borrow();
         InlineAtomDisplayProjection::build(session.document(), self.node, &self.atom_renderers)
     }
@@ -210,6 +215,9 @@ impl ParagraphView {
     /// Projects the focused mixed-inline caret into the visual byte space.
     #[must_use]
     pub(crate) fn display_focus_caret(&self) -> Option<(usize, CursorAffinity)> {
+        if self.is_range_input() {
+            return self.focus_caret();
+        }
         let projection = self.atom_display_projection()?;
         if projection.atoms().is_empty() {
             return self.focus_caret();
