@@ -2,9 +2,9 @@
 //!
 //! The writer is total over the built-in semantics it supports and refuses
 //! everything else. It never silently drops content: unknown node kinds,
-//! inline atoms, unknown attributes, extended or nullable link attributes,
-//! host asset images, and whitespace that cannot survive a round-trip all
-//! fail export.
+//! inline atoms, unknown attributes, text-style marks, extended or nullable
+//! link attributes, host asset images, and whitespace that cannot survive a
+//! round-trip all fail export.
 
 use xiaomu_core::document::{
     IMAGE_ATTR_ALT, IMAGE_ATTR_ASSET, IMAGE_ATTR_HEIGHT, IMAGE_ATTR_SRC, IMAGE_ATTR_TITLE,
@@ -374,6 +374,12 @@ fn render_run(run: &TextRun) -> Result<Vec<String>> {
         return Ok(vec![piece]);
     }
 
+    if marks.contains(MarkKind::TextStyle) {
+        return Err(MarkdownCodecError::UnsupportedMark {
+            mark: "TextStyle".to_owned(),
+        });
+    }
+
     let mut piece = escape_text(text);
     if marks.contains(MarkKind::Italic) {
         piece = format!("*{piece}*");
@@ -422,6 +428,7 @@ fn describe_mark(mark: &Mark) -> String {
         Mark::Underline => "Underline".to_owned(),
         Mark::Strike => "Strike".to_owned(),
         Mark::Link(_) => "Link".to_owned(),
+        Mark::TextStyle(_) => "TextStyle".to_owned(),
         _ => "Unknown".to_owned(),
     }
 }
@@ -444,6 +451,17 @@ fn inline_text(document: &XiaomuDocument, node: &Node) -> Result<String> {
     {
         return Err(MarkdownCodecError::UnsupportedMark {
             mark: "Heading + Link".to_owned(),
+        });
+    }
+    // Even an all-missing text-style mark has semantic presence. Plain-text
+    // heading export must reject it rather than strip the mark or its fields.
+    if inline
+        .runs()
+        .iter()
+        .any(|run| run.marks().contains(MarkKind::TextStyle))
+    {
+        return Err(MarkdownCodecError::UnsupportedMark {
+            mark: "Heading + TextStyle".to_owned(),
         });
     }
     Ok(inline

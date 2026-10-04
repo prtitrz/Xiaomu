@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 gpui.workspace = true
+cssparser = "=0.29.6"
 xiaomu-core.workspace = true
 xiaomu-runtime.workspace = true
 

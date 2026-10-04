@@ -10,26 +10,15 @@
 
 use std::collections::BTreeSet;
 
-use xiaomu_core::document::{
-    InlineContent, MarkKind, Node, NodeContent, NodeId, TextRun, XiaomuDocument,
-};
+use xiaomu_core::document::{InlineContent, Node, NodeContent, NodeId, TextRun, XiaomuDocument};
 use xiaomu_core::selection::InlinePoint;
 use xiaomu_core::text::{TextBuffer, TextOffset, TextRange};
 use xiaomu_core::transaction::TransactionStep;
 
 use super::cross_block;
-use super::intent::{EditPlan, PlannedAction, PrimaryEdit, SelectionUpdate};
+use super::intent::{EditPlan, MARK_KINDS, PlannedAction, PrimaryEdit, SelectionUpdate};
 use super::structure::user_transaction;
 use super::{DocumentPosition, DocumentSelection, SessionError};
-
-const MARK_KINDS: [MarkKind; 6] = [
-    MarkKind::Bold,
-    MarkKind::Italic,
-    MarkKind::Code,
-    MarkKind::Underline,
-    MarkKind::Strike,
-    MarkKind::Link,
-];
 
 /// Uses the established plain-text planner when both boundary blocks are
 /// atom-free, otherwise applies the mixed-inline migration contract below.

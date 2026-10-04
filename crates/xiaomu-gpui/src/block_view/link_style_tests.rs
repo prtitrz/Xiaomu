@@ -34,7 +34,8 @@ fn link_decoration_preserves_canonical_text_attrs_and_other_marks() {
     assert!(segments[0].link && segments[0].bold);
     assert!(!segments[1].link);
     let color = gpui::rgba(0x111111ff).into();
-    let runs = text_runs(&segments, gpui::font("sans-serif"), color);
+    let fonts = crate::block_view::text_style::FontCatalog::from_names(&[]);
+    let runs = text_runs(&segments, gpui::font("sans-serif"), color, &fonts);
     assert!(runs[0].underline.is_some());
     assert_ne!(runs[0].color, color);
     assert_eq!(runs[1].color, color);
@@ -43,9 +44,10 @@ fn link_decoration_preserves_canonical_text_attrs_and_other_marks() {
 }
 
 #[test]
-fn transient_preedit_is_not_misrepresented_as_link_but_neighbors_keep_style() {
+fn explicit_empty_pending_marks_keep_preedit_plain_but_link_neighbors_styled() {
     let content = inline();
-    let (text, segments) = project_display_content(&content, Some((3..3, "预编辑")));
+    let (text, segments) =
+        project_display_content(&content, Some((3..3, "预编辑", &MarkSet::empty())));
     assert_eq!(text, "链预编辑接🙂 plain");
     let preedit = segments
         .iter()

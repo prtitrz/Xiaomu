@@ -14,7 +14,8 @@ fn inline(runs: &[(&str, MarkSet)]) -> InlineContent {
 fn collapsed_composition_is_spliced_at_the_caret() {
     let content = inline(&[("before-after", MarkSet::empty())]);
 
-    let (text, segments) = project_display_content(&content, Some((7..7, "nihao")));
+    let (text, segments) =
+        project_display_content(&content, Some((7..7, "nihao", &MarkSet::empty())));
 
     assert_eq!(text, "before-nihaoafter");
     assert_eq!(segments.len(), 3);
@@ -33,7 +34,7 @@ fn composition_replaces_a_range_across_styled_runs() {
         ("cd", MarkSet::empty()),
     ]);
 
-    let (text, segments) = project_display_content(&content, Some((1..8, "X")));
+    let (text, segments) = project_display_content(&content, Some((1..8, "X", &MarkSet::empty())));
 
     assert_eq!(text, "aXcd");
     assert_eq!(
@@ -81,7 +82,7 @@ fn multiline_projection_preserves_canonical_lf_and_segment_offsets() {
 fn composition_after_hard_break_keeps_lf_in_virtual_projection() {
     let content = inline(&[("a\nb", MarkSet::empty())]);
 
-    let (text, segments) = project_display_content(&content, Some((2..2, "中")));
+    let (text, segments) = project_display_content(&content, Some((2..2, "中", &MarkSet::empty())));
 
     assert_eq!(text, "a\n中b");
     assert_eq!(

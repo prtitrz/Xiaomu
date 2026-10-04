@@ -5,9 +5,7 @@
 //! staged hierarchy planner so list/quote semantics survive reconstruction
 //! while the whole paste remains one history entry.
 
-use xiaomu_core::document::{
-    InlineContent, MarkKind, NodeContent, NodeId, TextRun, XiaomuDocument,
-};
+use xiaomu_core::document::{InlineContent, NodeContent, NodeId, TextRun, XiaomuDocument};
 use xiaomu_core::selection::InlinePoint;
 use xiaomu_core::text::{TextBuffer, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionStep};
@@ -18,20 +16,13 @@ use crate::clipboard::{
 
 use super::atom_edit::atoms_inside_span;
 use super::cross_block_atom as cross_block;
-use super::intent::{EditPlan, PlannedAction, PrimaryEdit, SelectionUpdate, concatenated};
+use super::intent::{
+    EditPlan, MARK_KINDS, PlannedAction, PrimaryEdit, SelectionUpdate, concatenated,
+};
 use super::paste_hierarchy;
 use super::paste_table;
 use super::structure::{children_of, user_transaction};
 use super::{DocumentPosition, DocumentSelection, SessionError};
-
-const MARK_KINDS: [MarkKind; 6] = [
-    MarkKind::Bold,
-    MarkKind::Italic,
-    MarkKind::Code,
-    MarkKind::Underline,
-    MarkKind::Strike,
-    MarkKind::Link,
-];
 
 /// Plans one structured paste, including replacement of an existing
 /// cross-block selection when necessary.

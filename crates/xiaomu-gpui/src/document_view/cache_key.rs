@@ -17,6 +17,7 @@ pub(crate) struct LayoutCacheKey {
     node: NodeId,
     epoch: u64,
     width_whole_px: i32,
+    style: u64,
 }
 
 impl LayoutCacheKey {
@@ -32,8 +33,43 @@ impl LayoutCacheKey {
             node,
             epoch,
             width_whole_px: width_px.round() as i32,
+            style: 0,
         }
     }
+    /// Includes effective shaping and paint inputs, not just document edits.
+    pub(crate) const fn with_style(mut self, style: u64) -> Self {
+        self.style = style;
+        self
+    }
+}
+
+/// Hash the actual projection, resolved families and host style. In particular,
+/// changing color/family without a document epoch cannot reuse painted runs.
+pub(crate) fn style_fingerprint(
+    text: &str,
+    font: &gpui::Font,
+    color: gpui::Hsla,
+    font_size: gpui::Pixels,
+    line_height: gpui::Pixels,
+    runs: &[gpui::TextRun],
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut state = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut state);
+    font.hash(&mut state);
+    color.hash(&mut state);
+    f32::from(font_size).to_bits().hash(&mut state);
+    f32::from(line_height).to_bits().hash(&mut state);
+    runs.len().hash(&mut state);
+    for run in runs {
+        run.len.hash(&mut state);
+        run.font.hash(&mut state);
+        run.color.hash(&mut state);
+        run.background_color.hash(&mut state);
+        run.underline.hash(&mut state);
+        run.strikethrough.hash(&mut state);
+    }
+    state.finish()
 }
 #[cfg(test)]
 mod tests {
@@ -89,5 +125,6 @@ mod tests {
         assert_ne!(base, LayoutCacheKey::new(first, 1, 300.0), "epoch");
         assert_ne!(base, LayoutCacheKey::new(second, 0, 300.0), "node");
         assert_ne!(base, LayoutCacheKey::new(first, 0, 301.0), "width");
+        assert_ne!(base.with_style(1), base.with_style(2), "render style");
     }
 }
