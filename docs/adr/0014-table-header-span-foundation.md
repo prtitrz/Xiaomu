@@ -82,6 +82,15 @@ This increment passed 251 Core tests and strict Core all-target Clippy, includin
 15 new merge/split/budget/mapping and stale-inverse cases. It has no product
 toolbar, row/column-span commands, native GUI or visual-parity claim yet.
 
+Split additionally preflights replicated attribute payload before cloning it:
+64 MiB of accounted output keys/strings/value storage, one million values and
+depth 64, with checked multiplication by output-cell count. Width lists are
+projected as one output entry per cell. This closes a large-opaque-attribute
+times-many-cells expansion that logical-grid limits alone cannot bound. It
+excludes BTree/allocator overhead and transient inverse copies, so is still not
+a process-memory sandbox. Five added boundary tests bring Core to 256 passing
+tests with strict Clippy; the rejected expansion preserves store and next ID.
+
 Runtime logical-selection integration passed 467 tests and strict all-target
 Clippy, including 15 new cases. Raw merge maps both CellRange endpoints through
 Core node-identity maps, including absorbed cells; Undo restores the original
@@ -111,9 +120,10 @@ budgets/overflow, covered empty rows, rejected mutation state, metadata versions
 logical TSV, hidden inputs, stale handler ownership and independent panes.
 No native GUI, arbitrary CSS or completed span-layout claim is made.
 
-Next work replaces the guards in coherent slices: unique-origin logical
-CellSelection, semantic subtree construction/paste, measured span/column-width
-layout and hit/IME geometry, then merge/split and logical row/column operations.
+Next work connects the tested logical selection and merge/split foundations to
+product commands, adds semantic subtree construction/partial paste and logical
+row/column operations, and integrates same-frame measured layout with real
+hit/IME geometry. The standalone layout prototype does not remove these gates.
 Each operation needs an identity-preserving inverse and one published history
 unit. Original product repair-on-Undo behavior must be recorded rather than
 assumed to restore raw JSON; Core never repairs persisted input implicitly.
