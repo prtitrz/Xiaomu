@@ -1,5 +1,6 @@
 //! Canonical inline marks and normalized mark sets.
 
+use super::LinkMark;
 use crate::{Error, Result};
 
 /// Semantic identity of a mark independent of its attributes.
@@ -17,37 +18,6 @@ pub enum MarkKind {
     Strike,
     /// Hyperlink.
     Link,
-}
-
-/// Attributes carried by a link mark.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct LinkMark {
-    href: String,
-    title: Option<String>,
-}
-
-impl LinkMark {
-    /// Creates a link mark. URI interpretation belongs to hosts/codecs; Core
-    /// preserves the string without applying network or product policy.
-    #[must_use]
-    pub fn new(href: impl Into<String>, title: Option<String>) -> Self {
-        Self {
-            href: href.into(),
-            title,
-        }
-    }
-
-    /// Returns the preserved link target.
-    #[must_use]
-    pub fn href(&self) -> &str {
-        &self.href
-    }
-
-    /// Returns the optional preserved title.
-    #[must_use]
-    pub fn title(&self) -> Option<&str> {
-        self.title.as_deref()
-    }
 }
 
 /// Canonical inline formatting mark.

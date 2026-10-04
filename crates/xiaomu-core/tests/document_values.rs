@@ -86,7 +86,7 @@ fn link_mark_preserves_href_and_optional_title() {
         Some("Open referenced node".to_owned()),
     );
 
-    assert_eq!(link.href(), "xiaomu://document/node");
+    assert_eq!(link.href(), Some("xiaomu://document/node"));
     assert_eq!(link.title(), Some("Open referenced node"));
 }
 
