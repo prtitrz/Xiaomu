@@ -108,3 +108,24 @@ fn batch_edit_shares_every_unchanged_content_payload() {
     assert!(before.shares_node_payload(&context.store, table));
     assert!(before.shares_node_payload(&context.store, context.root));
 }
+
+#[test]
+fn split_rejects_owned_attribute_expansion_before_copying_cells_or_allocating_ids() {
+    let (mut context, table, cell) = spanning_context(10_000);
+    let attributes = NodeAttrs::new(BTreeMap::from([
+        ("colspan".into(), AttrValue::Integer(10_000)),
+        ("opaque".into(), AttrValue::String("x".repeat(16 * 1024))),
+    ]))
+    .unwrap();
+    context
+        .rewrite_node(cell, attributes, context.content_of(cell).unwrap())
+        .unwrap();
+    let store = context.store.clone();
+    let ceiling = context.next_node_id;
+    assert_eq!(
+        context.apply_split_table_cell(table, cell).unwrap_err(),
+        Error::TableResourceLimit
+    );
+    assert_eq!(context.store, store);
+    assert_eq!(context.next_node_id, ceiling);
+}

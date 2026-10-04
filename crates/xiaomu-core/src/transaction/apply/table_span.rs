@@ -12,6 +12,8 @@ use crate::{Error, Result};
 
 use super::ApplyContext;
 
+mod attrs_budget;
+
 #[cfg(test)]
 mod tests;
 
@@ -158,6 +160,7 @@ impl ApplyContext {
             .checked_add(u64::try_from(new_nodes).map_err(|_| Error::NodeIdExhausted)?)
             .ok_or(Error::NodeIdExhausted)?;
         let original = self.store.get(cell).ok_or(Error::UnknownNode)?;
+        attrs_budget::check_split_attrs(original.attrs(), slots)?;
         let mut expected = vec![original.clone()];
         let mut replacement = Vec::new();
         replacement
