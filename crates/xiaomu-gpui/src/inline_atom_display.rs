@@ -9,7 +9,7 @@
 
 use std::ops::Range;
 
-use xiaomu_core::document::{NodeId, NodeKind, XiaomuDocument};
+use xiaomu_core::document::{MarkSet, NodeId, NodeKind, XiaomuDocument};
 use xiaomu_core::selection::{CursorAffinity, InlinePoint};
 use xiaomu_core::text::{TextBuffer, TextOffset};
 
@@ -22,9 +22,22 @@ pub struct InlineAtomDisplaySpan {
     text_offset: TextOffset,
     atom_index: usize,
     display_range: Range<usize>,
+    marks: MarkSet,
+    hard_break: bool,
 }
 
 impl InlineAtomDisplaySpan {
+    /// Returns the atom's canonical formatting, independent of its renderer.
+    #[must_use]
+    pub const fn marks(&self) -> &MarkSet {
+        &self.marks
+    }
+
+    /// Whether this is the intrinsic line-break atom rather than a host chip.
+    #[must_use]
+    pub const fn is_hard_break(&self) -> bool {
+        self.hard_break
+    }
     /// Returns the canonical atom identity.
     #[must_use]
     pub const fn atom(&self) -> NodeId {
@@ -136,6 +149,8 @@ impl InlineAtomDisplayProjection {
                 text_offset: placement.text_offset(),
                 atom_index,
                 display_range: start..end,
+                marks: content.marks().clone(),
+                hard_break: kind.is_hard_break(),
             });
         }
 

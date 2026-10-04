@@ -106,7 +106,7 @@ XiaomuDocument
 
 `InlineContent` 在构造时规范化相邻且 `MarkSet` 相同的 `TextRun`。`NodeAttrs` 使用确定性 key 顺序并 preservation-first 保存未知属性值。`AttrValue::Null` 是显式空值，支持 list/object 内递归保留；`get(key) == Some(&AttrValue::Null)` 与缺失 key 的 `None` 不同，不表示删除属性。它不放宽 image 等 typed attrs 校验，也不引入浮点值；canonical document version 仍为 v1。见 [ADR 0006](adr/0006-nullable-node-attrs.md)。
 
-ADR 0004 固化了当前 line-break contract：LF `\n`（U+000A）是晓木唯一赋予 line-break 语义的 inline scalar。Paragraph / Heading 等普通富文本 inline node 中 LF 表示 HardBreak；CodeBlock 中 LF 表示代码 newline；soft-wrap 不产生 canonical byte。LF 继续使用普通 UTF-8 `TextOffset`，因此无需 HardBreak 专用 Core content variant 或 position system。Core 原始 construction 当前仍容忍 CR 作为普通 scalar；平台 adapter / codec 表达 line break 时负责 `CRLF / CR → LF` 规范化。
+ADR0004 的默认 LF contract 保留：literal LF 使用普通 UTF-8 TextOffset，soft-wrap 不产生 canonical byte。为区分外部结构中的 literal LF 与独立 marked hardBreak，[ADR0009](adr/0009-typed-hard-break.md) 新增 typed builtin atom，沿用现有 NodeId/placement/ordinal，不建立第三套坐标。`AtomKind::new("hardBreak")` 仍是普通 extension，不会被字符串猜测升级。builtin 要求空 attrs、LF fallback；InlineAtomContent 的真实 MarkSet 参与 equality/inverse。当前是 canonical/wire/投影基础，Runtime/产品编辑还未完全接入。
 
 ### Canonical Node Tree 与 Snapshot
 
@@ -202,7 +202,7 @@ JoinNodes
 
 metadata seam 使用 `BTreeMap<String, String>`，不携带宿主专用类型。
 
-P4.2 落地了 atom-aware mutation：`InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom` 以 stable `NodeId` 与 `(text_offset, atom_index)` seam 操作 canonical atom；`ReplaceInlineText` 是 mixed-inline text replacement contract，消费 `InlinePoint` boundary 区分 seam 两侧 caret gap。旧 `ReplaceText / AddMark / RemoveMark` 保持 text-only 语义，在含 atom 的歧义 seam / range 上 fail closed；`ReplaceInlineText` 对"替换区域内含 atom"的 step 同样 fail closed，原子删除必须用 `RemoveInlineAtom` 显式表达；`SplitNode / JoinNodes` 遇 atom 仍 fail closed。
+P4.2 的 `InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom` 以 stable NodeId 和 `(text_offset, atom_index)` seam 操作 atom。旧 ReplaceText/AddMark/RemoveMark 保持 text-only 语义，歧义范围 fail closed；ReplaceInlineText 内部含 atom 的范围仍需显式 RemoveInlineAtom。新增 SplitInlineNode 使用完整 InlinePoint 切分，旧 SplitNode 仍拒 atoms；JoinNodes 已保留 mixed atoms，RestoreJoinedNode 的精确 suffix 校验与 split mapping 恢复原右节点 identity/attrs/kind。Core 映射已测，Runtime structural command resolver 的接入仍在进行。
 
 ### Position Mapping
 

@@ -8,19 +8,18 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+mod atoms;
 mod marks;
 mod strict_json;
+use atoms::WireAtom;
 use marks::WireRun;
 
 use serde::{Deserialize, Serialize};
-use xiaomu_core::document::{
-    AtomKind, AttrValue, HeadingLevel, InlineAtomContent, NodeAttrs, NodeKind,
-};
+use xiaomu_core::document::{AttrValue, HeadingLevel, NodeAttrs, NodeKind};
 use xiaomu_core::text::TextBuffer;
 
 use super::fragment::{
-    ClipboardAtom, ClipboardInline, ClipboardNode, ClipboardNodeContent, ClipboardSlice,
-    validate_roots,
+    ClipboardInline, ClipboardNode, ClipboardNodeContent, ClipboardSlice, validate_roots,
 };
 
 const FORMAT: &str = "xiaomu.clipboard";
@@ -44,6 +43,9 @@ const VERSION_NULL_ATTRS: u32 = 7;
 const VERSION_LINK_ATTRIBUTES: u32 = 8;
 // TextStyle is a new semantic mark even when all three fields are missing.
 const VERSION_TEXT_STYLE: u32 = 9;
+// Built-in atom identity and independent atom marks need an explicit tagged
+// kind, never a string projection that could turn a built-in into an extension.
+const VERSION_TYPED_ATOMS: u32 = 10;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -68,6 +70,12 @@ impl ClipboardMetadataError {
         }
     }
 
+    const fn resource_limit() -> Self {
+        Self {
+            message: "clipboard metadata exceeds supported resource limits",
+        }
+    }
+
     const fn serialization() -> Self {
         Self {
             message: "clipboard metadata could not be serialized",
@@ -87,7 +95,9 @@ impl std::error::Error for ClipboardMetadataError {}
 ///
 /// The plain-text fallback is deliberately not duplicated in the metadata;
 /// callers put [`ClipboardSlice::plain_text`] in the platform text flavor.
-/// Text-style marks encode as v9, preserving all three missing/null/string
+/// Built-in hard breaks or independently marked inline atoms encode as v10,
+/// preserving typed kind identity and the complete mark set. Otherwise,
+/// text-style marks encode as v9, preserving all three missing/null/string
 /// attributes without interpreting CSS. Otherwise, links outside the classic
 /// href/title form encode as v8, preserving all
 /// five fields and their missing/null/string distinctions. Otherwise,
@@ -95,13 +105,19 @@ impl std::error::Error for ClipboardMetadataError {}
 /// tables with nonempty row attributes encode as v6; other tables stay at
 /// v5 and non-table fragments at v4. Older readers fall back to plain text
 /// only for payloads whose semantics they cannot preserve.
+///
+/// All versions share a resource boundary: at most 16 MiB of metadata,
+/// 100,000 JSON values and nesting within 128 levels (also subject to serde's
+/// recursion limit). Encoding rejects output outside the decoding budget.
 pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetadataError> {
     let roots = slice
         .roots()
         .iter()
         .map(WireNode::from_node)
         .collect::<Result<Vec<_>, _>>()?;
-    let version = if roots.iter().any(WireNode::carries_text_style) {
+    let version = if roots.iter().any(WireNode::carries_typed_atoms) {
+        VERSION_TYPED_ATOMS
+    } else if roots.iter().any(WireNode::carries_text_style) {
         VERSION_TEXT_STYLE
     } else if roots.iter().any(WireNode::carries_link_attributes) {
         VERSION_LINK_ATTRIBUTES
@@ -114,12 +130,16 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
     } else {
         VERSION
     };
-    serde_json::to_string(&WireEnvelope {
+    let metadata = serde_json::to_string(&WireEnvelope {
         format: FORMAT.to_owned(),
         version,
         roots,
     })
-    .map_err(|_| ClipboardMetadataError::serialization())
+    .map_err(|_| ClipboardMetadataError::serialization())?;
+    if !strict_json::validate(&metadata) {
+        return Err(ClipboardMetadataError::resource_limit());
+    }
+    Ok(metadata)
 }
 
 /// Decodes Xiaomu metadata when it matches `plain_text` exactly.
@@ -129,15 +149,18 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
 /// differs from the platform text all return `None`. The caller should then
 /// paste the supplied plain text normally. An older envelope carrying a
 /// newer feature (v4 tables, v5 row attributes, pre-v7 null attributes, or
-/// pre-v8 extended link marks, or pre-v9 text-style marks)
+/// pre-v8 extended link marks, pre-v9 text-style marks, or pre-v10 typed/marked atoms)
 /// is also rejected. Unknown attribute variants reject the entire fragment
 /// rather than silently dropping values. Historical v1-v3 envelopes remain
-/// unsupported, as before the null-attribute extension.
+/// unsupported, as before the null-attribute extension. All versions are
+/// subject to the resource limits documented on [`encode_metadata`].
 #[must_use]
 pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlice> {
     // serde's map deserializer keeps the last duplicate key. Reject that
     // ambiguity before DTO parsing can overwrite an unsupported/null value.
-    serde_json::from_str::<strict_json::UniqueFields>(metadata).ok()?;
+    if !strict_json::validate(metadata) {
+        return None;
+    }
     let envelope: WireEnvelope = serde_json::from_str(metadata).ok()?;
     if envelope.format != FORMAT
         || !matches!(
@@ -148,7 +171,13 @@ pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlic
                 | VERSION_NULL_ATTRS
                 | VERSION_LINK_ATTRIBUTES
                 | VERSION_TEXT_STYLE
+                | VERSION_TYPED_ATOMS
         )
+    {
+        return None;
+    }
+    if envelope.version < VERSION_TYPED_ATOMS
+        && envelope.roots.iter().any(WireNode::carries_typed_atoms)
     {
         return None;
     }
@@ -204,9 +233,21 @@ struct WireNode {
 }
 
 impl WireNode {
+    fn carries_typed_atoms(&self) -> bool {
+        match &self.content {
+            WireContent::Inline { atoms, .. } => atoms.iter().any(WireAtom::is_typed),
+            WireContent::Children { children } => children.iter().any(Self::carries_typed_atoms),
+            WireContent::Table { rows, .. } => rows.iter().flatten().any(Self::carries_typed_atoms),
+            WireContent::Atomic => false,
+        }
+    }
+
     fn carries_text_style(&self) -> bool {
         match &self.content {
-            WireContent::Inline { runs, .. } => runs.iter().any(WireRun::carries_text_style),
+            WireContent::Inline { runs, atoms } => {
+                runs.iter().any(WireRun::carries_text_style)
+                    || atoms.iter().any(WireAtom::carries_text_style)
+            }
             WireContent::Children { children } => children.iter().any(Self::carries_text_style),
             WireContent::Table { rows, .. } => rows.iter().flatten().any(Self::carries_text_style),
             WireContent::Atomic => false,
@@ -215,7 +256,10 @@ impl WireNode {
 
     fn carries_link_attributes(&self) -> bool {
         match &self.content {
-            WireContent::Inline { runs, .. } => runs.iter().any(WireRun::carries_link_attributes),
+            WireContent::Inline { runs, atoms } => {
+                runs.iter().any(WireRun::carries_link_attributes)
+                    || atoms.iter().any(WireAtom::carries_link_attributes)
+            }
             WireContent::Children { children } => {
                 children.iter().any(Self::carries_link_attributes)
             }
@@ -231,9 +275,7 @@ impl WireNode {
             return true;
         }
         match &self.content {
-            WireContent::Inline { atoms, .. } => atoms
-                .iter()
-                .any(|atom| atom.attrs.values().any(WireAttr::carries_null)),
+            WireContent::Inline { atoms, .. } => atoms.iter().any(WireAtom::carries_null),
             WireContent::Children { children } => children.iter().any(Self::carries_null),
             WireContent::Table { rows, row_attrs } => {
                 row_attrs
@@ -412,50 +454,6 @@ enum WireContent {
         row_attrs: Vec<BTreeMap<String, WireAttr>>,
     },
     Atomic,
-}
-
-/// One detached inline-atom payload on the wire: anchor boundary plus the
-/// canonical payload a paste re-materializes under a fresh identity.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WireAtom {
-    anchor: usize,
-    kind: String,
-    attrs: BTreeMap<String, WireAttr>,
-    fallback: String,
-}
-
-impl WireAtom {
-    fn from_atom(atom: &ClipboardAtom) -> Result<Self, ClipboardMetadataError> {
-        let attrs = atom
-            .attrs()
-            .iter()
-            .map(|(key, value)| Ok((key.to_owned(), WireAttr::from_attr(value)?)))
-            .collect::<Result<BTreeMap<_, _>, ClipboardMetadataError>>()?;
-        Ok(Self {
-            anchor: atom.anchor().as_usize(),
-            kind: atom.kind().as_str().to_owned(),
-            attrs,
-            fallback: atom.content().fallback_text().to_owned(),
-        })
-    }
-
-    fn into_atom(self, buffer: &TextBuffer) -> Result<ClipboardAtom, ClipboardMetadataError> {
-        let attrs = self
-            .attrs
-            .into_iter()
-            .map(|(key, value)| Ok((key, value.into_attr()?)))
-            .collect::<Result<BTreeMap<_, _>, ClipboardMetadataError>>()?;
-        let anchor = buffer
-            .offset_at(self.anchor)
-            .map_err(|_| ClipboardMetadataError::invalid())?;
-        Ok(ClipboardAtom::new(
-            anchor,
-            AtomKind::new(self.kind).map_err(|_| ClipboardMetadataError::invalid())?,
-            NodeAttrs::new(attrs).map_err(|_| ClipboardMetadataError::invalid())?,
-            InlineAtomContent::new(self.fallback).map_err(|_| ClipboardMetadataError::invalid())?,
-        ))
-    }
 }
 
 #[derive(Serialize, Deserialize)]

@@ -177,14 +177,14 @@ fn conditional_v9_has_priority_only_when_text_style_is_present() {
 fn new_mark_requires_v9_but_legacy_payloads_keep_their_meaning() {
     let slice = plain_slice(sample());
     let original = roundtrip(&slice, 9);
-    for version in [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 999] {
+    for version in [0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 999] {
         let mut changed = original.clone();
         changed["version"] = version.into();
         assert!(decode_metadata(slice.plain_text(), &changed.to_string()).is_none());
     }
     let plain = plain_slice(Mark::Link(LinkMark::new("old", None)));
     let original = roundtrip(&plain, 4);
-    for version in 4..=9 {
+    for version in 4..=10 {
         let mut changed = original.clone();
         changed["version"] = version.into();
         assert_eq!(

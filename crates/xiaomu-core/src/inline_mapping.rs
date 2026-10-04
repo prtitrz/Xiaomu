@@ -20,7 +20,10 @@ impl StepMap {
     /// maps the UTF-8 text coordinate through the shared text rules and
     /// redistributes seam ordinals: gaps before the edited seam stay put, the
     /// edited gap resolves by `bias`, and gaps after it land after the
-    /// replacement text with the seam atoms that moved there.
+    /// replacement text with the seam atoms that moved there. Mixed splits
+    /// compare `(text_offset, atom_index)` and use bias only at the exact
+    /// split gap; mixed joins add the first node's end-seam atom count to
+    /// points at the second node's start. Affinity is preserved throughout.
     #[must_use]
     pub fn map_inline_point(
         &self,
@@ -61,6 +64,50 @@ impl StepMap {
                     point.node_id(),
                     point.text_offset(),
                     mapped,
+                    point.affinity(),
+                ))
+            }
+            StepMap::InlineNodeSplit { at, inserted, .. } if point.node_id() == at.node_id() => {
+                let order = (point.text_offset(), point.atom_index())
+                    .cmp(&(at.text_offset(), at.atom_index()));
+                let to_tail = order == Ordering::Greater
+                    || (order == Ordering::Equal && bias == MapBias::End);
+                if !to_tail {
+                    return MappedPosition::Mapped(point);
+                }
+                let ordinal = if point.text_offset() == at.text_offset() {
+                    point.atom_index() - at.atom_index()
+                } else {
+                    point.atom_index()
+                };
+                MappedPosition::Mapped(InlinePoint::new(
+                    *inserted,
+                    TextOffset::from_validated_byte_index(
+                        point.text_offset().as_usize() - at.text_offset().as_usize(),
+                    ),
+                    ordinal,
+                    point.affinity(),
+                ))
+            }
+            StepMap::InlineNodeJoined {
+                first,
+                second,
+                first_len,
+                seam_atom_index,
+                ..
+            } if point.node_id() == *second => {
+                let ordinal = point.atom_index()
+                    + if point.text_offset() == TextOffset::ZERO {
+                        *seam_atom_index
+                    } else {
+                        0
+                    };
+                MappedPosition::Mapped(InlinePoint::new(
+                    *first,
+                    TextOffset::from_validated_byte_index(
+                        first_len + point.text_offset().as_usize(),
+                    ),
+                    ordinal,
                     point.affinity(),
                 ))
             }

@@ -185,6 +185,7 @@ fn validate_tree(root: NodeId, store: &NodeStore) -> Result<()> {
         stack.push((id, false));
 
         let node = store.get(id).ok_or(Error::UnknownNode)?;
+        node.validate()?;
 
         if let Some(children) = node.content().as_children() {
             match node.kind() {

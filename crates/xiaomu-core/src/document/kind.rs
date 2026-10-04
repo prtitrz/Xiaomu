@@ -58,7 +58,7 @@ pub enum NodeKind {
     TableRow,
     /// One cell of a table row; children are ordinary blocks.
     TableCell,
-    /// Extension-defined inline atom with a stable semantic key.
+    /// Inline atom with a typed built-in identity or stable extension key.
     InlineAtom(AtomKind),
     /// Extension-defined block kind preserved by its stable key.
     Custom(String),
