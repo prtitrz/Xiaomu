@@ -250,6 +250,12 @@ JoinNodes          → 删除追加文本 + RestoreSubtree
 
 `DocumentSession::new_with_policy` 在构造时绑定可选 `SessionPolicy`；旧 `new` 保留无 policy 的通用语义。`EditorInstance::new_with_policy` 把同一能力带到 GPUI，原 `EditorHooks` 字段和 `new` 签名不变。没有运行时更换 policy 的入口，避免旧 Undo 历史受后换规则影响。Core `MarkSet` 不包含任何宿主 schema 或 codec 的规则。
 
+可选 `EditorInstance::with_command_router` 在现有 composition 保护之后、默认 Tab/ShiftTab 规划和普通非 Code 文本 paste 的换行归一化之前，向纯只读 `EditorCommandRouter` 暴露文档、完整选区、stored marks 与原始文本。`Default` 保留原行为；`NoChange` 或错误消费动作而不修改会话；`Intent` 仍经过同一 policy、事务验证和 Undo 发布路径。结构剪贴板、图片、Code paste 及 IME 传输不进入该路由。该 API 不修改 `EditorHooks` 的公开字段，也不授权回调外部副作用或重入借用。已有实例可用 `DocumentView::set_command_router(None)` 恢复默认。
+
+可选 `with_list_marker_provider` / `set_list_marker_provider` 每次渲染读取真实 list/item/index/depth 与当前 attrs，仅向原 GPUI 文本绘制提供视觉标签。默认标签与固定宽度不变；自定义标签列可扩宽，不向正文插入序号、不改变位置或 selection。setter 后已挂载视图须按通常 GPUI 约定通知重绘。
+
+宿主结构规划可返回 `SelectionUpdate::PreserveSelection`，把原 anchor、focus、affinity 与 cell range 完整保留，并在最终文档上验证；不做自动位置映射或退化成 caret。失效选区在普通/staged 发布前失败，保留原 marks、typing group、history 与 listener 状态。既有 `PreserveFocus` / `MapExisting` 语义不变。相关门禁是 Runtime 8 项、GPUI 外部 12 项和内部 4 项新增自动测试；这不等于某宿主列表产品行为或原生 GUI 已验收。
+
 宿主工具栏可调用 `DocumentView::apply_edit_intent` 复用内建编辑 action 的同一入口：composition guard、session policy、render epoch、child 同步、焦点和 caret scroll 均沿原路径执行，不直接绕过前端对共享 session 操作。该 seam 只公开已有行为，不新增输入协议。
 
 `prepare_intent(SessionContext, &EditIntent)` 在任何 selection / StoredMarks / history mutation 前运行，包括 `PasteSlice` 和 cell-range convergence。只读 context 提供 document、selection、explicit stored marks，以及复用 Runtime 周围 run 继承语义的 `effective_typing_marks`。宿主返回 Continue、完全保留状态的 NoChange、collapsed inline caret 的显式 StoredMarks（区分 None / Some(empty)），或一个 `EditPlan`。宿主可用 `EditPlan::new` / `PrimaryEdit::new` 描述替代 transaction 与 selection policy，一次成功接管只产生一个 isolated Undo 单元，无需可变 session 或递归 `apply_intent`。

@@ -324,6 +324,14 @@ pub enum SelectionUpdate {
     /// (list wrap / lift / indent / outdent). The resolved selection is
     /// validated against the post-command snapshot.
     PreserveFocus,
+    /// Keep the complete selection exactly as it was before the command.
+    ///
+    /// Both endpoints, their direction, affinity and mixed-inline ordinals,
+    /// and any active cell range are preserved without mapping or collapse.
+    /// The complete selection must validate against the final document;
+    /// otherwise the command fails atomically. This supports identity-
+    /// preserving edits whose intermediate steps temporarily remove nodes.
+    PreserveSelection,
     /// Collapse onto an exact structural gap in the post-command snapshot.
     ///
     /// Atomic node removal leaves no inline caret behind; the selection

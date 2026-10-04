@@ -32,8 +32,10 @@ use crate::document_view::{
     actions::HardBreak,
     cell_selection::{EscapeCellRange, SelectCell},
 };
+use crate::editor_commands::EditorCommandRouter;
 use crate::image_block::SharedImageAssetService;
 use crate::inline_atom::InlineAtomRendererRegistry;
+use crate::list_marker::ListMarkerLabelProvider;
 
 /// Optional host integrations handed to an [`EditorInstance`].
 ///
@@ -68,6 +70,8 @@ pub struct EditorInstance {
     atom_renderers: Option<Rc<InlineAtomRendererRegistry>>,
     atom_capability: Option<SharedAtomCapability>,
     asset_service: Option<SharedImageAssetService>,
+    command_router: Option<Rc<dyn EditorCommandRouter>>,
+    list_marker_provider: Option<Rc<dyn ListMarkerLabelProvider>>,
 }
 
 impl EditorInstance {
@@ -111,7 +115,23 @@ impl EditorInstance {
             atom_renderers: hooks.atom_renderers,
             atom_capability: hooks.atom_capability,
             asset_service: hooks.asset_service,
+            command_router: None,
+            list_marker_provider: None,
         }
+    }
+
+    /// Installs an optional, pure command router for views built by this instance.
+    #[must_use]
+    pub fn with_command_router(mut self, router: Rc<dyn EditorCommandRouter>) -> Self {
+        self.command_router = Some(router);
+        self
+    }
+
+    /// Installs a visual-only list label provider for this instance's views.
+    #[must_use]
+    pub fn with_list_marker_provider(mut self, provider: Rc<dyn ListMarkerLabelProvider>) -> Self {
+        self.list_marker_provider = Some(provider);
+        self
     }
 
     /// Returns this instance's independent shared session handle.
@@ -139,6 +159,8 @@ impl EditorInstance {
         if let Some(service) = &self.asset_service {
             view.set_asset_service(service.clone());
         }
+        view.set_command_router(self.command_router.clone());
+        view.set_list_marker_provider(self.list_marker_provider.clone());
         view
     }
 }

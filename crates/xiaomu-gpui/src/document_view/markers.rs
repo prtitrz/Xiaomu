@@ -10,6 +10,7 @@ use gpui::{div, prelude::*, px};
 use xiaomu_core::document::{NodeId, NodeKind, XiaomuDocument};
 
 use crate::block_view::ParagraphView;
+use crate::list_marker::{ListMarkerContext, ListMarkerLabel, ListMarkerLabelProvider};
 
 /// Where the focused block sits relative to list structure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +29,8 @@ pub(crate) struct ListMarker {
     pub glyph: String,
     /// Nesting depth of the enclosing list (1 = top-level list).
     pub depth: usize,
+    /// Host labels use the same text renderer but may need a wider column.
+    custom_label: bool,
 }
 
 /// Classifies `node`'s position when it is a block directly inside a list
@@ -59,7 +62,11 @@ pub(crate) fn list_context(document: &XiaomuDocument, node: NodeId) -> Option<Li
 /// a list item. Nested lists and later paragraphs in the same item get no
 /// extra marker of their own.
 #[must_use]
-pub(crate) fn marker_for_block(document: &XiaomuDocument, node: NodeId) -> Option<ListMarker> {
+pub(crate) fn marker_for_block(
+    document: &XiaomuDocument,
+    node: NodeId,
+    provider: Option<&dyn ListMarkerLabelProvider>,
+) -> Option<ListMarker> {
     let parent = document.parent_of(node)?;
     let parent_node = document.node(parent)?;
     if parent_node.kind() != &NodeKind::ListItem {
@@ -85,7 +92,24 @@ pub(crate) fn marker_for_block(document: &XiaomuDocument, node: NodeId) -> Optio
         NodeKind::OrderedList => format!("{}.", index + 1),
         _ => return None,
     };
-    Some(ListMarker { glyph, depth })
+    let label = provider.map(|provider| {
+        provider.label(ListMarkerContext {
+            document,
+            list: list_id,
+            item: parent,
+            index,
+            depth,
+        })
+    });
+    let (glyph, custom_label) = match label {
+        Some(ListMarkerLabel::Label(label)) => (label, true),
+        _ => (glyph, false),
+    };
+    Some(ListMarker {
+        glyph,
+        depth,
+        custom_label,
+    })
 }
 
 fn list_nesting_depth(document: &XiaomuDocument, list_id: NodeId) -> usize {
@@ -149,12 +173,13 @@ pub(crate) fn style_block(
         row = row.text_color(gpui::rgba(0x444444ff));
     }
     if let Some(marker) = marker {
-        row = row.child(
-            div()
-                .w(px(MARKER_COLUMN))
-                .flex_shrink_0()
-                .child(marker.glyph.clone()),
-        );
+        let label = div().flex_shrink_0().child(marker.glyph.clone());
+        let label = if marker.custom_label {
+            label.min_w(px(MARKER_COLUMN)).whitespace_nowrap()
+        } else {
+            label.w(px(MARKER_COLUMN))
+        };
+        row = row.child(label);
     }
     row.child(view)
 }
@@ -248,23 +273,23 @@ mod tests {
         let (document, first, second, nested, one, two) = sample_lists();
 
         assert_eq!(
-            marker_for_block(&document, first).map(|m| m.glyph),
+            marker_for_block(&document, first, None).map(|m| m.glyph),
             Some("\u{2022}".to_owned())
         );
         assert_eq!(
-            marker_for_block(&document, second).map(|m| m.glyph),
+            marker_for_block(&document, second, None).map(|m| m.glyph),
             Some("\u{2022}".to_owned())
         );
         assert_eq!(
-            marker_for_block(&document, nested).map(|m| (m.glyph, m.depth)),
+            marker_for_block(&document, nested, None).map(|m| (m.glyph, m.depth)),
             Some(("\u{25e6}".to_owned(), 2))
         );
         assert_eq!(
-            marker_for_block(&document, one).map(|m| m.glyph),
+            marker_for_block(&document, one, None).map(|m| m.glyph),
             Some("1.".to_owned())
         );
         assert_eq!(
-            marker_for_block(&document, two).map(|m| m.glyph),
+            marker_for_block(&document, two, None).map(|m| m.glyph),
             Some("2.".to_owned())
         );
 
@@ -309,8 +334,8 @@ mod tests {
             .unwrap();
         let document = XiaomuDocument::new(root, builder.finish()).unwrap();
 
-        assert!(marker_for_block(&document, a).is_some());
-        assert_eq!(marker_for_block(&document, b), None);
+        assert!(marker_for_block(&document, a, None).is_some());
+        assert_eq!(marker_for_block(&document, b, None), None);
         assert_eq!(text_blocks(&document)[1].text(), "b");
     }
 
@@ -326,7 +351,7 @@ mod tests {
             )
             .unwrap();
         let document = XiaomuDocument::new(root, builder.finish()).unwrap();
-        assert_eq!(marker_for_block(&document, p), None);
+        assert_eq!(marker_for_block(&document, p, None), None);
     }
 
     #[test]
