@@ -254,6 +254,10 @@ JoinNodes          → 删除追加文本 + RestoreSubtree
 
 可选 `with_list_marker_provider` / `set_list_marker_provider` 每次渲染读取真实 list/item/index/depth 与当前 attrs，仅向原 GPUI 文本绘制提供视觉标签。默认标签与固定宽度不变；自定义标签列可扩宽，不向正文插入序号、不改变位置或 selection。setter 后已挂载视图须按通常 GPUI 约定通知重绘。
 
+代码块宿主可独立覆盖默认方法 `route_enter`、`route_code_paste`、`route_code_slice` 和 `route_arrow_down`。Enter 来源在 block-kind 映射前区分普通、Shift 与显式绑定的 Ctrl/Cmd；未绑定新增 primary action 的旧宿主不变，Default 向外传播。Code 文本在 CR/LF 规范化前交给 hook，混合图片+非空文字可由宿主选择文字；默认仍保持图片优先及代码块图片拒绝。已验证结构片段通过独立 slice hook 提供完整树，Default 继续保留旧 open 平文行为与 closed fail-closed，不偷偷展开结构。普通平台文字保持独立 raw 来源。Down hook 只在非 Shift、无 composition 时运行，成功只改经过验证的 selection，不增加文档 history。所有 callback 仍为纯只读，失败/NoChange 不污染会话。
+
+`CodeBlockPresentation` 是可选、每实例的前端配置，不改变 `EditorHooks` 或 canonical attrs。代码块使用宿主字体与颜色、.88 倍正文字号、1.55 倍正文行高（对应 CSS pre 最小行框）、14/16px 内边距、8px 圆角与 1px 边框；列表 marker 留在包装外。layout/paint/caret/IME 共享同一有效样式和布局缓存；setter 清除该实例相关几何缓存。未配置宿主保持原样。虚拟 GPUI 测试不证明真实字体像素与浏览器一致，语法高亮计算尚未接入该配置。
+
 宿主结构规划可返回 `SelectionUpdate::PreserveSelection`，把原 anchor、focus、affinity 与 cell range 完整保留，并在最终文档上验证；不做自动位置映射或退化成 caret。失效选区在普通/staged 发布前失败，保留原 marks、typing group、history 与 listener 状态。既有 `PreserveFocus` / `MapExisting` 语义不变。相关门禁是 Runtime 8 项、GPUI 外部 12 项和内部 4 项新增自动测试；这不等于某宿主列表产品行为或原生 GUI 已验收。
 
 宿主把文本 LF 转成零字节 inline atom（或反向转换）时，可使用 `SelectionUpdate::Exact { selection }` 提供最终快照坐标，保留正反范围、双端 affinity 和 atom ordinal。普通与 staged commit 都只在最终快照上验证该选区，非法 UTF-8 边界、已删节点、越界 ordinal 或非 collapsed 选区搭配显式 stored marks 时整体拒绝；不得借中间快照的合法性提前发布。Undo 保留原选区，Redo 恢复精确后选区。新增 11 项 integration 和 3 项 staged unit 回归覆盖后续 typing grouping、redo 与 listener 原子性。此公开 enum 新增 variant，外部穷尽匹配须更新；原 selection policies 不变。

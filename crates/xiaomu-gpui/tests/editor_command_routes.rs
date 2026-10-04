@@ -24,6 +24,8 @@ use xiaomu_runtime::{
     },
 };
 
+#[path = "editor_commands/code_sources.rs"]
+mod code_sources;
 #[path = "editor_commands/defaults.rs"]
 mod defaults;
 #[path = "editor_commands/paste.rs"]

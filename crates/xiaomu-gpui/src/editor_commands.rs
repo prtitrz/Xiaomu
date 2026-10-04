@@ -1,6 +1,7 @@
 //! Opt-in, read-only routing of a bounded set of editor gestures.
 
 use xiaomu_core::document::{MarkSet, XiaomuDocument};
+use xiaomu_runtime::clipboard::ClipboardSlice;
 use xiaomu_runtime::session::{DocumentSelection, DocumentSession, EditIntent, PolicyError};
 
 /// A gesture offered before Xiaomu's default planning or normalization.
@@ -14,9 +15,53 @@ pub enum EditorCommand<'a> {
     /// Unmodified platform text, including CRLF/LF, outside a code block.
     ///
     /// Valid native structured clipboard data, image paste and IME transport
-    /// never enter this route. A code block keeps its original paste path.
+    /// never enter this route. Code-block paste uses `route_code_paste` instead.
     PlainTextPaste(&'a str),
 }
+
+/// The original Enter gesture, before block-kind-specific intent planning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnterSource {
+    /// Enter without modifiers.
+    Plain,
+    /// Shift-Enter, whose default is an inline LF.
+    Shift,
+    /// Ctrl/Cmd-Enter, only bound when the host explicitly opts in.
+    ///
+    /// A default route propagates this action to outer application handlers.
+    PrimaryModifier,
+}
+
+/// The validated clipboard transport offered to a code-block paste hook.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodePasteSource {
+    /// Ordinary platform text without valid native structured metadata.
+    ///
+    /// Also covers nonempty text accompanying an image. `Default` preserves
+    /// the image-first transport path; an explicit intent can prefer raw text.
+    PlatformText,
+    /// The exact plain-text projection of validated native structured data.
+    ///
+    /// This source never enters [`EditorCommand::PlainTextPaste`].
+    NativeStructuredPlainText {
+        /// Whether the source has explicit closed whole-root boundaries.
+        ///
+        /// A default route preserves `PasteSlice` for closed data. A host
+        /// choosing a text intent explicitly opts into discarding structure.
+        closed: bool,
+    },
+}
+
+gpui::actions!(
+    xiaomu_gpui,
+    [
+        /// Opt-in Ctrl/Cmd-Enter gesture, with no default document edit.
+        ///
+        /// Bind through `editor::bind_primary_modifier_enter_keys` or install
+        /// an explicit host key binding. Default routing propagates outward.
+        PrimaryModifierEnter,
+    ]
+);
 
 /// Read-only canonical state at the original command selection.
 #[derive(Clone, Copy)]
@@ -68,7 +113,7 @@ pub enum CommandRoute {
     Intent(EditIntent),
 }
 
-/// Optional per-view routing for Tab, ordinary text paste and Select All.
+/// Optional per-view routing for explicit editor gestures and clipboard sources.
 ///
 /// Callbacks must be pure, read-only and non-reentrant. Do not borrow or mutate
 /// the editor session recursively, or perform external side effects. Runtime
@@ -91,6 +136,74 @@ pub trait EditorCommandRouter {
         _context: EditorCommandContext<'_>,
     ) -> Result<Option<DocumentSelection>, PolicyError> {
         Ok(None)
+    }
+
+    /// Optionally routes unmodified ArrowDown to an exact selection.
+    ///
+    /// Called before default vertical geometry, never for Shift-ArrowDown or
+    /// active composition. `None` preserves ordinary navigation. A returned
+    /// selection is validated and installed without a document transaction,
+    /// document listener notification or undo entry. Errors consume the
+    /// gesture without changing canonical state.
+    fn route_arrow_down(
+        &self,
+        _context: EditorCommandContext<'_>,
+    ) -> Result<Option<DocumentSelection>, PolicyError> {
+        Ok(None)
+    }
+
+    /// Routes the original Enter gesture before any block-kind mapping.
+    ///
+    /// Called outside active composition for ordinary, Shift and explicitly
+    /// bound primary-modifier Enter, including code and non-code targets.
+    /// `Default` keeps existing Plain/Shift behavior and propagates the
+    /// primary-modifier action without consuming an outer host command.
+    fn route_enter(
+        &self,
+        _context: EditorCommandContext<'_>,
+        _source: EnterSource,
+    ) -> Result<CommandRoute, PolicyError> {
+        Ok(CommandRoute::Default)
+    }
+
+    /// Routes validated native structured clipboard data at a code target.
+    ///
+    /// The default forwards its exact plain-text projection and closed-source
+    /// flag to [`Self::route_code_paste`], preserving existing routers. Hosts
+    /// needing their own block-separator convention can inspect the read-only
+    /// fragment tree and return one policy-validated intent. This callback
+    /// never receives foreign text, images, or unvalidated clipboard metadata.
+    fn route_code_slice(
+        &self,
+        context: EditorCommandContext<'_>,
+        slice: &ClipboardSlice,
+    ) -> Result<CommandRoute, PolicyError> {
+        self.route_code_paste(
+            context,
+            slice.plain_text(),
+            CodePasteSource::NativeStructuredPlainText {
+                closed: slice.is_closed(),
+            },
+        )
+    }
+
+    /// Routes code-target paste before any newline normalization.
+    ///
+    /// `raw` preserves CRLF, CR and LF from platform text or the validated
+    /// native slice's plain-text projection. Image bytes, image-only paste
+    /// and IME transport never enter this callback. Nonempty text alongside
+    /// an image is offered, but `Default` retains the original image path.
+    /// For text-only data, `Default` normalizes platform text and open native
+    /// slices as before; closed native slices retain `PasteSlice` semantics
+    /// and generic unsupported edits fail closed. Returned intents still pass
+    /// through the session policy and the ordinary undo pipeline.
+    fn route_code_paste(
+        &self,
+        _context: EditorCommandContext<'_>,
+        _raw: &str,
+        _source: CodePasteSource,
+    ) -> Result<CommandRoute, PolicyError> {
+        Ok(CommandRoute::Default)
     }
 
     /// Routes a gesture using the original, validated selection and snapshot.

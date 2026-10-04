@@ -381,4 +381,117 @@ mod tests {
             })
         );
     }
+
+    #[gpui::test]
+    fn code_wrapper_keeps_the_list_marker_outside_and_builder_is_instance_local(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use crate::code_presentation::CodeBlockPresentation;
+        use crate::editor::{EditorHooks, EditorInstance};
+        use gpui::AppContext as _;
+        use xiaomu_core::selection::InlinePoint;
+        use xiaomu_runtime::session::DocumentSelection;
+
+        let mut builder = NodeStoreBuilder::new();
+        let code = builder
+            .insert(
+                NodeKind::CodeBlock,
+                NodeAttrs::empty(),
+                NodeContent::Inline(
+                    InlineContent::new([TextRun::new("a\tb\r\nc", MarkSet::empty()).unwrap()])
+                        .unwrap(),
+                ),
+            )
+            .unwrap();
+        let list_item = item(code, &mut builder);
+        let list = builder
+            .insert(
+                NodeKind::BulletList,
+                NodeAttrs::empty(),
+                NodeContent::children([list_item]),
+            )
+            .unwrap();
+        let plain = paragraph("plain", &mut builder);
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([list, plain]),
+            )
+            .unwrap();
+        let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+        let selection = DocumentSelection::collapsed(InlinePoint::at_start_of(code));
+        let default =
+            EditorInstance::new(document.clone(), selection, EditorHooks::default()).unwrap();
+        let styled = EditorInstance::new(document.clone(), selection, EditorHooks::default())
+            .unwrap()
+            .with_code_block_presentation(CodeBlockPresentation::default());
+        for (instance, enabled) in [(&default, false), (&styled, true)] {
+            let handle = cx.update(|cx| {
+                cx.open_window(Default::default(), |_, cx| {
+                    cx.new(|_| instance.build_view())
+                })
+                .unwrap()
+            });
+            cx.background_executor.run_until_parked();
+            handle
+                .update(cx, |view, _, cx| {
+                    let code_bounds = view
+                        .children
+                        .iter()
+                        .find(|(id, _)| *id == code)
+                        .unwrap()
+                        .1
+                        .read(cx)
+                        .last_bounds
+                        .unwrap();
+                    let plain_bounds = view
+                        .children
+                        .iter()
+                        .find(|(id, _)| *id == plain)
+                        .unwrap()
+                        .1
+                        .read(cx)
+                        .last_bounds
+                        .unwrap();
+                    // Document inset + independent 24px marker column, then
+                    // only the code child gets its 16px padding + 1px border.
+                    assert_eq!(plain_bounds.left(), px(16.0));
+                    assert_eq!(
+                        code_bounds.left() - plain_bounds.left(),
+                        px(MARKER_COLUMN + if enabled { 17.0 } else { 0.0 })
+                    );
+                    assert_eq!(
+                        code_bounds.top(),
+                        px(16.0 + if enabled { 15.0 } else { 0.0 })
+                    );
+                    assert_eq!(marker_for_block(&document, code, None).unwrap().glyph, "•");
+                    view.set_code_block_presentation(None);
+                    cx.notify();
+                })
+                .unwrap();
+            cx.background_executor.run_until_parked();
+            handle
+                .update(cx, |view, _, cx| {
+                    let bounds = view
+                        .children
+                        .iter()
+                        .find(|(id, _)| *id == code)
+                        .unwrap()
+                        .1
+                        .read(cx)
+                        .last_bounds
+                        .unwrap();
+                    assert_eq!(bounds.left(), px(16.0 + MARKER_COLUMN));
+                    assert_eq!(bounds.top(), px(16.0));
+                })
+                .unwrap();
+            assert_eq!(
+                instance.session().borrow().document().store(),
+                document.store()
+            );
+            assert_eq!(instance.session().borrow().selection(), selection);
+            assert_eq!(instance.session().borrow().history_depths(), (0, 0));
+        }
+    }
 }
