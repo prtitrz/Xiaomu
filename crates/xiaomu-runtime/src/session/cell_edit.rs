@@ -33,6 +33,23 @@ impl DocumentSession {
                 PlannedAction::CommitStaged(_) => unreachable!(),
             };
         }
+        if matches!(
+            intent,
+            EditIntent::ToggleMark { .. }
+                | EditIntent::SetMark { .. }
+                | EditIntent::RemoveMark { .. }
+        ) {
+            let action = super::marks::plan_cell_range_mark(&self.document, range, intent)?;
+            if !matches!(action, PlannedAction::NoChange) {
+                self.history.break_group();
+                self.clear_stored_marks();
+            }
+            return match action {
+                PlannedAction::Commit(plan) => self.commit(plan).map(Some),
+                PlannedAction::NoChange => Ok(Some(SessionOutcome::NoChange)),
+                PlannedAction::CommitStaged(_) => unreachable!(),
+            };
+        }
         match intent {
             EditIntent::PasteSlice { .. }
             | EditIntent::InsertTableRow { .. }
@@ -44,7 +61,7 @@ impl DocumentSession {
             | EditIntent::MoveToPreviousCell
             | EditIntent::PlaceCaret { .. }
             | EditIntent::SetSelection { .. } => self.collapse_cell_range(),
-            // Formatting / structural content commands need a rectangular
+            // Other structural content commands need an explicit rectangular
             // contract; never silently edit just one cell.
             _ => return Err(SessionError::SelectionInvalid),
         }
@@ -56,7 +73,14 @@ impl DocumentSession {
         range: CellRange,
         replacement: Option<&str>,
     ) -> Result<PlannedAction, SessionError> {
-        let mut cells: Vec<_> = range.cells(&self.document)?.into_iter().flatten().collect();
+        let mut cells = if replacement.is_none() {
+            range.unique_origins(&self.document)?
+        } else {
+            // Keep the historical unit-matrix replacement contract. Span
+            // replacement needs its own focus/content policy; clearing is
+            // already well-defined over distinct selected origins.
+            range.cells(&self.document)?.into_iter().flatten().collect()
+        };
         let already_empty = cells.iter().all(|cell| {
             let children = children_of(&self.document, *cell);
             children.len() == 1

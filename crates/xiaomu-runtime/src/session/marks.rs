@@ -7,7 +7,8 @@ use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
 use super::intent::{PlannedAction, edit_transaction, map_existing_plan, ordered_range};
 use super::{
-    DocumentPosition, DocumentSelection, EditIntent, EditPlan, SelectionUpdate, SessionError,
+    CellRange, DocumentPosition, DocumentSelection, EditIntent, EditPlan, SelectionUpdate,
+    SessionError,
 };
 
 /// Plans one isolated mark edit over the full mixed-inline document range.
@@ -47,7 +48,61 @@ pub(super) fn plan_range_mark(
         }
     }
 
-    let spans = selected_spans(document, head, tail)?;
+    plan_spans(selected_spans(document, head, tail)?, intent)
+}
+
+/// Marks all inline descendants of selected unique cell origins as one edit.
+///
+/// The selected cells are disjoint canonical subtrees, even when their slots
+/// repeat through row/column spans. Nested table contents are visited once as
+/// descendants of the selected outer cell. Non-inline blocks are preserved.
+pub(super) fn plan_cell_range_mark(
+    document: &XiaomuDocument,
+    range: CellRange,
+    intent: &EditIntent,
+) -> Result<PlannedAction, SessionError> {
+    let mut pending = range.unique_origins(document)?;
+    pending.reverse();
+    let mut spans = Vec::new();
+    while let Some(id) = pending.pop() {
+        let node = document.node(id).ok_or(SessionError::SelectionInvalid)?;
+        if let Some(children) = node.content().as_children() {
+            pending.extend(children.iter().rev().copied());
+        }
+        let Some(inline) = node.content().as_inline() else {
+            continue;
+        };
+        let atoms = inline
+            .atoms()
+            .iter()
+            .map(|placement| {
+                let content = document
+                    .node(placement.atom())
+                    .and_then(|node| node.content().as_inline_atom())
+                    .ok_or(SessionError::SelectionInvalid)?;
+                Ok((placement.atom(), content.marks()))
+            })
+            .collect::<Result<_, SessionError>>()?;
+        spans.push(SelectedSpan {
+            node: id,
+            inline,
+            range: TextRange::new(
+                inline.offset_at(0).map_err(SessionError::Core)?,
+                inline
+                    .offset_at(inline.len_bytes())
+                    .map_err(SessionError::Core)?,
+            )
+            .map_err(SessionError::Core)?,
+            atoms,
+        });
+    }
+    plan_spans(spans, intent)
+}
+
+fn plan_spans(
+    spans: Vec<SelectedSpan<'_>>,
+    intent: &EditIntent,
+) -> Result<PlannedAction, SessionError> {
     let kind = match intent {
         EditIntent::ToggleMark { mark } | EditIntent::SetMark { mark } => mark.kind(),
         EditIntent::RemoveMark { kind } => *kind,

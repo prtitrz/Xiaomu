@@ -252,7 +252,7 @@ fn review_table_copy_preserves_unknown_attrs() {
 
 #[test]
 fn rectangular_commands_never_silently_edit_only_the_first_cell() {
-    use xiaomu_core::document::Mark;
+    use xiaomu_core::document::{Mark, MarkKind};
     use xiaomu_runtime::session::{SessionError, SessionOutcome};
     let fixture = fixture();
     let mut session = session_at(&fixture.document, fixture.intro, 0);
@@ -263,18 +263,40 @@ fn rectangular_commands_never_silently_edit_only_the_first_cell() {
     let range = session.selection();
     assert!(!range.is_collapsed());
     assert!(session.text_selection().is_none());
-    for intent in [
-        EditIntent::SplitBlock,
-        EditIntent::ToggleMark { mark: Mark::Bold },
-    ] {
-        assert!(matches!(
-            session.apply_intent(&intent),
-            Err(SessionError::SelectionInvalid)
-        ));
-        assert_eq!(session.document().store(), fixture.document.store());
-        assert_eq!(session.selection(), range);
-        assert_eq!(session.history_depths(), (0, 0));
+    assert!(matches!(
+        session.apply_intent(&EditIntent::SplitBlock),
+        Err(SessionError::SelectionInvalid)
+    ));
+    assert_eq!(session.document().store(), fixture.document.store());
+    assert_eq!(session.selection(), range);
+    assert_eq!(session.history_depths(), (0, 0));
+    session
+        .apply_intent(&EditIntent::ToggleMark { mark: Mark::Bold })
+        .unwrap();
+    for text in &fixture.texts_a {
+        let inline = session
+            .document()
+            .node(*text)
+            .unwrap()
+            .content()
+            .as_inline()
+            .unwrap();
+        assert!(
+            inline
+                .runs()
+                .iter()
+                .all(|run| run.marks().contains(MarkKind::Bold))
+        );
     }
+    assert_eq!(
+        session.document().node(fixture.intro),
+        fixture.document.node(fixture.intro)
+    );
+    assert_eq!(session.selection(), range);
+    assert_eq!(session.history_depths(), (1, 0));
+    session.undo().unwrap();
+    assert_eq!(session.document().store(), fixture.document.store());
+    assert_eq!(session.selection(), range);
     session.apply_intent(&EditIntent::Backspace).unwrap();
     let cleared = session.document().clone();
     assert_eq!(
