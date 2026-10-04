@@ -16,6 +16,7 @@ mod snapshot;
 mod store;
 mod string_attribute;
 mod text_run;
+mod text_style;
 mod version;
 
 pub use atom::{AtomKind, InlineAtomContent, InlineAtomPlacement};
@@ -35,6 +36,7 @@ pub use snapshot::XiaomuDocument;
 pub use store::{NodeStore, NodeStoreBuilder};
 pub use string_attribute::StringAttribute;
 pub use text_run::TextRun;
+pub use text_style::{TextStyleAttributes, TextStyleMark};
 pub use version::{DocumentRevision, DocumentVersion};
 
 pub(crate) use store::allows_child;

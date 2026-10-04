@@ -95,7 +95,7 @@ fn assert_v7_round_trip(slice: &ClipboardSlice) -> serde_json::Value {
         Some(slice)
     );
     assert!(decode_metadata("stale text", &metadata).is_none());
-    for version in [1, 2, 3, 4, 5, 6, 9, 999] {
+    for version in [1, 2, 3, 4, 5, 6, 10, 999] {
         let mut changed = wire.clone();
         changed["version"] = version.into();
         assert!(

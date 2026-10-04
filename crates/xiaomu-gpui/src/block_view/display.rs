@@ -5,12 +5,13 @@
 //! paint use the atom-aware projection in this module so renderer bytes never
 //! leak back into Core coordinates.
 
-use xiaomu_core::document::{InlineContent, MarkKind, NodeId};
+use xiaomu_core::document::{InlineContent, MarkSet, NodeId};
 use xiaomu_core::selection::CursorAffinity;
 use xiaomu_runtime::session::DocumentPosition;
 
 use crate::inline_atom_display::InlineAtomDisplayProjection;
 
+use super::projection::normalize_segments;
 use super::{DisplaySegment, ParagraphView, SelectionProjection};
 
 fn project_atom_display_content(
@@ -25,16 +26,7 @@ fn project_atom_display_content(
         push_styled_text(inline, canonical_cursor, anchor, &mut segments);
         let display_range = atom.display_range().clone();
         let rendered = &projection.display_text()[display_range];
-        segments.push(DisplaySegment {
-            start: 0,
-            text: rendered.to_owned(),
-            bold: false,
-            italic: false,
-            underline: false,
-            strike: false,
-            code: false,
-            link: false,
-        });
+        segments.push(DisplaySegment::from_marks(0, rendered, &MarkSet::empty()));
         canonical_cursor = anchor;
     }
 
@@ -71,45 +63,19 @@ fn push_styled_text(
             continue;
         }
 
-        let style = style_for_run(run.marks());
-        segments.push(DisplaySegment {
-            start: 0,
-            text: run.text().as_str()[overlap_start - run_start..overlap_end - run_start]
-                .to_owned(),
-            bold: style.0,
-            italic: style.1,
-            underline: style.2,
-            strike: style.3,
-            code: style.4,
-            link: style.5,
-        });
+        segments.push(DisplaySegment::from_marks(
+            0,
+            &run.text().as_str()[overlap_start - run_start..overlap_end - run_start],
+            run.marks(),
+        ));
     }
-}
-
-fn style_for_run(marks: &xiaomu_core::document::MarkSet) -> (bool, bool, bool, bool, bool, bool) {
-    (
-        marks.contains(MarkKind::Bold),
-        marks.contains(MarkKind::Italic),
-        marks.contains(MarkKind::Underline),
-        marks.contains(MarkKind::Strike),
-        marks.contains(MarkKind::Code),
-        marks.contains(MarkKind::Link),
-    )
-}
-
-fn normalize_segments(mut segments: Vec<DisplaySegment>) -> (String, Vec<DisplaySegment>) {
-    let mut text = String::new();
-    for segment in &mut segments {
-        segment.start = text.len();
-        text.push_str(&segment.text);
-    }
-    (text, segments)
 }
 
 fn splice_preedit(
     segments: Vec<DisplaySegment>,
     range: std::ops::Range<usize>,
     preedit: &str,
+    marks: &MarkSet,
 ) -> (String, Vec<DisplaySegment>) {
     let mut result = Vec::new();
     // Emit in visual order; collapsed insertion must precede the suffix.
@@ -121,16 +87,7 @@ fn splice_preedit(
             result.push(piece);
         }
     }
-    result.push(DisplaySegment {
-        start: 0,
-        text: preedit.to_owned(),
-        bold: false,
-        italic: false,
-        underline: true,
-        strike: false,
-        code: false,
-        link: false,
-    });
+    result.push(DisplaySegment::preedit(0, preedit, marks));
     for segment in &segments {
         let start = segment.start.max(range.end);
         if start < segment.start + segment.text.len() {
@@ -162,7 +119,7 @@ impl ParagraphView {
         if let Some(state) = &self.composition
             && let Some(range) = self.composition_layout_range(&projection)
         {
-            return splice_preedit(content.1, range, state.preedit());
+            return splice_preedit(content.1, range, state.preedit(), &self.preedit_marks());
         }
         content
     }
