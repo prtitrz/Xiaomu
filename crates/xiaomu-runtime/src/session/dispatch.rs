@@ -11,7 +11,7 @@ impl DocumentSession {
     /// caret moves at a boundary, TurnInto the kind already present) return
     /// [`SessionOutcome::NoChange`] without calling Core, advancing the
     /// revision, notifying document listeners, or writing history. A
-    /// collapsed mark toggle updates Runtime StoredMarks without a Core
+    /// collapsed mark intent updates Runtime StoredMarks without a Core
     /// transaction.
     pub(super) fn apply_default_intent(
         &mut self,
@@ -246,7 +246,33 @@ impl DocumentSession {
                     .selection
                     .as_single_node()
                     .ok_or(SessionError::SelectionInvalid)?;
-                intent::plan_toggle_mark(&inline, selection, mark)?
+                marks::plan_toggle_mark(&inline, selection, mark)?
+            }
+            EditIntent::SetMark { mark } if self.selection.is_collapsed() => {
+                return self.set_stored_mark(&inline, mark);
+            }
+            EditIntent::RemoveMark { kind } if self.selection.is_collapsed() => {
+                return self.remove_stored_mark(&inline, *kind);
+            }
+            EditIntent::SetMark { .. } | EditIntent::RemoveMark { .. } => {
+                let selection = self
+                    .selection
+                    .as_single_node()
+                    .ok_or(SessionError::SelectionInvalid)?;
+                let action = match intent {
+                    EditIntent::SetMark { mark } => marks::plan_set_mark(&inline, selection, mark)?,
+                    EditIntent::RemoveMark { kind } => {
+                        marks::plan_remove_mark(&inline, selection, *kind)?
+                    }
+                    _ => unreachable!("explicit mark intent"),
+                };
+                // A truly idempotent operation leaves all transient state
+                // alone. A real range edit is one isolated Core transaction.
+                if !matches!(action, PlannedAction::NoChange) {
+                    self.history.break_group();
+                    self.clear_stored_marks();
+                }
+                action
             }
             EditIntent::SplitBlock => {
                 // Split is an explicit history boundary, but pending marks are

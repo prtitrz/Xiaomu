@@ -21,6 +21,9 @@ use super::{ParagraphView, SelectionProjection};
 use crate::document_view::cache_key::LayoutCacheKey;
 
 #[cfg(test)]
+#[path = "link_style_tests.rs"]
+mod link_style_tests;
+#[cfg(test)]
 #[path = "element_tests.rs"]
 mod tests;
 
@@ -329,19 +332,24 @@ fn text_runs(
             }
             // Only the preedit segment carries an explicit underline;
             // canonical segments keep their own mark styling.
-            let underline = segment.underline.then_some(UnderlineStyle {
-                color: Some(color),
+            let run_color = if segment.link {
+                rgba(0x2563ebff).into()
+            } else {
+                color
+            };
+            let underline = (segment.underline || segment.link).then_some(UnderlineStyle {
+                color: Some(run_color),
                 thickness: px(1.0),
                 wavy: false,
             });
             TextRun {
                 len: segment.text.len(),
                 font: run_font,
-                color,
+                color: run_color,
                 background_color: segment.code.then_some(rgba(0x00000012).into()),
                 underline,
                 strikethrough: segment.strike.then_some(StrikethroughStyle {
-                    color: Some(color),
+                    color: Some(run_color),
                     thickness: px(1.0),
                 }),
             }

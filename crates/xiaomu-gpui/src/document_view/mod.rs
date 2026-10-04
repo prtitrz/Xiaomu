@@ -16,6 +16,7 @@
 pub(crate) mod actions;
 pub(crate) mod cache_key;
 pub(crate) mod cell_selection;
+mod host_transaction;
 pub(crate) mod markers;
 pub(crate) mod mouse;
 pub(crate) mod navigation;
@@ -23,6 +24,8 @@ mod table_block;
 mod vertical_geometry;
 mod visual_navigation;
 
+#[cfg(all(test, target_os = "linux"))]
+mod host_form_order_tests;
 #[cfg(test)]
 mod host_intent_tests;
 
