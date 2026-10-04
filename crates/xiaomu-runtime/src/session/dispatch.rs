@@ -17,6 +17,11 @@ impl DocumentSession {
         &mut self,
         intent: &EditIntent,
     ) -> Result<SessionOutcome, SessionError> {
+        // Policy has already seen the logical command. Normalize only inside
+        // default dispatch, so hosts never need to guess a clipboard's origin.
+        if matches!(intent, EditIntent::InsertLineBreak) {
+            return self.apply_default_intent(&EditIntent::PasteText { text: "\n".into() });
+        }
         if let Some(outcome) = self.apply_cell_range_intent(intent)? {
             return Ok(outcome);
         }
@@ -305,6 +310,7 @@ impl DocumentSession {
                 structure::plan_outdent_list_item(&self.document, focus.node_id())?
             }
             EditIntent::MoveCaret { .. }
+            | EditIntent::InsertLineBreak
             | EditIntent::MoveToNextCell
             | EditIntent::MoveToPreviousCell
             | EditIntent::InsertTableRow { .. }

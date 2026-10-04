@@ -258,6 +258,8 @@ JoinNodes          → 删除追加文本 + RestoreSubtree
 
 范围剪贴板按真实树叶序选择 Inline 与 Atomic 节点，保留覆盖范围中的图片等原子块及其 attrs、marks 和最小容器；只有真正 collapsed Atomic 选区走单块复制捷径，Atomic 作为前后范围端点不再截断后续内容。未知被选叶节点和 Gap 端点明确拒绝，未选内容不被顺带复制。Cut 在写系统剪贴板及删除之前，先验证结构 metadata 能 encode/decode 且与原 slice 全等，失败不写、不删；普通 Copy 的既有纯文本 fallback 不变。新门禁含 7 项 Runtime 范围/回滚测试与 2 项 lossless-write helper 测试，不能宣称已测试真实 OS Cut。通用 mixed inline/atomic paste 仍明确拒绝，宿主可以通过 policy 接受完整 detached roots 并提供自己的事务规划。通用跨块删除与 Ctrl+A 的首尾原子块范围仍是独立待完善项。
 
+`EditIntent::insert_line_break()` 返回独立 `InsertLineBreak`，让 policy 明确区分键盘换行与同字节 `PasteText("\n")`。只有 policy 返回 Continue 后的私有默认 dispatch 才将它转换为既有 isolated LF 插入；不会二次调用 policy，但最终 candidate 验证仍照常执行。无 policy 的 canonical/marks/selection/Undo 行为保留。**外部自定义 policy 若以前只按 PasteText 匹配换行，必须显式识别新 variant**，不能假定公共 constructor 永远展开为 PasteText。这里仍是命令来源区分，并未把 canonical LF 改成精确保真 TipTap hardBreak 节点。
+
 宿主工具栏可调用 `DocumentView::apply_edit_intent` 复用内建编辑 action 的同一入口：composition guard、session policy、render epoch、child 同步、焦点和 caret scroll 均沿原路径执行，不直接绕过前端对共享 session 操作。该 seam 只公开已有行为，不新增输入协议。
 
 `prepare_intent(SessionContext, &EditIntent)` 在任何 selection / StoredMarks / history mutation 前运行，包括 `PasteSlice` 和 cell-range convergence。只读 context 提供 document、selection、explicit stored marks，以及复用 Runtime 周围 run 继承语义的 `effective_typing_marks`。宿主返回 Continue、完全保留状态的 NoChange、collapsed inline caret 的显式 StoredMarks（区分 None / Some(empty)），或一个 `EditPlan`。宿主可用 `EditPlan::new` / `PrimaryEdit::new` 描述替代 transaction 与 selection policy，一次成功接管只产生一个 isolated Undo 单元，无需可变 session 或递归 `apply_intent`。
