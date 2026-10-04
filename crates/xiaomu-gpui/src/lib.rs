@@ -26,6 +26,7 @@ pub mod atom_capability;
 pub mod block_view;
 pub mod document_view;
 pub mod editor;
+pub mod editor_commands;
 #[cfg(test)]
 mod font_size;
 pub mod image_block;
@@ -33,6 +34,7 @@ pub mod inline_atom;
 pub mod inline_atom_display;
 mod inline_position;
 pub mod input;
+pub mod list_marker;
 
 // Source-only prototype; production dispatch remains unchanged until admission
 // and all editor geometry consumers can switch together.

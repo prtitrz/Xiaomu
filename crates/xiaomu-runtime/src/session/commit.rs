@@ -1,7 +1,9 @@
 //! Candidate preparation, validation and atomic document publication.
 
 use super::history::{self, HistoryEntry, HistoryGroup};
-use super::resolve::{affinity_of, collapsed_caret, preserved_focus, resolve_selection};
+use super::resolve::{
+    affinity_of, collapsed_caret, preserved_focus, preserved_selection, resolve_selection,
+};
 use super::*;
 use xiaomu_core::mapping::StepMap;
 use xiaomu_core::transaction::{Transaction, TransactionOrigin};
@@ -127,6 +129,7 @@ impl DocumentSession {
 
         let after_selection = match staged.selection_update {
             SelectionUpdate::PreserveFocus => preserved_focus(before_selection, &current)?,
+            SelectionUpdate::PreserveSelection => preserved_selection(before_selection, &current)?,
             SelectionUpdate::CaretAtSplitTail => {
                 let inserted = split_tail.ok_or(SessionError::SelectionInvalid)?;
                 collapsed_caret(&current, inserted, 0, affinity_of(before_selection))?

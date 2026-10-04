@@ -16,6 +16,8 @@
 pub(crate) mod actions;
 pub(crate) mod cache_key;
 pub(crate) mod cell_selection;
+mod clipboard;
+mod host_extensions;
 mod host_transaction;
 pub(crate) mod markers;
 pub(crate) mod mouse;
@@ -24,10 +26,14 @@ mod table_block;
 mod vertical_geometry;
 mod visual_navigation;
 
+#[cfg(test)]
+mod command_composition_tests;
 #[cfg(all(test, target_os = "linux"))]
 mod host_form_order_tests;
 #[cfg(test)]
 mod host_intent_tests;
+#[cfg(test)]
+mod list_marker_tests;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -89,6 +95,8 @@ pub struct DocumentView {
     asset_service: Option<Rc<dyn AssetService>>,
     /// Per-node image load states shared with resolve callbacks.
     image_loads: SharedImageLoadCache,
+    command_router: Option<Rc<dyn crate::editor_commands::EditorCommandRouter>>,
+    list_marker_provider: Option<Rc<dyn crate::list_marker::ListMarkerLabelProvider>>,
 }
 
 impl DocumentView {
@@ -112,6 +120,8 @@ impl DocumentView {
             atom_capability: None,
             asset_service: None,
             image_loads: Rc::new(ImageLoadCache::default()),
+            command_router: None,
+            list_marker_provider: None,
         }
     }
 
@@ -519,7 +529,11 @@ impl DocumentView {
                 };
                 let marker = {
                     let session = self.session.borrow();
-                    markers::marker_for_block(session.document(), id)
+                    markers::marker_for_block(
+                        session.document(),
+                        id,
+                        self.list_marker_provider.as_deref(),
+                    )
                 };
                 markers::style_block(
                     view.clone(),
