@@ -82,6 +82,8 @@ pub enum Error {
     /// Image node attrs violate the typed image contract (missing or
     /// ambiguous source, empty alternative text, non-positive dimensions).
     InvalidImageAttrs,
+    /// A task item has a checked attribute other than missing, null, or boolean.
+    InvalidTaskItemChecked,
     /// A table violates row/column structural invariants.
     InvalidTableStructure,
 }
@@ -135,6 +137,9 @@ impl fmt::Display for Error {
             Self::InvalidSelection => f.write_str("selection is invalid for the document"),
             Self::InvalidDocument => f.write_str("document invariants are not satisfied"),
             Self::InvalidTransaction => f.write_str("transaction cannot be applied"),
+            Self::InvalidTaskItemChecked => {
+                f.write_str("task item checked attribute must be missing, null, or boolean")
+            }
             Self::InvalidTableStructure => {
                 f.write_str("table rows must share one column count with non-empty cells")
             }

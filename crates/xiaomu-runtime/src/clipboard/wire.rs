@@ -48,6 +48,8 @@ const VERSION_TEXT_STYLE: u32 = 9;
 const VERSION_TYPED_ATOMS: u32 = 10;
 // Explicit whole-root source boundaries must never degrade into text fitting.
 const VERSION_CLOSED_ROOTS: u32 = 11;
+// Typed task containers preserve checked state and an explicit boundary flag.
+const VERSION_TASK_LISTS: u32 = 12;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -97,7 +99,8 @@ impl std::error::Error for ClipboardMetadataError {}
 ///
 /// The plain-text fallback is deliberately not duplicated in the metadata;
 /// callers put [`ClipboardSlice::plain_text`] in the platform text flavor.
-/// Explicit whole-root source selections encode as v11 with closed boundaries.
+/// Task list/item fragments encode as v12 with an explicit open/closed flag.
+/// Otherwise, explicit whole-root source selections encode as v11 with closed boundaries.
 /// Otherwise, built-in hard breaks or independently marked inline atoms encode as v10,
 /// preserving typed kind identity and the complete mark set. Otherwise,
 /// text-style marks encode as v9, preserving all three missing/null/string
@@ -118,7 +121,9 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
         .iter()
         .map(WireNode::from_node)
         .collect::<Result<Vec<_>, _>>()?;
-    let version = if slice.is_closed() {
+    let version = if roots.iter().any(WireNode::carries_tasks) {
+        VERSION_TASK_LISTS
+    } else if slice.is_closed() {
         VERSION_CLOSED_ROOTS
     } else if roots.iter().any(WireNode::carries_typed_atoms) {
         VERSION_TYPED_ATOMS
@@ -139,7 +144,11 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
         format: FORMAT.to_owned(),
         version,
         roots,
-        closed: slice.is_closed().then_some(true),
+        closed: if version == VERSION_TASK_LISTS {
+            Some(slice.is_closed())
+        } else {
+            slice.is_closed().then_some(true)
+        },
     })
     .map_err(|_| ClipboardMetadataError::serialization())?;
     if !strict_json::validate(&metadata) {
@@ -155,7 +164,8 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
 /// differs from the platform text all return `None`. The caller should then
 /// paste the supplied plain text normally. An older envelope carrying a
 /// newer feature (v4 tables, v5 row attributes, pre-v7 null attributes, or
-/// pre-v8 extended link marks, pre-v9 text-style marks, or pre-v10 typed/marked atoms)
+/// pre-v8 extended link marks, pre-v9 text-style marks, pre-v10 typed/marked atoms,
+/// or pre-v12 task nodes)
 /// is also rejected. Unknown attribute variants reject the entire fragment
 /// rather than silently dropping values. Historical v1-v3 envelopes remain
 /// unsupported, as before the null-attribute extension. All versions are
@@ -179,13 +189,18 @@ pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlic
                 | VERSION_TEXT_STYLE
                 | VERSION_TYPED_ATOMS
                 | VERSION_CLOSED_ROOTS
+                | VERSION_TASK_LISTS
         )
     {
         return None;
     }
-    if (envelope.version == VERSION_CLOSED_ROOTS && envelope.closed != Some(true))
+    if (envelope.version == VERSION_TASK_LISTS && envelope.closed.is_none())
+        || (envelope.version == VERSION_CLOSED_ROOTS && envelope.closed != Some(true))
         || (envelope.version < VERSION_CLOSED_ROOTS && envelope.closed.is_some())
     {
+        return None;
+    }
+    if envelope.version < VERSION_TASK_LISTS && envelope.roots.iter().any(WireNode::carries_tasks) {
         return None;
     }
     if envelope.version < VERSION_TYPED_ATOMS
@@ -264,6 +279,17 @@ struct WireNode {
 }
 
 impl WireNode {
+    fn carries_tasks(&self) -> bool {
+        if matches!(self.kind, WireKind::TaskList | WireKind::TaskItem) {
+            return true;
+        }
+        match &self.content {
+            WireContent::Children { children } => children.iter().any(Self::carries_tasks),
+            WireContent::Table { rows, .. } => rows.iter().flatten().any(Self::carries_tasks),
+            WireContent::Inline { .. } | WireContent::Atomic => false,
+        }
+    }
+
     fn carries_typed_atoms(&self) -> bool {
         match &self.content {
             WireContent::Inline { atoms, .. } => atoms.iter().any(WireAtom::is_typed),
@@ -501,6 +527,8 @@ enum WireKind {
     BulletList,
     OrderedList,
     ListItem,
+    TaskList,
+    TaskItem,
     CodeBlock,
     HorizontalRule,
     Image,
@@ -519,6 +547,8 @@ impl WireKind {
             NodeKind::BulletList => Ok(Self::BulletList),
             NodeKind::OrderedList => Ok(Self::OrderedList),
             NodeKind::ListItem => Ok(Self::ListItem),
+            NodeKind::TaskList => Ok(Self::TaskList),
+            NodeKind::TaskItem => Ok(Self::TaskItem),
             NodeKind::CodeBlock => Ok(Self::CodeBlock),
             NodeKind::HorizontalRule => Ok(Self::HorizontalRule),
             NodeKind::Image => Ok(Self::Image),
@@ -540,6 +570,8 @@ impl WireKind {
             Self::BulletList => Ok(NodeKind::BulletList),
             Self::OrderedList => Ok(NodeKind::OrderedList),
             Self::ListItem => Ok(NodeKind::ListItem),
+            Self::TaskList => Ok(NodeKind::TaskList),
+            Self::TaskItem => Ok(NodeKind::TaskItem),
             Self::CodeBlock => Ok(NodeKind::CodeBlock),
             Self::HorizontalRule => Ok(NodeKind::HorizontalRule),
             Self::Image => Ok(NodeKind::Image),

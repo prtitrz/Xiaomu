@@ -218,13 +218,24 @@ impl Default for NodeStoreBuilder {
 pub(crate) fn allows_child(parent: &NodeKind, child: &NodeKind) -> bool {
     match parent {
         NodeKind::BulletList | NodeKind::OrderedList => matches!(child, NodeKind::ListItem),
+        NodeKind::TaskList => matches!(child, NodeKind::TaskItem),
         NodeKind::Table => matches!(child, NodeKind::TableRow),
         NodeKind::TableRow => matches!(child, NodeKind::TableCell),
+        NodeKind::TaskItem => !matches!(
+            child,
+            NodeKind::Document
+                | NodeKind::ListItem
+                | NodeKind::TaskItem
+                | NodeKind::TableRow
+                | NodeKind::TableCell
+                | NodeKind::InlineAtom(_)
+        ),
         NodeKind::Document | NodeKind::Quote | NodeKind::ListItem | NodeKind::TableCell => {
             !matches!(
                 child,
                 NodeKind::Document
                     | NodeKind::ListItem
+                    | NodeKind::TaskItem
                     | NodeKind::TableRow
                     | NodeKind::InlineAtom(_)
             )
