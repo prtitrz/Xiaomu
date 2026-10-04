@@ -7,9 +7,11 @@
 
 mod atom;
 mod structure;
+mod subtree_restore;
 mod table;
 mod table_axis;
 mod table_span;
+mod table_tree;
 
 #[cfg(test)]
 mod cow_tests;
@@ -122,6 +124,11 @@ impl ApplyContext {
                 rows,
                 columns,
             } => self.apply_insert_table(*parent, *index, *rows, *columns),
+            TransactionStep::InsertTableTree {
+                parent,
+                index,
+                tree,
+            } => self.apply_insert_table_tree(*parent, *index, tree),
             TransactionStep::InsertTableRow { table, index } => {
                 self.apply_insert_table_row(*table, *index)
             }
@@ -158,7 +165,7 @@ impl ApplyContext {
                 index,
                 root,
                 nodes,
-            } => self.apply_restore_subtree(*parent, *index, *root, nodes),
+            } => self.apply_restore_subtree_batched(*parent, *index, *root, nodes),
             TransactionStep::RemoveNode { node } => self.apply_remove_node(*node),
             TransactionStep::SetNodeAttrs { node, attrs } => {
                 self.apply_set_node_attrs(*node, attrs)
@@ -340,50 +347,6 @@ impl ApplyContext {
             inserted: id,
         };
         let inverse = vec![TransactionStep::RemoveNode { node: id }];
-        Ok((vec![step_map], inverse))
-    }
-
-    fn apply_restore_subtree(
-        &mut self,
-        parent: NodeId,
-        index: usize,
-        root: NodeId,
-        nodes: &[Node],
-    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
-        if !nodes.iter().any(|node| node.id() == root) {
-            return Err(Error::InvalidTransaction);
-        }
-        if nodes.iter().any(|node| self.store.contains(node.id())) {
-            return Err(Error::InvalidTransaction);
-        }
-
-        let mut children = self.children(parent)?;
-        if index > children.len() {
-            return Err(Error::InvalidTransaction);
-        }
-
-        for node in nodes {
-            let ceiling = node
-                .id()
-                .raw()
-                .checked_add(1)
-                .ok_or(Error::NodeIdExhausted)?;
-            self.next_node_id = self.next_node_id.max(ceiling);
-            self.store.insert_node_mut(node.clone())?;
-        }
-        children.insert(index, root);
-        self.rewrite_node(
-            parent,
-            self.attrs_of(parent)?,
-            NodeContent::children(children),
-        )?;
-
-        let step_map = StepMap::NodeInserted {
-            parent,
-            index,
-            inserted: root,
-        };
-        let inverse = vec![TransactionStep::RemoveNode { node: root }];
         Ok((vec![step_map], inverse))
     }
 

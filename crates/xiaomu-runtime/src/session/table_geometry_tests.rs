@@ -219,7 +219,7 @@ fn merged_tables_reject_every_legacy_row_column_and_cell_navigation_path() {
 }
 
 #[test]
-fn merged_range_keeps_legacy_matrix_clipboard_and_replacement_guards() {
+fn merged_range_keeps_legacy_matrix_clipboard_and_physical_navigation_guards() {
     let f = fixture(true, true);
     let unit = fixture(false, false);
     let plain = ClipboardSlice::from_roots(vec![
@@ -243,12 +243,6 @@ fn merged_range_keeps_legacy_matrix_clipboard_and_replacement_guards() {
         Err(SessionError::UnsupportedTableOperation)
     );
     for intent in [
-        EditIntent::InsertText {
-            text: "overwrite".into(),
-        },
-        EditIntent::PasteText {
-            text: "overwrite".into(),
-        },
         EditIntent::PasteSlice { slice: plain },
         EditIntent::PasteSlice {
             slice: open_table(&unit),
