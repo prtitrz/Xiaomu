@@ -4,8 +4,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    AppContext as _, AvailableSpace, EntityInputHandler, ParentElement, Styled,
-    TestAppContext, VisualTestContext, div, point, px, size,
+    AppContext as _, AvailableSpace, EntityInputHandler, ParentElement, Styled, TestAppContext,
+    VisualTestContext, div, point, px, size,
 };
 use xiaomu_core::document::{
     AttrValue, InlineContent, MarkSet, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStoreBuilder,
