@@ -16,9 +16,9 @@ use crate::session::{DocumentPosition, DocumentSelection, SessionError};
 /// Projects a validated document selection into a detached clipboard slice.
 ///
 /// A single selected inline block stays an inline fragment even when it lives
-/// under a list or quote. Once a selection spans multiple inline leaves, the
-/// minimal selected container tree is retained so Xiaomu-native copy/paste can
-/// preserve list/quote structure without dragging unrelated siblings along.
+/// under a list or quote. Cross-block ranges retain every covered leaf,
+/// including whole atomic blocks, under their minimal selected container tree.
+/// Structural gap endpoints remain unsupported outside active cell ranges.
 pub(crate) fn slice_selection(
     document: &XiaomuDocument,
     selection: DocumentSelection,
@@ -31,53 +31,37 @@ pub(crate) fn slice_selection(
         return slice_cell_range(document, range);
     }
 
+    // Only a collapsed atomic selection takes the whole-node shortcut. An
+    // atomic endpoint of a range must not hide the rest of that range.
+    if let Some(node) = selection.as_atomic_node() {
+        return Ok(Some(ClipboardSlice::from_roots(vec![whole_fragment(
+            document, node,
+        )?])));
+    }
+
     let (head, tail) = selection.ordered(document)?;
+    let head_node = endpoint_node(head)?;
+    let tail_node = endpoint_node(tail)?;
 
-    // A collapsed atomic node selection copies the block whole: kind and
-    // attrs are the payload, there is no editable interior.
-    if let DocumentPosition::Atomic(node) = head {
-        let source = document.node(node).ok_or(SessionError::SelectionInvalid)?;
-        return Ok(Some(ClipboardSlice::from_roots(vec![ClipboardNode::new(
-            source.kind().clone(),
-            source.attrs().clone(),
-            ClipboardNodeContent::Atomic,
-        )])));
-    }
-
-    let (DocumentPosition::Inline(head), DocumentPosition::Inline(tail)) = (head, tail) else {
-        return Err(SessionError::SelectionInvalid);
-    };
-
-    // Identical endpoints (node, boundary, and atom ordinal) select nothing;
-    // affinity is visual bookkeeping and never selects canonical content.
-    // Two gaps at one text boundary can still select the atoms between them.
-    if head.node_id() == tail.node_id()
-        && head.text_offset() == tail.text_offset()
-        && head.atom_index() == tail.atom_index()
-    {
-        return Ok(None);
-    }
-
-    let mut source_blocks = Vec::new();
-    collect_inline_blocks(document, document.root(), &mut source_blocks);
-
-    let head_index = source_blocks
-        .iter()
-        .position(|block| block.node == head.node_id())
-        .ok_or(SessionError::SelectionInvalid)?;
-    let tail_index = source_blocks
-        .iter()
-        .position(|block| block.node == tail.node_id())
-        .ok_or(SessionError::SelectionInvalid)?;
-    if head_index > tail_index {
-        return Err(SessionError::SelectionInvalid);
-    }
-
-    if head_index == tail_index {
-        let source = &source_blocks[head_index];
+    if head_node == tail_node {
+        let (DocumentPosition::Inline(head), DocumentPosition::Inline(tail)) = (head, tail) else {
+            return Err(SessionError::SelectionInvalid);
+        };
+        // Affinity is visual bookkeeping. Different atom ordinals at the
+        // same text offset still select the atoms between those gaps.
+        if head.text_offset() == tail.text_offset() && head.atom_index() == tail.atom_index() {
+            return Ok(None);
+        }
+        let node = document
+            .node(head_node)
+            .ok_or(SessionError::SelectionInvalid)?;
+        let inline = node
+            .content()
+            .as_inline()
+            .ok_or(SessionError::SelectionInvalid)?;
         let inline = slice_inline(
             document,
-            &source.inline,
+            inline,
             head.text_offset().as_usize(),
             head.atom_index(),
             tail.text_offset().as_usize(),
@@ -85,56 +69,79 @@ pub(crate) fn slice_selection(
             false,
         )?;
         return Ok(Some(ClipboardSlice::from_roots(vec![ClipboardNode::new(
-            source.kind.clone(),
-            source.attrs.clone(),
+            node.kind().clone(),
+            node.attrs().clone(),
             ClipboardNodeContent::Inline(inline),
         )])));
     }
 
-    // Cross-block selections own every atom of the blocks they span; the
-    // boundary blocks clip by ordinal exactly like the editing contract.
-    let mut selected = BTreeMap::new();
-    for (index, source) in source_blocks[head_index..=tail_index].iter().enumerate() {
-        let absolute_index = head_index + index;
-        let (start_raw, start_ordinal, end_raw, end_ordinal, include_end_atoms) =
-            if absolute_index == head_index {
-                (
-                    head.text_offset().as_usize(),
-                    head.atom_index(),
-                    source.inline.len_bytes(),
-                    0,
-                    true,
-                )
-            } else if absolute_index == tail_index {
-                (
-                    0,
-                    0,
-                    tail.text_offset().as_usize(),
-                    tail.atom_index(),
-                    false,
-                )
-            } else {
-                (0, 0, source.inline.len_bytes(), 0, true)
-            };
-        selected.insert(
-            source.node,
-            slice_inline(
-                document,
-                &source.inline,
-                start_raw,
-                start_ordinal,
-                end_raw,
-                end_ordinal,
-                include_end_atoms,
-            )?,
-        );
+    // Walk the real tree, retaining identities only. An inline-only index
+    // loses intervening images, rules, and host atomic blocks. Unrecognized
+    // leaf content must occupy a slot too, so selecting it fails explicitly.
+    let mut leaves = Vec::new();
+    collect_leaves(document, document.root(), &mut leaves)?;
+    let head_index = leaves
+        .iter()
+        .position(|id| *id == head_node)
+        .ok_or(SessionError::SelectionInvalid)?;
+    let tail_index = leaves
+        .iter()
+        .position(|id| *id == tail_node)
+        .ok_or(SessionError::SelectionInvalid)?;
+    if head_index >= tail_index {
+        return Err(SessionError::SelectionInvalid);
     }
 
-    let roots = project_roots(document, &selected);
+    let mut selected = BTreeMap::new();
+    for id in &leaves[head_index..=tail_index] {
+        let node = document.node(*id).ok_or(SessionError::SelectionInvalid)?;
+        let fragment = if let NodeContent::Inline(inline) = node.content() {
+            let (start_raw, start_ordinal) = match head {
+                DocumentPosition::Inline(point) if point.node_id() == *id => {
+                    (point.text_offset().as_usize(), point.atom_index())
+                }
+                _ => (0, 0),
+            };
+            let (end_raw, end_ordinal, include_end_atoms) = match tail {
+                DocumentPosition::Inline(point) if point.node_id() == *id => {
+                    (point.text_offset().as_usize(), point.atom_index(), false)
+                }
+                _ => (inline.len_bytes(), 0, true),
+            };
+            ClipboardNode::new(
+                node.kind().clone(),
+                node.attrs().clone(),
+                ClipboardNodeContent::Inline(slice_inline(
+                    document,
+                    inline,
+                    start_raw,
+                    start_ordinal,
+                    end_raw,
+                    end_ordinal,
+                    include_end_atoms,
+                )?),
+            )
+        } else {
+            // Only selected leaves are cloned. Whole atomic and empty
+            // container payloads survive; unsupported content returns Err.
+            whole_fragment(document, *id)?
+        };
+        selected.insert(*id, fragment);
+    }
+
+    let roots = project_roots(document, &selected)?;
     if roots.is_empty() {
         return Err(SessionError::SelectionInvalid);
     }
     Ok(Some(ClipboardSlice::from_roots(roots)))
+}
+
+fn endpoint_node(position: DocumentPosition) -> Result<NodeId, SessionError> {
+    match position {
+        DocumentPosition::Inline(point) => Ok(point.node_id()),
+        DocumentPosition::Atomic(node) => Ok(node),
+        DocumentPosition::Gap(_) => Err(SessionError::SelectionInvalid),
+    }
 }
 
 /// Projects an active cell range into one rectangular table fragment.
@@ -238,31 +245,21 @@ fn whole_fragment(document: &XiaomuDocument, id: NodeId) -> Result<ClipboardNode
     ))
 }
 
-struct SourceBlock {
-    node: NodeId,
-    kind: NodeKind,
-    attrs: NodeAttrs,
-    inline: InlineContent,
-}
-
-fn collect_inline_blocks(document: &XiaomuDocument, id: NodeId, out: &mut Vec<SourceBlock>) {
-    let Some(node) = document.node(id) else {
-        return;
-    };
+fn collect_leaves(
+    document: &XiaomuDocument,
+    id: NodeId,
+    out: &mut Vec<NodeId>,
+) -> Result<(), SessionError> {
+    let node = document.node(id).ok_or(SessionError::SelectionInvalid)?;
     match node.content() {
-        NodeContent::Inline(inline) => out.push(SourceBlock {
-            node: id,
-            kind: node.kind().clone(),
-            attrs: node.attrs().clone(),
-            inline: inline.clone(),
-        }),
-        NodeContent::Children(children) => {
+        NodeContent::Children(children) if !children.is_empty() => {
             for child in children {
-                collect_inline_blocks(document, *child, out);
+                collect_leaves(document, *child, out)?;
             }
         }
-        NodeContent::Atomic | _ => {}
+        _ => out.push(id),
     }
+    Ok(())
 }
 
 fn slice_inline(
