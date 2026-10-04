@@ -13,6 +13,7 @@ mod inline;
 mod inline_atom;
 mod inverse;
 mod step;
+mod table_restore;
 
 use std::collections::BTreeMap;
 
@@ -21,6 +22,7 @@ use crate::mapping::ChangeMap;
 use crate::{Error, Result};
 
 pub use step::TransactionStep;
+pub use table_restore::TableCellRestore;
 
 /// Where a transaction came from.
 ///

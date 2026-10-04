@@ -126,6 +126,40 @@ pub enum StepMap {
         /// The removed node together with every node of its subtree.
         removed: BTreeSet<NodeId>,
     },
+    /// One cell was absorbed into another without deleting its child blocks.
+    /// Text/inline positions and descendant node selections keep their IDs.
+    /// Gaps in the absorbed cell move into the survivor's appended content;
+    /// selection of the absorbed cell itself maps to the survivor.
+    TableCellMerged {
+        /// Physical row losing the absorbed cell.
+        row: NodeId,
+        /// Physical child index immediately before absorption.
+        index: usize,
+        /// Geometric top-left cell retaining its identity.
+        survivor: NodeId,
+        /// Absorbed cell identity; its descendants remain live.
+        removed: NodeId,
+        /// Survivor child gap receiving the moved block sequence.
+        at: usize,
+        /// Number of moved direct child blocks.
+        child_count: usize,
+    },
+    /// Exact structural inverse of one cell absorption.
+    /// At content-sequence endpoints, bias chooses which cell owns the gap.
+    TableCellRestored {
+        /// Physical row receiving the original cell identity.
+        row: NodeId,
+        /// Physical child insertion index.
+        index: usize,
+        /// Cell giving back the original direct child blocks.
+        survivor: NodeId,
+        /// Restored cell identity.
+        restored: NodeId,
+        /// Start of the returned child sequence in the survivor.
+        at: usize,
+        /// Number of returned direct child blocks.
+        child_count: usize,
+    },
     /// An inline-bearing node was split at a text offset; the tail text
     /// entered the parent's child list as a freshly allocated sibling.
     NodeSplit {
@@ -219,7 +253,9 @@ impl StepMap {
             } => map_text_point_over_range(point, *node, *range, *replacement_len, bias),
             Self::InlineAtomInserted { .. }
             | Self::InlineAtomRemoved { .. }
-            | Self::NodeInserted { .. } => MappedPosition::Mapped(point),
+            | Self::NodeInserted { .. }
+            | Self::TableCellMerged { .. }
+            | Self::TableCellRestored { .. } => MappedPosition::Mapped(point),
             Self::NodeSplit {
                 node, at, inserted, ..
             } => {
@@ -308,6 +344,54 @@ impl StepMap {
     #[must_use]
     pub fn map_node_gap(&self, gap: NodeGap, bias: MapBias) -> MappedPosition<NodeGap> {
         match self {
+            Self::TableCellMerged {
+                row,
+                index,
+                survivor,
+                removed,
+                at,
+                child_count,
+            } => {
+                if gap.parent() == *removed {
+                    MappedPosition::Mapped(NodeGap::new(*survivor, at + gap.index()))
+                } else if gap.parent() == *survivor
+                    && (gap.index() > *at || (gap.index() == *at && bias == MapBias::End))
+                {
+                    MappedPosition::Mapped(NodeGap::new(*survivor, gap.index() + child_count))
+                } else if gap.parent() == *row && gap.index() > *index {
+                    MappedPosition::Mapped(NodeGap::new(*row, gap.index() - 1))
+                } else {
+                    MappedPosition::Mapped(gap)
+                }
+            }
+            Self::TableCellRestored {
+                row,
+                index,
+                survivor,
+                restored,
+                at,
+                child_count,
+            } => {
+                let end = at + child_count;
+                if gap.parent() == *survivor {
+                    let inside = (gap.index() > *at && gap.index() < end)
+                        || (gap.index() == *at && bias == MapBias::End)
+                        || (gap.index() == end && bias == MapBias::Start);
+                    if inside {
+                        MappedPosition::Mapped(NodeGap::new(*restored, gap.index() - at))
+                    } else if gap.index() >= end {
+                        MappedPosition::Mapped(NodeGap::new(*survivor, gap.index() - child_count))
+                    } else {
+                        MappedPosition::Mapped(gap)
+                    }
+                } else if gap.parent() == *row
+                    && (gap.index() > *index || (gap.index() == *index && bias == MapBias::End))
+                {
+                    MappedPosition::Mapped(NodeGap::new(*row, gap.index() + 1))
+                } else {
+                    MappedPosition::Mapped(gap)
+                }
+            }
             Self::TextReplaced { .. }
             | Self::InlineTextReplaced { .. }
             | Self::InlineAtomInserted { .. }
@@ -365,11 +449,17 @@ impl StepMap {
 
     /// Maps one node selection across this step.
     ///
-    /// Removal deletes a selection whose stable target left the document;
-    /// every other step keeps the selected node identity intact.
+    /// Removal deletes a selection whose stable target left the document.
+    /// A merged cell maps to its survivor; other surviving targets keep their
+    /// identity, including every block and inline atom moved between cells.
     #[must_use]
     pub fn map_node_selection(&self, selection: NodeSelection) -> MappedPosition<NodeSelection> {
         match self {
+            Self::TableCellMerged {
+                survivor, removed, ..
+            } if selection.node_id() == *removed => {
+                MappedPosition::Mapped(NodeSelection::new(*survivor))
+            }
             Self::InlineAtomRemoved { removed, .. }
             | Self::InlineNodeJoined {
                 second: removed, ..

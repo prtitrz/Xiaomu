@@ -101,6 +101,33 @@ impl NodeStore {
         Self::from_nodes(nodes)
     }
 
+    /// Atomically exchanges an exact set of payloads, cloning the ordered map
+    /// once. Replacement-only IDs must be absent; expected payloads must still
+    /// match. Used by semantic table edits and their guarded inverses.
+    pub(crate) fn exchange(&self, expected: &[Node], replacement: &[Node]) -> Result<Self> {
+        let expected_ids: BTreeSet<_> = expected.iter().map(Node::id).collect();
+        let replacement_ids: BTreeSet<_> = replacement.iter().map(Node::id).collect();
+        if expected_ids.len() != expected.len()
+            || replacement_ids.len() != replacement.len()
+            || expected
+                .iter()
+                .any(|node| self.get(node.id()) != Some(node))
+            || replacement_ids
+                .difference(&expected_ids)
+                .any(|id| self.contains(*id))
+        {
+            return Err(Error::InvalidTransaction);
+        }
+        let mut next = self.nodes.as_ref().clone();
+        for id in expected_ids.difference(&replacement_ids) {
+            next.remove(id);
+        }
+        for node in replacement {
+            next.insert(node.id(), Arc::new(node.clone()));
+        }
+        Ok(Self::from_nodes(next))
+    }
+
     #[cfg(test)]
     pub(crate) fn shares_node_payload(&self, other: &Self, id: NodeId) -> bool {
         match (self.nodes.get(&id), other.nodes.get(&id)) {
