@@ -18,7 +18,7 @@ use crate::session::{DocumentPosition, DocumentSelection, SessionError};
 /// A single selected inline block stays an inline fragment even when it lives
 /// under a list or quote. Cross-block ranges retain every covered leaf,
 /// including whole atomic blocks, under their minimal selected container tree.
-/// Only an explicit full-root gap range supports structural gap endpoints.
+/// Explicit whole-block identity and full-root ranges support structural gaps.
 pub(crate) fn slice_selection(
     document: &XiaomuDocument,
     selection: DocumentSelection,
@@ -29,6 +29,15 @@ pub(crate) fn slice_selection(
     // cell fragments in reading order, TSV as the plain-text fallback (P5.5).
     if let Some(range) = selection.active_cell_range() {
         return slice_cell_range(document, range);
+    }
+
+    // Identity-tagged block selections capture exactly one closed subtree,
+    // even for a nested container or a sole root child. Ordinary gap ranges
+    // must never acquire this shortcut merely by spanning the same endpoints.
+    if let Some(node) = selection.as_node_selection() {
+        return Ok(Some(ClipboardSlice::from_closed_roots(vec![
+            whole_fragment(document, node)?,
+        ])));
     }
 
     // Explicit root ranges must retain every root subtree, even leading or
