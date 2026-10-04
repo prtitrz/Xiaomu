@@ -11,7 +11,7 @@ use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 
 use crate::clipboard::ClipboardSlice;
 
-use super::SessionError;
+use super::{DocumentSelection, SessionError};
 
 pub(super) const MARK_KINDS: [MarkKind; 7] = [
     MarkKind::Bold,
@@ -285,6 +285,16 @@ pub(crate) enum HistoryPolicy {
 /// How the session derives the selection after a plan commits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SelectionUpdate {
+    /// Install exact endpoints in the final snapshot, after validating them.
+    ///
+    /// A host converting text bytes to typed inline atoms can compute the
+    /// corresponding complete range without collapsing it or guessing a
+    /// ChangeMap bias. Invalid endpoints reject the entire candidate before
+    /// history or listeners are published. Undo retains the original range.
+    Exact {
+        /// Selection expressed against the transaction's final document.
+        selection: DocumentSelection,
+    },
     /// Select the complete root child range of the final snapshot.
     ///
     /// Host whole-document replacement/deletion uses this instead of retaining

@@ -129,6 +129,10 @@ impl DocumentSession {
             .clone();
 
         let after_selection = match staged.selection_update {
+            SelectionUpdate::Exact { selection } => {
+                selection.validate(&current)?;
+                selection
+            }
             SelectionUpdate::AllDocument => DocumentSelection::all(&current),
             SelectionUpdate::PreserveFocus => preserved_focus(before_selection, &current)?,
             SelectionUpdate::PreserveSelection => preserved_selection(before_selection, &current)?,
@@ -182,3 +186,7 @@ impl DocumentSession {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "exact_staged_tests.rs"]
+mod exact_staged_tests;

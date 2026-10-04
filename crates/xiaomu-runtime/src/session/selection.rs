@@ -58,7 +58,7 @@ impl From<NodeId> for DocumentPosition {
 /// every public read. Ordering across blocks requires the snapshot, so
 /// unlike `TextSelection`, head/tail resolution goes through
 /// [`DocumentSelection::ordered`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct DocumentSelection {
     anchor: DocumentPosition,
     focus: DocumentPosition,
