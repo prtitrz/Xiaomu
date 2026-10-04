@@ -60,6 +60,30 @@ not inherit these temporary frontend restrictions.
 
 ## Evidence and continuation
 
+### Logical row/column transactions
+
+The opt-in `InsertTableRowLogical`/`InsertTableColumnLogical` steps take explicit
+Header/Cell kinds by logical column/row. New attrs and paragraphs are neutral
+Core defaults; product default attrs and neighbor-kind rules belong to the
+host. Existing unit-grid steps remain unchanged. Half-open logical row/column
+deletion refuses removal of the entire dimension, adjusts intersecting spans
+and width slices, and moves surviving origin cells with their content/identity
+when the original row disappears. `NodeReparented` maps both parent gaps and
+keeps descendant identities rather than treating a move as deletion.
+
+Restoration now binds every affected node's actual parent and the ancestor
+closure up to its target table. Parent maps are built once and compared before
+exchange or allocator changes; mere descendant reachability is insufficient.
+This includes a row moved into a nested table inside the same outer table,
+whether the original split changed the row payload or only a cell. Rich nested
+subtrees and inline-atom edges remain valid restoration payloads.
+
+Core tests total 272 with strict all-target Clippy. New cases cover every
+insertion boundary/proper deletion interval of the test grid, nested content,
+resource preflight, moved origin cells, forward/reverse gap mapping and exact
+inverse identities. This is Core semantics, not product toolbar/PM selection,
+repair-plugin or GUI parity; those adapters continue separately.
+
 ### Semantic merge/split foundation
 
 `MergeTableCells` requires a closed logical rectangle and keeps the geometric
