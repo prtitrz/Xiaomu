@@ -52,10 +52,16 @@ impl DocumentView {
             NodeContent::Children(_) if matches!(kind, NodeKind::Table) => {
                 self.render_table(id, index, cx)
             }
+            NodeContent::Children(children) if matches!(kind, NodeKind::TaskItem) => {
+                self.render_task_item(id, children, in_quote, list_depth, index, cx)
+            }
             NodeContent::Children(children) => {
                 let next_quote = in_quote || matches!(kind, NodeKind::Quote);
                 let next_depth = list_depth
-                    + usize::from(matches!(kind, NodeKind::BulletList | NodeKind::OrderedList));
+                    + usize::from(matches!(
+                        kind,
+                        NodeKind::BulletList | NodeKind::OrderedList | NodeKind::TaskList
+                    ));
                 let mut column = div().relative().flex().flex_col();
                 if self
                     .session

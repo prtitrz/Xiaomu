@@ -72,9 +72,29 @@ payloads, downgrade attempts, raw duplicates and resource limits, and atomic
 default-paste rejection with policy interception. These source tests require the
 integration owner's Cargo gates; writing them is not evidence they have passed.
 
-This change does not implement task commands, checkbox paint/hit-testing, a
-host's persistent-document adapter or native acceptance. Existing GPUI and IME
-routing are unchanged. No additional wait, input owner or fallback UI is added.
+The initial foundation did not implement task commands or controls. The next
+local checkpoint adds `EditIntent::SetTaskChecked { item, checked }` and a real
+GPUI pointer checkbox. Actual mutations patch only `checked`, preserve exact
+selection, clear pending marks and create an isolated undo unit. An identical
+boolean is a true no-op preserving typing state. Runtime rejects stale IDs and
+wrong kinds; host validation still gates every candidate.
+
+The control captures only the stable item ID, reads live state at click, and
+focuses the existing selection even after accepted NoChange without requesting
+scroll. Task content, nested lists, images and code stay in the content column.
+No extra IME wait or platform input owner is introduced. GPUI 0.2.2 does not
+expose checkbox role/checked accessibility builders; the pointer implementation
+does not claim those platform semantics.
+
+The integrated workspace/all-targets suite passed 922 tests and strict Clippy
+on 2026-10-04. Twelve new control tests comprise ten virtual event/layout tests,
+one explicitly callback-level no-render test, and one attribute projection.
+GPUI public test input flushes effects between pointer events; the callback
+test is not evidence of OS pointer delivery in a single paint frame. The IME
+test models platform unmark-before-click, pending real X11 acceptance. Product
+keyboard planners, persistence adapters and production migration remain
+separate host work. Product history can coalesce checkbox actions; the isolated
+native undo boundary is an explicit stronger transaction policy.
 
 ## Alternatives considered
 
