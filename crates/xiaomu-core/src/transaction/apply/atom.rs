@@ -96,7 +96,7 @@ impl ApplyContext {
             self.attrs_of(parent)?,
             crate::document::NodeContent::Inline(next),
         )?;
-        self.store = self.store.without_nodes(&BTreeSet::from([atom]));
+        self.store.remove_nodes_mut(&BTreeSet::from([atom]));
 
         let step_map = StepMap::InlineAtomRemoved {
             parent,
@@ -135,7 +135,7 @@ impl ApplyContext {
             .checked_add(1)
             .ok_or(Error::NodeIdExhausted)?;
         self.next_node_id = self.next_node_id.max(ceiling);
-        self.store = self.store.inserted(node.clone())?;
+        self.store.insert_node_mut(node.clone())?;
         self.attach_inline_atom(at, node.id())?;
 
         let step_map = StepMap::InlineAtomInserted {

@@ -12,9 +12,10 @@ use super::{Node, NodeAttrs, NodeContent, NodeId, NodeKind};
 /// Read-only canonical node storage shared by document snapshots.
 ///
 /// The map itself is wrapped in `Arc`, and each node payload is also an `Arc`.
-/// Replacing one node clones only the ordered map and reuses all unchanged node
-/// payloads. This is the P0 structural-sharing prototype; the public contract
-/// does not depend on this concrete representation.
+/// A private transaction writer separates the ordered map on its first write
+/// with copy-on-write, then reuses that working map for subsequent steps.
+/// Unchanged node payloads stay shared. Public snapshots expose no mutation
+/// capability; this prototype representation is not part of their contract.
 ///
 /// Equality compares stored node payloads by identity; structural sharing of
 /// payloads is deliberately not part of equality.
@@ -63,48 +64,54 @@ impl NodeStore {
     ///
     /// Unchanged node payloads are reused through `Arc`, keeping the
     /// structural-sharing prototype intact.
+    #[cfg(test)]
     pub(crate) fn replace_node(&self, node: Node) -> Result<Self> {
+        let mut next = self.clone();
+        next.replace_node_mut(node)?;
+        Ok(next)
+    }
+
+    /// Replaces one payload in an unpublished working store. The first write
+    /// separates a shared map; further writes keep its unique allocation.
+    pub(crate) fn replace_node_mut(&mut self, node: Node) -> Result<()> {
         let id = node.id();
         if !self.nodes.contains_key(&id) {
             return Err(Error::UnknownNode);
         }
 
-        let mut next = self.nodes.as_ref().clone();
-        next.insert(id, Arc::new(node));
-        Ok(Self::from_nodes(next))
+        Arc::make_mut(&mut self.nodes).insert(id, Arc::new(node));
+        Ok(())
     }
 
-    /// Returns a store with one previously absent node added.
-    pub(crate) fn inserted(&self, node: Node) -> Result<Self> {
+    /// Adds one previously absent node to an unpublished working store.
+    pub(crate) fn insert_node_mut(&mut self, node: Node) -> Result<()> {
         let id = node.id();
         if self.nodes.contains_key(&id) {
             return Err(Error::DuplicateChildReference);
         }
 
-        let mut next = self.nodes.as_ref().clone();
-        next.insert(id, Arc::new(node));
-        Ok(Self::from_nodes(next))
+        Arc::make_mut(&mut self.nodes).insert(id, Arc::new(node));
+        Ok(())
     }
 
-    /// Returns a store without the given node identities.
+    /// Removes node identities from an unpublished working store.
     ///
     /// Missing identities are ignored so callers can remove whole subtrees in
     /// one pass.
-    pub(crate) fn without_nodes(&self, removed: &BTreeSet<NodeId>) -> Self {
-        let nodes = self
-            .nodes
-            .as_ref()
-            .iter()
-            .filter(|(id, _)| !removed.contains(id))
-            .map(|(id, node)| (*id, Arc::clone(node)))
-            .collect();
-        Self::from_nodes(nodes)
+    pub(crate) fn remove_nodes_mut(&mut self, removed: &BTreeSet<NodeId>) {
+        if removed.iter().all(|id| !self.contains(*id)) {
+            return;
+        }
+        let nodes = Arc::make_mut(&mut self.nodes);
+        for id in removed {
+            nodes.remove(id);
+        }
     }
 
-    /// Atomically exchanges an exact set of payloads, cloning the ordered map
-    /// once. Replacement-only IDs must be absent; expected payloads must still
-    /// match. Used by semantic table edits and their guarded inverses.
-    pub(crate) fn exchange(&self, expected: &[Node], replacement: &[Node]) -> Result<Self> {
+    /// Exchanges exact payloads after complete preflight. Replacement-only IDs
+    /// must be absent and expected payloads must match. Copy-on-write separates
+    /// the map only if it is still shared with a published snapshot.
+    pub(crate) fn exchange_mut(&mut self, expected: &[Node], replacement: &[Node]) -> Result<()> {
         let expected_ids: BTreeSet<_> = expected.iter().map(Node::id).collect();
         let replacement_ids: BTreeSet<_> = replacement.iter().map(Node::id).collect();
         if expected_ids.len() != expected.len()
@@ -118,14 +125,14 @@ impl NodeStore {
         {
             return Err(Error::InvalidTransaction);
         }
-        let mut next = self.nodes.as_ref().clone();
+        let next = Arc::make_mut(&mut self.nodes);
         for id in expected_ids.difference(&replacement_ids) {
             next.remove(id);
         }
         for node in replacement {
             next.insert(node.id(), Arc::new(node.clone()));
         }
-        Ok(Self::from_nodes(next))
+        Ok(())
     }
 
     #[cfg(test)]
@@ -135,7 +142,15 @@ impl NodeStore {
             _ => false,
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn map_storage_id(&self) -> usize {
+        Arc::as_ptr(&self.nodes) as usize
+    }
 }
+
+#[cfg(test)]
+mod cow_tests;
 
 /// Safe bottom-up builder for an initial canonical node store.
 ///

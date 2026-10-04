@@ -11,6 +11,9 @@ mod table;
 mod table_axis;
 mod table_span;
 
+#[cfg(test)]
+mod cow_tests;
+
 use std::collections::{BTreeSet, VecDeque};
 
 use crate::document::{
@@ -40,18 +43,19 @@ impl ApplyContext {
         content: NodeContent,
     ) -> Result<NodeId> {
         let raw = self.next_node_id;
+        let next_id = raw.checked_add(1).ok_or(Error::NodeIdExhausted)?;
         let id = NodeId::from_allocated(raw);
         let node = Node::new(id, kind, attrs, content)?;
 
-        self.store = self.store.inserted(node)?;
-        self.next_node_id = raw.checked_add(1).ok_or(Error::NodeIdExhausted)?;
+        self.store.insert_node_mut(node)?;
+        self.next_node_id = next_id;
         Ok(id)
     }
 
     fn rewrite_node(&mut self, id: NodeId, attrs: NodeAttrs, content: NodeContent) -> Result<()> {
         let node = self.store.get(id).ok_or(Error::UnknownNode)?;
         let rewritten = Node::new(node.id(), node.kind().clone(), attrs, content)?;
-        self.store = self.store.replace_node(rewritten)?;
+        self.store.replace_node_mut(rewritten)?;
         Ok(())
     }
 
@@ -300,7 +304,7 @@ impl ApplyContext {
             current.attrs().clone(),
             current.content().clone(),
         )?;
-        self.store = self.store.replace_node(rewritten)?;
+        self.store.replace_node_mut(rewritten)?;
 
         let inverse = vec![TransactionStep::SetNodeKind {
             node,
@@ -365,7 +369,7 @@ impl ApplyContext {
                 .checked_add(1)
                 .ok_or(Error::NodeIdExhausted)?;
             self.next_node_id = self.next_node_id.max(ceiling);
-            self.store = self.store.inserted(node.clone())?;
+            self.store.insert_node_mut(node.clone())?;
         }
         children.insert(index, root);
         self.rewrite_node(
@@ -406,7 +410,7 @@ impl ApplyContext {
             self.attrs_of(parent)?,
             NodeContent::children(children),
         )?;
-        self.store = self.store.without_nodes(&subtree);
+        self.store.remove_nodes_mut(&subtree);
 
         let step_map = StepMap::NodeRemoved {
             parent,
