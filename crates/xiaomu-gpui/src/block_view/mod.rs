@@ -372,15 +372,18 @@ impl ParagraphView {
         let Some(state) = &self.composition else {
             return xiaomu_core::document::MarkSet::empty();
         };
-        let Some(offset) = self
-            .inline()
-            .and_then(|inline| inline.offset_at(state.base_range().start).ok())
-        else {
+        let Some(range) = self.inline().and_then(|inline| {
+            xiaomu_core::text::TextRange::new(
+                inline.offset_at(state.base_range().start).ok()?,
+                inline.offset_at(state.base_range().end).ok()?,
+            )
+            .ok()
+        }) else {
             return xiaomu_core::document::MarkSet::empty();
         };
         self.session
             .borrow()
-            .effective_input_marks(self.node, offset)
+            .effective_composition_marks(self.node, range)
             .unwrap_or_else(|_| xiaomu_core::document::MarkSet::empty())
     }
 

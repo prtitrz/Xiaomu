@@ -6,7 +6,7 @@
 //! [`InlinePoint`] start boundary, so the atom ordinal survives the edit and
 //! the seam atoms are split or shifted explicitly instead of silently.
 
-use crate::document::{InlineAtomPlacement, InlineContent};
+use crate::document::{InlineAtomPlacement, InlineContent, MarkSet};
 use crate::selection::InlinePoint;
 use crate::text::{TextOffset, TextRange};
 use crate::{Error, Result};
@@ -32,6 +32,7 @@ pub(super) fn replace_inline_text(
     at: InlinePoint,
     end: TextOffset,
     replacement: &str,
+    insertion_marks: Option<&MarkSet>,
 ) -> Result<InlineContent> {
     let start = at.text_offset();
     if start > end {
@@ -48,7 +49,7 @@ pub(super) fn replace_inline_text(
 
     let atoms = mapped_atom_placements_after_inline_replace(inline, at, end, replacement.len())?;
     let range = TextRange::new(start, end)?;
-    let pieces = splice_pieces(inline, range, replacement);
+    let pieces = splice_pieces(inline, range, replacement, insertion_marks);
     rebuild(pieces, &atoms)
 }
 
@@ -164,7 +165,8 @@ mod tests {
 
         // Inserting between the two atoms pushes only later seam atoms past
         // the inserted text.
-        let next = replace_inline_text(&content, seam(ids[0], 1, 1), offset_at(1), "X").unwrap();
+        let next =
+            replace_inline_text(&content, seam(ids[0], 1, 1), offset_at(1), "X", None).unwrap();
         assert_eq!(text_of(&next), "AXB");
         assert_eq!(next.atoms()[0].atom(), ids[0]);
         assert_eq!(next.atoms()[0].text_offset(), offset_at(1));
@@ -172,13 +174,15 @@ mod tests {
         assert_eq!(next.atoms()[1].text_offset(), offset_at(2));
 
         // Inserting before both atoms moves both of them.
-        let before = replace_inline_text(&content, seam(ids[0], 1, 0), offset_at(1), "X").unwrap();
+        let before =
+            replace_inline_text(&content, seam(ids[0], 1, 0), offset_at(1), "X", None).unwrap();
         assert_eq!(text_of(&before), "AXB");
         assert_eq!(before.atoms()[0].text_offset(), offset_at(2));
         assert_eq!(before.atoms()[1].text_offset(), offset_at(2));
 
         // Inserting after both atoms leaves both anchors in place.
-        let after = replace_inline_text(&content, seam(ids[0], 1, 2), offset_at(1), "X").unwrap();
+        let after =
+            replace_inline_text(&content, seam(ids[0], 1, 2), offset_at(1), "X", None).unwrap();
         assert_eq!(text_of(&after), "AXB");
         assert_eq!(after.atoms()[0].text_offset(), offset_at(1));
         assert_eq!(after.atoms()[1].text_offset(), offset_at(1));
@@ -197,7 +201,8 @@ mod tests {
         .unwrap();
 
         // Replace "B" with "XY" starting after the atom anchored at 1.
-        let next = replace_inline_text(&content, seam(ids[0], 1, 1), offset_at(2), "XY").unwrap();
+        let next =
+            replace_inline_text(&content, seam(ids[0], 1, 1), offset_at(2), "XY", None).unwrap();
         assert_eq!(text_of(&next), "AXYC");
         assert_eq!(next.atoms()[0].text_offset(), offset_at(1));
         assert_eq!(next.atoms()[1].text_offset(), offset_at(3));
@@ -217,12 +222,12 @@ mod tests {
 
         // Seam atoms after the caret are inside a non-empty region.
         assert_eq!(
-            replace_inline_text(&content, seam(ids[0], 1, 1), offset_at(2), "X"),
+            replace_inline_text(&content, seam(ids[0], 1, 1), offset_at(2), "X", None),
             Err(Error::InvalidTransaction)
         );
         // A caret gap that does not exist at the seam is invalid.
         assert_eq!(
-            replace_inline_text(&content, seam(ids[0], 1, 3), offset_at(1), "X"),
+            replace_inline_text(&content, seam(ids[0], 1, 3), offset_at(1), "X", None),
             Err(Error::InvalidSelection)
         );
 
@@ -233,7 +238,7 @@ mod tests {
         .unwrap();
         // An atom anchored strictly inside the region fails closed.
         assert_eq!(
-            replace_inline_text(&inside, seam(ids[0], 1, 0), offset_at(3), "X"),
+            replace_inline_text(&inside, seam(ids[0], 1, 0), offset_at(3), "X", None),
             Err(Error::InvalidTransaction)
         );
     }
@@ -244,9 +249,11 @@ mod tests {
         let content = inline("AB");
 
         assert!(matches!(
-            replace_inline_text(&content, seam(ids[0], 2, 0), offset_at(1), "X"),
+            replace_inline_text(&content, seam(ids[0], 2, 0), offset_at(1), "X", None),
             Err(Error::InvalidTextRange { start: 2, end: 1 })
         ));
-        assert!(replace_inline_text(&content, seam(ids[0], 1, 0), offset_at(9), "X").is_err());
+        assert!(
+            replace_inline_text(&content, seam(ids[0], 1, 0), offset_at(9), "X", None).is_err()
+        );
     }
 }

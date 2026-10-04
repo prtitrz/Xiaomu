@@ -86,6 +86,7 @@ fn prepare_target(
         }
         let inline = inline_of(document, head.node_id())?;
         let action = atom_edit::plan_text_input(
+            document,
             inline,
             Some(head),
             tail,

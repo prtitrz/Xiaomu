@@ -216,3 +216,36 @@ fn preedit_between_breaks_splices_into_correct_display_row_without_canonical_cha
         assert_eq!(session.borrow().history_depths(), (0, 0));
     }
 }
+
+#[gpui::test]
+fn preedit_and_commit_inherit_the_same_marks_at_each_hard_break_gap(cx: &mut TestAppContext) {
+    for ordinal in 0..=2 {
+        let (window, session) = open(cx, ordinal);
+        let before = session.borrow().document().clone();
+        let selection = session.borrow().selection();
+        let expected = match ordinal {
+            0 => MarkSet::empty(),
+            1 => MarkSet::new([Mark::Bold]).unwrap(),
+            _ => MarkSet::new([Mark::Underline]).unwrap(),
+        };
+        window
+            .update(cx, |view, window, cx| {
+                view.replace_and_mark_text_in_range(None, "你好", Some(2..2), window, cx);
+                assert_eq!(view.preedit_marks(), expected);
+                assert_eq!(session.borrow().document().store(), before.store());
+                view.replace_text_in_range(None, "你好", window, cx);
+                let inline = view.inline().unwrap();
+                let inserted = inline
+                    .runs()
+                    .iter()
+                    .find(|run| run.text().as_str().contains("你好"))
+                    .unwrap();
+                assert_eq!(inserted.marks(), &expected);
+                assert_eq!(inline.atoms().len(), 2);
+            })
+            .unwrap();
+        session.borrow_mut().undo().unwrap();
+        assert_eq!(session.borrow().document().store(), before.store());
+        assert_eq!(session.borrow().selection(), selection);
+    }
+}

@@ -157,7 +157,7 @@ pub(super) fn replace_inline_text_inverse(
     at: InlinePoint,
     range: TextRange,
     replacement: &str,
-    pre: &InlineContent,
+    restore_marks: &MarkSet,
     spans: &[InlineSpan],
 ) -> Vec<TransactionStep> {
     let start = range.start().as_usize();
@@ -183,12 +183,12 @@ pub(super) fn replace_inline_text_inverse(
     }];
 
     // After the restoring replacement, the restored span carries exactly the
-    // marks the original replacement had inherited. Strip them so the
+    // marks the inverse will inherit at the post-edit gap. Strip them so the
     // per-span re-add below reconstructs the original segmentation. Mark
     // steps never move text or atoms, so the preserved seam stays intact.
     let restored_span =
         TextRange::new(offset(start), offset(start + old_len)).expect("inverse span stays ordered");
-    for mark in inherited_marks_at(pre, start).as_slice() {
+    for mark in restore_marks.as_slice() {
         steps.push(TransactionStep::RemoveMark {
             node: at.node_id(),
             range: restored_span,
