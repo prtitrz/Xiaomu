@@ -21,6 +21,9 @@ use xiaomu_core::selection::{InlinePoint, NodeGap, NodeSelection, TextPoint, Tex
 
 use super::SessionError;
 
+#[path = "selection_node.rs"]
+mod node;
+
 /// One endpoint of a [`DocumentSelection`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DocumentPosition {
@@ -68,6 +71,8 @@ pub struct DocumentSelection {
     /// its anchor seam and the rectangle is the effective selection; the two
     /// forms never mix (P5.5).
     cell_range: Option<CellRange>,
+    /// Explicit whole-block identity and its originating document root.
+    node_selection: Option<(NodeId, NodeId)>,
 }
 
 pub use super::cell_range::CellRange;
@@ -79,6 +84,7 @@ impl DocumentSelection {
             anchor: anchor.into(),
             focus: focus.into(),
             cell_range: None,
+            node_selection: None,
         }
     }
 
@@ -100,10 +106,10 @@ impl DocumentSelection {
     /// Whether this is exactly the current root's complete child range.
     ///
     /// Both directions are accepted; partial, nested and mixed gap ranges,
-    /// inline endpoint ranges and active cell ranges are never Select All.
+    /// inline endpoints, cell ranges and explicit node selections are never All.
     #[must_use]
     pub fn is_all(&self, document: &XiaomuDocument) -> bool {
-        if self.cell_range.is_some() {
+        if self.cell_range.is_some() || self.node_selection.is_some() {
             return false;
         }
         let all = Self::all(document);
@@ -119,6 +125,7 @@ impl DocumentSelection {
             anchor: position,
             focus: position,
             cell_range: None,
+            node_selection: None,
         }
     }
 
@@ -133,6 +140,7 @@ impl DocumentSelection {
             anchor: park,
             focus: park,
             cell_range: Some(CellRange::new(anchor_cell, focus_cell)),
+            node_selection: None,
         }
     }
 
@@ -167,10 +175,10 @@ impl DocumentSelection {
         self.cell_range
     }
 
-    /// Returns whether this is a coincident endpoint selection, not a cell range.
+    /// Whether endpoints coincide without a cell range or whole-block identity.
     #[must_use]
     pub fn is_collapsed(&self) -> bool {
-        self.cell_range.is_none() && self.anchor == self.focus
+        self.cell_range.is_none() && self.node_selection.is_none() && self.anchor == self.focus
     }
 
     /// Returns the single-block Core selection when both endpoints are
@@ -195,7 +203,7 @@ impl DocumentSelection {
     /// cross-block code paths own those selections.
     #[must_use]
     pub fn as_same_node_inline(&self) -> Option<(InlinePoint, InlinePoint)> {
-        if self.cell_range.is_some() {
+        if self.cell_range.is_some() || self.node_selection.is_some() {
             return None;
         }
         match (self.anchor, self.focus) {
@@ -213,6 +221,7 @@ impl DocumentSelection {
     #[must_use]
     pub fn as_atomic_node(&self) -> Option<NodeId> {
         if self.cell_range.is_none()
+            && self.node_selection.is_none()
             && self.anchor == self.focus
             && let DocumentPosition::Atomic(node) = self.anchor
         {
@@ -227,6 +236,9 @@ impl DocumentSelection {
     /// exist, carry cell content, and belong to one table; the parked text
     /// endpoints are validated like any other position.
     pub fn validate(&self, document: &XiaomuDocument) -> Result<(), SessionError> {
+        if self.node_selection.is_some() {
+            return self.validate_node_selection(document);
+        }
         let check = |position: DocumentPosition| match position {
             DocumentPosition::Inline(point) => point.validate(document),
             DocumentPosition::Gap(gap) => gap.validate(document),
@@ -256,6 +268,9 @@ impl DocumentSelection {
         changes: &ChangeMap,
         document: &XiaomuDocument,
     ) -> Result<Self, SessionError> {
+        if self.node_selection.is_some() {
+            return self.map_node_selection(changes, document);
+        }
         let map_one = |endpoint: DocumentPosition,
                        bias|
          -> Result<DocumentPosition, SessionError> {

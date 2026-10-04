@@ -372,6 +372,8 @@ pub enum SelectionUpdate {
     /// The complete selection must validate against the final document;
     /// otherwise the command fails atomically. This supports identity-
     /// preserving edits whose intermediate steps temporarily remove nodes.
+    /// Explicit whole-block selections preserve the selected identity and
+    /// refresh its surrounding gaps against the final snapshot instead.
     PreserveSelection,
     /// Collapse onto an exact structural gap in the post-command snapshot.
     ///

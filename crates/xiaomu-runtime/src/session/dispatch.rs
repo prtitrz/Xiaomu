@@ -17,6 +17,17 @@ impl DocumentSession {
         &mut self,
         intent: &EditIntent,
     ) -> Result<SessionOutcome, SessionError> {
+        // Whole-block selections carry identity, not an ordinary partial gap
+        // range. A node-aware policy may replace this default; until then no
+        // selection-driven edit may accidentally take an All/text/gap route.
+        if self.selection.as_node_selection().is_some()
+            && !matches!(
+                intent,
+                EditIntent::SetSelection { .. } | EditIntent::SetTaskChecked { .. }
+            )
+        {
+            return Err(SessionError::UnsupportedEdit);
+        }
         // Task fitting belongs to an explicit task-aware policy. Do not let
         // the generic single-leaf/table routes discard the task wrapper.
         if let EditIntent::PasteSlice { slice } = intent

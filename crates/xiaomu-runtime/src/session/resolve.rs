@@ -141,12 +141,16 @@ pub(super) fn resolve_selection(
     }
 }
 
-/// Retains the full selection only when every coordinate remains valid in
-/// the final snapshot, irrespective of temporary removals in the change map.
+/// Retains the full selection in the final snapshot, irrespective of temporary
+/// removals. Explicit node identity refreshes its surrounding gaps; all other
+/// forms retain every coordinate exactly and must remain valid.
 pub(super) fn preserved_selection(
     before: DocumentSelection,
     document: &XiaomuDocument,
 ) -> Result<DocumentSelection, SessionError> {
+    if let Some(selection) = before.preserved_node_selection(document)? {
+        return Ok(selection);
+    }
     before
         .validate(document)
         .map_err(|_| SessionError::SelectionInvalid)?;
