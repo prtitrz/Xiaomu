@@ -17,6 +17,13 @@ impl DocumentSession {
         &mut self,
         intent: &EditIntent,
     ) -> Result<SessionOutcome, SessionError> {
+        // Task fitting belongs to an explicit task-aware policy. Do not let
+        // the generic single-leaf/table routes discard the task wrapper.
+        if let EditIntent::PasteSlice { slice } = intent
+            && slice.contains_tasks()
+        {
+            return Err(SessionError::UnsupportedEdit);
+        }
         if let EditIntent::PasteSlice { slice } = intent
             && slice.is_closed()
         {
