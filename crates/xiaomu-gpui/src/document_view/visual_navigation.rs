@@ -55,7 +55,7 @@ impl DocumentView {
             return None;
         }
         if selection.is_all(session.document()) {
-            let units = super::table_guard::rendered_nav_units(session.document());
+            let units = self.rendered_nav_units(session.document());
             let edge = if forward {
                 units.last()?
             } else {
@@ -95,7 +95,7 @@ impl DocumentView {
     /// per-step helpers decide which coordinate space the block layout speaks.
     fn visual_focus_location(&self) -> Option<(Vec<navigation::TextBlock>, usize, InlinePoint)> {
         let session = self.session.borrow();
-        let blocks = super::table_guard::rendered_text_blocks(session.document());
+        let blocks = self.rendered_text_blocks(session.document());
         let focus = match session.selection().focus() {
             DocumentPosition::Inline(point) => point,
             DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => return None,
@@ -202,7 +202,7 @@ impl DocumentView {
         // The unit sequence may interleave atomic blocks after this one;
         // horizontal steps stop on them as whole-node selections.
         let document = self.session.borrow().document().clone();
-        let units = super::table_guard::rendered_nav_units(&document);
+        let units = self.rendered_nav_units(&document);
         let unit = navigation::unit_index(&units, focus.node_id())?;
         match navigation::step_horizontal(&units, unit, raw, forward)? {
             navigation::HorizontalTarget::OnAtomic(unit_index) => match &units[unit_index] {
@@ -265,7 +265,7 @@ impl DocumentView {
                 0
             };
             let document = self.session.borrow().document().clone();
-            let units = super::table_guard::rendered_nav_units(&document);
+            let units = self.rendered_nav_units(&document);
             let unit = navigation::unit_index(&units, focus.node_id())?;
             return match navigation::step_horizontal(&units, unit, canonical, forward)? {
                 navigation::HorizontalTarget::OnAtomic(unit_index) => match &units[unit_index] {
@@ -497,7 +497,7 @@ impl DocumentView {
         self.desired_x = None;
         let forward = matches!(step, NavStep::Right);
         let document = self.session.borrow().document().clone();
-        let units = super::table_guard::rendered_nav_units(&document);
+        let units = self.rendered_nav_units(&document);
         let Some(index) = navigation::unit_index(&units, node) else {
             return;
         };
@@ -514,7 +514,7 @@ impl DocumentView {
                 let Some(navigation::NavUnit::Text(block)) = units.get(unit_index) else {
                     return;
                 };
-                let blocks = super::table_guard::rendered_text_blocks(&document);
+                let blocks = self.rendered_text_blocks(&document);
                 let Some(block_index) = navigation::block_index(&blocks, block.node) else {
                     return;
                 };

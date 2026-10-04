@@ -15,6 +15,25 @@ impl DocumentView {
         index: usize,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
+        self.render_block_tree_at_width(id, in_quote, list_depth, index, None, cx)
+    }
+
+    pub(super) fn render_block_tree_at_width(
+        &self,
+        id: NodeId,
+        in_quote: bool,
+        list_depth: usize,
+        index: usize,
+        width: Option<super::measured_table::BlockLayoutWidth>,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let width = width.map(|width| {
+            if self.session.borrow().selection().as_node_selection() == Some(id) {
+                width.inset(px(2.0))
+            } else {
+                width
+            }
+        });
         let node_data = {
             let session = self.session.borrow();
             session
@@ -50,11 +69,24 @@ impl DocumentView {
                 .into_any_element()
             }
             NodeContent::Children(_) if matches!(kind, NodeKind::Table) => {
-                self.render_table(id, index, cx)
+                if let Some(width) = width {
+                    self.render_measured_table(id, index, width, cx)
+                } else {
+                    self.render_table(id, index, cx)
+                }
             }
-            NodeContent::Children(children) if matches!(kind, NodeKind::TaskItem) => {
-                self.render_task_item(id, children, in_quote, list_depth, index, cx)
-            }
+            NodeContent::Children(children) if matches!(kind, NodeKind::TaskItem) => self
+                .render_task_item(
+                    id,
+                    children,
+                    super::task_checkbox::TaskItemLayout {
+                        in_quote,
+                        list_depth,
+                        index,
+                        width,
+                    },
+                    cx,
+                ),
             NodeContent::Children(children) => {
                 let next_quote = in_quote || matches!(kind, NodeKind::Quote);
                 let next_depth = list_depth
@@ -74,12 +106,20 @@ impl DocumentView {
                 if matches!(kind, NodeKind::Quote) {
                     column = column.border_l_2().border_color(gpui::black()).pl_4();
                 }
+                let child_width = width.map(|width| {
+                    if matches!(kind, NodeKind::Quote) {
+                        width.inset(width.rem_size + px(2.0))
+                    } else {
+                        width
+                    }
+                });
                 for (child_index, child) in children.into_iter().enumerate() {
-                    column = column.child(self.render_block_tree(
+                    column = column.child(self.render_block_tree_at_width(
                         child,
                         next_quote,
                         next_depth,
                         index + child_index,
+                        child_width,
                         cx,
                     ));
                 }

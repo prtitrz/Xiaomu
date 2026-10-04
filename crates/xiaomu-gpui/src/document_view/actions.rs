@@ -209,7 +209,7 @@ impl DocumentView {
             return;
         }
         let session = self.session.borrow();
-        let blocks = super::table_guard::rendered_text_blocks(session.document());
+        let blocks = self.rendered_text_blocks(session.document());
         drop(session);
         let (Some(first), Some(last)) = (blocks.first(), blocks.last()) else {
             return;

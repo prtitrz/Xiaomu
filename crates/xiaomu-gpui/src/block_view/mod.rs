@@ -47,9 +47,11 @@ use crate::code_presentation::CodeBlockPresentation;
 use crate::document_view::cache_key::LayoutCacheKey;
 use crate::inline_atom::InlineAtomRendererRegistry;
 use crate::input::composition::CompositionState;
+use crate::table_capability::SharedTableCapability;
 use layout::BlockTextLayout;
 
 pub use element::ParagraphElement;
+pub(crate) use text_style::css_color;
 
 /// The session handle every block view of one editor shares.
 pub type SharedSession = Rc<RefCell<DocumentSession>>;
@@ -154,6 +156,7 @@ pub struct ParagraphView {
     pub(super) scroll_handle: Option<ScrollHandle>,
     pub(super) scroll_caret_pending: Cell<bool>,
     pub(super) atom_renderers: Rc<InlineAtomRendererRegistry>,
+    table_capability: Option<SharedTableCapability>,
     code_block_presentation: Option<CodeBlockPresentation>,
     composition: Option<CompositionState>,
     /// Consume the remainder of an unsupported native composition without
@@ -188,6 +191,7 @@ impl ParagraphView {
             scroll_handle: None,
             scroll_caret_pending: Cell::new(true),
             atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
+            table_capability: None,
             code_block_presentation: None,
             composition: None,
             rejected_composition: false,
@@ -220,6 +224,11 @@ impl ParagraphView {
     /// Attaches the owning document view's renderer registry.
     pub(crate) fn attach_atom_renderers(&mut self, renderers: Rc<InlineAtomRendererRegistry>) {
         self.atom_renderers = renderers;
+    }
+
+    /// Share the owner's live measurement gate, including later revocations.
+    pub(crate) fn attach_table_capability(&mut self, capability: SharedTableCapability) {
+        self.table_capability = Some(capability);
     }
 
     /// Applies the owning editor's optional visual-only code presentation.
@@ -312,6 +321,15 @@ impl ParagraphView {
     /// The handler can outlive child syncing or a host-restored selection.
     pub(super) fn input_is_hidden_by_table(&self) -> bool {
         let session = self.session.borrow();
+        if let Some(capability) = &self.table_capability {
+            return crate::table_capability::handler_is_hidden_by_table(
+                session.document(),
+                session.selection(),
+                self.node,
+                self.range_input,
+                &capability.borrow(),
+            );
+        }
         crate::document_view::table_guard::selection_has_hidden_table_endpoint(
             session.document(),
             session.selection(),

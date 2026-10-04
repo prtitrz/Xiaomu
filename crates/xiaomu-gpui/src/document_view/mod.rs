@@ -21,6 +21,9 @@ mod clipboard;
 mod host_extensions;
 mod host_transaction;
 pub(crate) mod markers;
+mod measured_table;
+#[cfg(test)]
+mod measured_table_tests;
 pub(crate) mod mouse;
 pub(crate) mod navigation;
 mod node_selection;
@@ -57,7 +60,7 @@ use gpui::{
     prelude::*, px,
 };
 
-use xiaomu_core::document::{ImageAttrs, ImageSource, NodeId};
+use xiaomu_core::document::{ImageAttrs, ImageSource, NodeId, XiaomuDocument};
 use xiaomu_core::selection::InlinePoint;
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
@@ -80,6 +83,8 @@ pub struct DocumentView {
     registry: BlockBoundsRegistry,
     /// Full cell bounds, including padding and space below shorter content.
     cell_registry: BlockBoundsRegistry,
+    /// Per-view measured-table admission, also held by retained input handlers.
+    table_capability: crate::table_capability::SharedTableCapability,
     cell_drag_anchor: Option<NodeId>,
     range_input: Option<(NodeId, Entity<ParagraphView>)>,
     focus_handle: Option<gpui::FocusHandle>,
@@ -120,6 +125,7 @@ impl DocumentView {
             epoch: Rc::new(Cell::new(0)),
             registry: Rc::new(RefCell::new(Vec::new())),
             cell_registry: Rc::new(RefCell::new(Vec::new())),
+            table_capability: Rc::new(RefCell::new(Default::default())),
             cell_drag_anchor: None,
             range_input: None,
             focus_handle: None,
@@ -141,6 +147,41 @@ impl DocumentView {
     /// Attaches the host asset resolver for image blocks.
     pub fn set_asset_service(&mut self, service: Rc<dyn AssetService>) {
         self.asset_service = Some(service);
+    }
+
+    /// Opts this view into measured Header/span/shared-column layout.
+    ///
+    /// Disabled by default. Opt-in does not grant unconditional edit access:
+    /// each table must have supported current attributes and a successful
+    /// measured layout in this view. Unknown presentation values and layout
+    /// failures retain a visible, protected placeholder. Automatic columns use
+    /// the explicit native sizing policy, not browser intrinsic-width parity.
+    /// Hosts changing a mounted view should notify its context afterward.
+    pub fn set_measured_table_layout(&mut self, enabled: bool) {
+        self.table_capability.borrow_mut().set_enabled(enabled);
+    }
+
+    /// Captures this editor's current measured-table presentation admission.
+    ///
+    /// Hosts may call this without an App/Window before saving or preparing a
+    /// normal edit, with the current installed document. A document without
+    /// tables passes; otherwise every table must be opted in and successfully
+    /// measured in this instance. Unsupported changes and measurement failure
+    /// refuse the whole document, including edits outside the failing table.
+    /// Ordinary typing preserves admission when the table's structural key is
+    /// unchanged, even before another paint or an immediate leave-time flush.
+    /// This reports the latest measurement, not proof that the current text or
+    /// viewport has already painted. Call it for each operation; don't retain
+    /// the returned boolean as a lasting permission.
+    ///
+    /// This is not storage authorization or schema validation. Hosts must keep
+    /// their own ownership/CAS checks and let history restoration and subsequent
+    /// measurement recover admission. Do not use it to probe uninstalled edit
+    /// candidates or other notes: its cache belongs to this view's document.
+    #[must_use]
+    pub fn measured_table_presentation_guard(&self) -> Rc<dyn Fn(&XiaomuDocument) -> bool> {
+        let capability = self.table_capability.clone();
+        Rc::new(move |document| capability.borrow().permits_document(document))
     }
 
     /// Returns the load state of one image block, when a request exists.
@@ -472,7 +513,7 @@ impl DocumentView {
         self.sync_range_input(cx);
         let nodes: Vec<NodeId> = {
             let session = self.session.borrow();
-            table_guard::rendered_text_blocks(session.document())
+            self.buildable_text_blocks(session.document())
                 .into_iter()
                 .map(|block| block.node)
                 .collect()
@@ -510,6 +551,7 @@ impl DocumentView {
             child.update(cx, |view, _| {
                 view.attach_scroll_handle(scroll_handle);
                 view.attach_atom_renderers(atom_renderers);
+                view.attach_table_capability(self.table_capability.clone());
                 view.set_code_block_presentation(self.code_block_presentation.clone());
             });
         }
@@ -522,7 +564,12 @@ impl Render for DocumentView {
         // A host policy may commit into another node/All/cell range. Capture
         // ownership before syncing drops the old proxy, and transfer focus
         // only if that proxy owned it, including range-to-range transitions.
-        let restore_focus = (self.selection_has_hidden_table_endpoint()
+        // Measured tables may delete a focused cell while a host moves the
+        // canonical caret elsewhere. Capture this pane's ownership before
+        // sync_children drops that entity; post-measurement cannot recover it
+        // from the new child list. An inactive pane never enters this branch.
+        let restore_focus = ((self.table_capability.borrow().enabled()
+            || self.selection_has_hidden_table_endpoint())
             && self.focused_child(window, cx).is_some())
             || (self.range_input_is_focused(window, cx)
                 && self.range_input.as_ref().map(|(anchor, _)| *anchor)
@@ -537,6 +584,10 @@ impl Render for DocumentView {
             sync_image_loads(&document, &self.image_loads, self.asset_service.as_ref());
         }
 
+        if self.table_capability.borrow().enabled() {
+            return self.render_measured_viewport(cx);
+        }
+
         let root = self.session.borrow().document().root();
 
         // Each paint pass repopulates the registry; stale entries must go.
@@ -545,6 +596,16 @@ impl Render for DocumentView {
 
         let tree = self.render_block_tree(root, false, 0, 0, cx);
 
+        self.render_scroll_tree(tree, cx)
+    }
+}
+
+impl DocumentView {
+    fn render_scroll_tree(
+        &self,
+        tree: gpui::AnyElement,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         div()
             .key_context("XiaomuDocument")
             .track_focus(self.focus_handle.as_ref().expect("synced focus handle"))
@@ -558,6 +619,9 @@ impl Render for DocumentView {
             .id("xiaomu-document-scroll")
             .track_scroll(&self.scroll_handle)
             .overflow_y_scroll()
+            .when(self.table_capability.borrow().enabled(), |scroll| {
+                scroll.overflow_x_scroll()
+            })
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::left))
@@ -596,5 +660,6 @@ impl Render for DocumentView {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .child(tree)
+            .into_any_element()
     }
 }

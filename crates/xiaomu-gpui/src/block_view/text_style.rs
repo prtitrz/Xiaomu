@@ -54,7 +54,7 @@ pub(super) fn block_text_style(
     style
 }
 
-fn css_color(value: &str) -> Option<Hsla> {
+pub(crate) fn css_color(value: &str) -> Option<Hsla> {
     let mut input = ParserInput::new(value);
     let mut parser = Parser::new(&mut input);
     let parsed = Color::parse(&mut parser).ok()?;
