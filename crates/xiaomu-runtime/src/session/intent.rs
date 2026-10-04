@@ -53,6 +53,12 @@ pub enum EditIntent {
         /// Replacement text; may be empty (deletes the selection).
         text: String,
     },
+    /// Insert one logical inline line break as an isolated edit.
+    ///
+    /// The host-neutral default inserts canonical LF, retaining the existing
+    /// stored-mark and history behavior. A product policy can distinguish this
+    /// keyboard command from pasting a clipboard string containing LF.
+    InsertLineBreak,
     /// Inserts one image atomic block after the focused block (P4.7).
     ///
     /// The payload is the typed canonical image semantics; pixels and host
