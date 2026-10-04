@@ -18,9 +18,21 @@ impl DocumentSession {
         };
         let replacement = match intent {
             EditIntent::Backspace | EditIntent::Delete => Some(None),
-            EditIntent::InsertText { text }
-            | EditIntent::PasteText { text }
-            | EditIntent::CommitComposition { text, .. } => Some(Some(text.as_str())),
+            EditIntent::InsertText { text } | EditIntent::PasteText { text } => {
+                Some(Some(text.as_str()))
+            }
+            EditIntent::CommitComposition {
+                range: composition,
+                text,
+            } => {
+                // A cell selection has no canonical inline text range. Its
+                // native input proxy is empty and commits at exactly 0..0;
+                // offsets into a former paragraph must never be ignored.
+                if composition.start().as_usize() != 0 || composition.end().as_usize() != 0 {
+                    return Err(SessionError::SelectionInvalid);
+                }
+                Some(Some(text.as_str()))
+            }
             _ => None,
         };
         if let Some(replacement) = replacement {
@@ -73,14 +85,10 @@ impl DocumentSession {
         range: CellRange,
         replacement: Option<&str>,
     ) -> Result<PlannedAction, SessionError> {
-        let mut cells = if replacement.is_none() {
-            range.unique_origins(&self.document)?
-        } else {
-            // Keep the historical unit-matrix replacement contract. Span
-            // replacement needs its own focus/content policy; clearing is
-            // already well-defined over distinct selected origins.
-            range.cells(&self.document)?.into_iter().flatten().collect()
-        };
+        // Retain the generic anchor-based replacement contract for both unit
+        // and spanning cells. Covered slots are never separate mutation
+        // targets, and cells crossing in from above/left remain untouched.
+        let mut cells = range.unique_origins(&self.document)?;
         let already_empty = cells.iter().all(|cell| {
             let children = children_of(&self.document, *cell);
             children.len() == 1

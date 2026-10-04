@@ -36,9 +36,9 @@ paths similarly refuse still-physical operations on spans. `CellRange::cells`
 keeps its unit-matrix contract; separate `logical_rect`, `unique_origins` and
 `is_closed_rect` APIs describe spans. Unique origins follow ProseMirror's
 origin-inside rule, not all cells intersecting the rectangle. Generic range
-clear and toggle/set/remove marks visit each selected origin's subtree once,
-with one transaction and inverse; text replacement and partial clipboard
-remain explicitly unsupported on spans. Product whole-table Backspace deletion
+clear, text replacement and toggle/set/remove marks visit selected origins,
+with one transaction and inverse; partial clipboard remains explicitly
+unsupported on spans. Product whole-table Backspace deletion
 is a separate host command, not implied by generic range clearing.
 Inline text/marks and exact Undo inside canonical cells remain possible in
 headless Runtime. Header unit-cell reconstruction preserves node kind.
@@ -59,6 +59,33 @@ selection; it cannot write through a later outside caret. Generic Runtime does
 not inherit these temporary frontend restrictions.
 
 ## Evidence and continuation
+
+### Complete table-tree insertion
+
+`TableTreeTemplate::capture` creates an opaque Arc-backed template from a
+validated source table, with checked private local references instead of source
+canonical IDs. `InsertTableTree` validates parent/index, destination aggregate
+grids and the complete allocator range before one batch exchange. Every table,
+row, cell, block and inline atom gets a fresh destination identity; attrs, runs,
+atom marks and nested structure are preserved. Undo removes the new subtree;
+Redo legitimately restores those newly allocated identities. Existing
+RestoreSubtree now preflights its whole batch without changing its resurrection
+semantics. The private inline rebinder checks order, UTF-8 and duplicate refs.
+
+Template capture checks node/value count, tree/attribute depth and accounted
+owned payload before copying; it does not claim a process-memory sandbox.
+Eighteen additional cases bring Core to 297 passing tests with strict Clippy.
+This does not change clipboard v13 admission or default open/closed fitting.
+
+### Span range text replacement
+
+Generic range typing/plain paste/composition now use unique origins, filling
+the gesture anchor and clearing other selected cells in one history unit.
+Incoming cells that cross the top/left rectangle boundary remain untouched.
+The empty range-input proxy accepts only composition range `0..0`; invalid
+ranges formerly ignored on unit tables now fail atomically. Ordinary inline
+composition ranges are unchanged. Runtime tests total 484 with strict Clippy;
+product head-cell/Tab semantics still require their separate policy.
 
 ### Logical row/column transactions
 

@@ -11,7 +11,7 @@ use xiaomu_core::document::{
     NodeAttrs, NodeContent, NodeId, NodeKind, NodeStoreBuilder, TableRect, TextRun, XiaomuDocument,
 };
 use xiaomu_core::selection::{InlinePoint, NodeGap};
-use xiaomu_core::text::TextRange;
+use xiaomu_core::text::{TextBuffer, TextOffset, TextRange};
 use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
 use xiaomu_runtime::session::{
     CellRange, DocumentChangeListener, DocumentSelection, DocumentSession, EditIntent, PolicyError,
@@ -605,7 +605,7 @@ fn mixed_cell_marks_toggle_to_one_shared_value_and_restore_exactly() {
 }
 
 #[test]
-fn nonclosed_span_copy_and_text_replacement_stay_explicitly_unsupported() {
+fn nonclosed_span_copy_stays_explicitly_unsupported() {
     let f = spanning();
     let mut session = session(&f);
     session
@@ -618,24 +618,345 @@ fn nonclosed_span_copy_and_text_replacement_stay_explicitly_unsupported() {
         session.clipboard_slice(),
         Err(SessionError::UnsupportedTableOperation)
     );
-    for intent in [
-        EditIntent::InsertText {
-            text: "replacement".into(),
+    assert_eq!(session.document().store(), f.document.store());
+    assert_eq!(session.document().revision(), f.document.revision());
+    assert_eq!(session.selection(), before);
+    assert_eq!(session.history_depths(), (0, 0));
+    assert_eq!(notifications.get(), 0);
+}
+
+fn text_replacements(text: &str) -> [EditIntent; 3] {
+    [
+        EditIntent::InsertText { text: text.into() },
+        EditIntent::PasteText { text: text.into() },
+        EditIntent::CommitComposition {
+            range: TextRange::empty(TextOffset::ZERO),
+            text: text.into(),
         },
-        EditIntent::PasteText {
-            text: "replacement".into(),
-        },
-    ] {
-        assert_eq!(
-            session.apply_intent(&intent),
-            Err(SessionError::UnsupportedTableOperation)
-        );
-        assert_eq!(session.document().store(), f.document.store());
-        assert_eq!(session.document().revision(), f.document.revision());
-        assert_eq!(session.selection(), before);
-        assert_eq!(session.history_depths(), (0, 0));
-        assert_eq!(notifications.get(), 0);
+    ]
+}
+
+fn image_only(f: &mut Fixture, label: &str) {
+    let cell = f.cells[label];
+    let mut transaction =
+        Transaction::new(TransactionOrigin::UserInput).with_step(TransactionStep::InsertNode {
+            parent: cell,
+            index: 0,
+            kind: NodeKind::Image,
+            attrs: attrs(&[
+                (
+                    "src",
+                    AttrValue::String("https://example.invalid/cell.png".into()),
+                ),
+                ("alt", AttrValue::String("cell image".into())),
+            ]),
+            content: NodeContent::Atomic,
+        });
+    for node in children(&f.document, cell) {
+        transaction.push_step(TransactionStep::RemoveNode { node: *node });
     }
+    f.document = transaction.apply(&f.document).unwrap();
+}
+
+#[test]
+fn logical_text_replacement_preserves_crossing_cells_and_uses_the_gesture_anchor() {
+    let mut f = spanning();
+    add_nested_content(&mut f);
+    image_only(&mut f, "F");
+    image_only(&mut f, "G");
+    for (anchor, focus) in [("F", "D"), ("D", "F"), ("J", "D"), ("D", "J"), ("G", "G")] {
+        for text in ["中🙂\nnext", ""] {
+            for intent in text_replacements(text) {
+                let mut session = session(&f);
+                session
+                    .set_cell_range_selection(f.cells[anchor], f.cells[focus])
+                    .unwrap();
+                let before_selection = session.selection();
+                let selected = before_selection
+                    .active_cell_range()
+                    .unwrap()
+                    .unique_origins(&f.document)
+                    .unwrap();
+                let notifications = Rc::new(Cell::new(0));
+                session.add_listener(Box::new(Notifications(notifications.clone())));
+                assert_eq!(
+                    session.apply_intent(&intent).unwrap(),
+                    SessionOutcome::DocumentChanged
+                );
+                assert_eq!(
+                    session.document().revision(),
+                    f.document.revision().next().unwrap()
+                );
+                assert_eq!(notifications.get(), 1);
+                assert_eq!(session.history_depths(), (1, 0));
+                assert_eq!(
+                    session.document().table_grid(f.table).unwrap(),
+                    f.document.table_grid(f.table).unwrap()
+                );
+                for cell in f.cells.values() {
+                    assert_eq!(
+                        session.document().node(*cell).unwrap().kind(),
+                        f.document.node(*cell).unwrap().kind()
+                    );
+                    assert_eq!(
+                        session.document().node(*cell).unwrap().attrs(),
+                        f.document.node(*cell).unwrap().attrs()
+                    );
+                    if selected.contains(cell) {
+                        for id in subtree_ids(&f.document, *cell).into_iter().skip(1) {
+                            assert!(session.document().node(id).is_none());
+                        }
+                        let blocks = children(session.document(), *cell);
+                        assert_eq!(blocks.len(), 1);
+                        assert_eq!(
+                            session.document().node(blocks[0]).unwrap().kind(),
+                            &NodeKind::Paragraph
+                        );
+                        let inline = inline(session.document(), blocks[0]);
+                        let expected = if *cell == f.cells[anchor] { text } else { "" };
+                        assert_eq!(
+                            inline
+                                .runs()
+                                .iter()
+                                .map(|run| run.text().as_str())
+                                .collect::<String>(),
+                            expected
+                        );
+                        assert!(inline.atoms().is_empty());
+                        assert!(inline.runs().iter().all(|run| run.marks().is_empty()));
+                    } else {
+                        for id in subtree_ids(&f.document, *cell) {
+                            assert_eq!(session.document().node(id), f.document.node(id));
+                        }
+                    }
+                }
+                let caret = session.text_selection().unwrap();
+                assert!(caret.is_collapsed());
+                assert_eq!(
+                    caret.focus().node_id(),
+                    children(session.document(), f.cells[anchor])[0]
+                );
+                assert_eq!(caret.focus().offset().as_usize(), text.len());
+                assert!(session.selection().active_cell_range().is_none());
+                let changed = session.document().clone();
+                let after_selection = session.selection();
+                session.undo().unwrap();
+                assert_eq!(session.document().store(), f.document.store());
+                assert_eq!(session.selection(), before_selection);
+                session.redo().unwrap();
+                assert_eq!(session.document().store(), changed.store());
+                assert_eq!(session.selection(), after_selection);
+                assert_eq!(notifications.get(), 3);
+            }
+        }
+    }
+}
+
+#[test]
+fn cell_proxy_composition_commits_once_and_immediate_typing_uses_the_new_anchor_caret() {
+    let f = spanning();
+    let mut session = session(&f);
+    let before = session.selection();
+    let notifications = Rc::new(Cell::new(0));
+    session.add_listener(Box::new(Notifications(notifications.clone())));
+    session
+        .apply_intent_with_selection(
+            selection(&f, "G", "A"),
+            &EditIntent::CommitComposition {
+                range: TextRange::empty(TextOffset::ZERO),
+                text: "你好🙂".into(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        session.document().revision(),
+        f.document.revision().next().unwrap()
+    );
+    assert_eq!(session.history_depths(), (1, 0));
+    assert_eq!(notifications.get(), 1);
+    let committed = session.document().clone();
+    let committed_selection = session.selection();
+    let anchor_text = children(session.document(), f.cells["G"])[0];
+    session
+        .apply_intent(&EditIntent::InsertText { text: "!".into() })
+        .unwrap();
+    assert_eq!(
+        inline(session.document(), anchor_text)
+            .runs()
+            .iter()
+            .map(|run| run.text().as_str())
+            .collect::<String>(),
+        "你好🙂!"
+    );
+    assert_eq!(session.history_depths(), (2, 0));
+    assert_eq!(notifications.get(), 2);
+    session.undo().unwrap();
+    assert_eq!(session.document().store(), committed.store());
+    assert_eq!(session.selection(), committed_selection);
+    session.undo().unwrap();
+    assert_eq!(session.document().store(), f.document.store());
+    assert_eq!(session.selection(), before);
+    session.redo().unwrap();
+    assert_eq!(session.document().store(), committed.store());
+    assert_eq!(session.selection(), committed_selection);
+}
+
+#[test]
+fn unit_and_fully_covered_row_proxy_replacement_accepts_zero_composition() {
+    for mut f in [
+        fixture(&[&[("A", 1, 1, true)]]),
+        fixture(&[&[("A", 2, 2, true)], &[]]),
+    ] {
+        image_only(&mut f, "A");
+        for intent in text_replacements("中🙂") {
+            let mut session = session(&f);
+            session
+                .set_cell_range_selection(f.cells["A"], f.cells["A"])
+                .unwrap();
+            let before = session.selection();
+            session.apply_intent(&intent).unwrap();
+            assert_eq!(session.history_depths(), (1, 0));
+            assert_eq!(
+                session.document().table_grid(f.table).unwrap(),
+                f.document.table_grid(f.table).unwrap()
+            );
+            let paragraph = children(session.document(), f.cells["A"])[0];
+            assert_eq!(
+                inline(session.document(), paragraph).runs()[0]
+                    .text()
+                    .as_str(),
+                "中🙂"
+            );
+            assert_eq!(
+                session
+                    .text_selection()
+                    .unwrap()
+                    .focus()
+                    .offset()
+                    .as_usize(),
+                "中🙂".len()
+            );
+            session.undo().unwrap();
+            assert_eq!(session.document().store(), f.document.store());
+            assert_eq!(session.selection(), before);
+        }
+    }
+}
+
+#[test]
+fn cell_proxy_rejects_nonzero_or_nonempty_ime_ranges_for_unit_and_spanning_tables() {
+    let offsets = TextBuffer::from("123456789");
+    for mut f in [
+        spanning(),
+        fixture(&[
+            &[("A", 1, 1, true), ("B", 1, 1, false)],
+            &[("C", 1, 1, false), ("D", 1, 1, true)],
+        ]),
+    ] {
+        let text = f.texts["D"];
+        f.document = Transaction::new(TransactionOrigin::UserInput)
+            .with_step(TransactionStep::ReplaceText {
+                node: text,
+                range: TextRange::new(
+                    TextOffset::ZERO,
+                    inline(&f.document, text).offset_at(1).unwrap(),
+                )
+                .unwrap(),
+                replacement: "中🙂x".into(),
+            })
+            .apply(&f.document)
+            .unwrap();
+        add_nested_content(&mut f);
+        // Includes a split multibyte boundary, a valid nonzero byte seam,
+        // ranges covering the atom/emoji, and a stale out-of-bounds endpoint.
+        for (start, end) in [(1, 1), (3, 3), (0, 1), (0, 7), (3, 7), (0, 9)] {
+            let mut session = session(&f);
+            session
+                .apply_intent(&EditIntent::SetMark { mark: Mark::Italic })
+                .unwrap();
+            session
+                .apply_intent(&EditIntent::InsertText { text: "x".into() })
+                .unwrap();
+            let before = session.document().clone();
+            let before_selection = session.selection();
+            let marks = session.stored_marks().cloned();
+            let depths = session.history_depths();
+            let input_rule = session.input_rule_undo_available();
+            let notifications = Rc::new(Cell::new(0));
+            session.add_listener(Box::new(Notifications(notifications.clone())));
+            assert_eq!(
+                session.apply_intent_with_selection(
+                    selection(&f, "D", "A"),
+                    &EditIntent::CommitComposition {
+                        range: TextRange::new(
+                            offsets.offset_at(start).unwrap(),
+                            offsets.offset_at(end).unwrap()
+                        )
+                        .unwrap(),
+                        text: "bad".into(),
+                    }
+                ),
+                Err(SessionError::SelectionInvalid)
+            );
+            assert_eq!(session.document().store(), before.store());
+            assert_eq!(session.document().revision(), before.revision());
+            assert_eq!(session.selection(), before_selection);
+            assert_eq!(session.stored_marks(), marks.as_ref());
+            assert_eq!(session.history_depths(), depths);
+            assert_eq!(session.input_rule_undo_available(), input_rule);
+            assert_eq!(notifications.get(), 0);
+            session
+                .apply_intent(&EditIntent::InsertText { text: "y".into() })
+                .unwrap();
+            assert_eq!(session.history_depths(), depths);
+            session.undo().unwrap();
+            assert_eq!(session.document().store(), f.document.store());
+        }
+    }
+}
+
+#[test]
+fn ordinary_inline_composition_retains_its_nonzero_range_contract_inside_a_span() {
+    let mut f = spanning();
+    let text = f.texts["A"];
+    f.document = Transaction::new(TransactionOrigin::UserInput)
+        .with_step(TransactionStep::ReplaceText {
+            node: text,
+            range: TextRange::new(
+                TextOffset::ZERO,
+                inline(&f.document, text).offset_at(1).unwrap(),
+            )
+            .unwrap(),
+            replacement: "中🙂x".into(),
+        })
+        .apply(&f.document)
+        .unwrap();
+    let mut session = DocumentSession::new(
+        f.document.clone(),
+        DocumentSelection::collapsed(InlinePoint::at_start_of(text)),
+    )
+    .unwrap();
+    session
+        .apply_intent(&EditIntent::CommitComposition {
+            range: TextRange::new(
+                inline(&f.document, text).offset_at(3).unwrap(),
+                inline(&f.document, text).offset_at(7).unwrap(),
+            )
+            .unwrap(),
+            text: "文".into(),
+        })
+        .unwrap();
+    assert_eq!(
+        inline(session.document(), text)
+            .runs()
+            .iter()
+            .map(|run| run.text().as_str())
+            .collect::<String>(),
+        "中文x"
+    );
+    assert_eq!(session.history_depths(), (1, 0));
+    session.undo().unwrap();
+    assert_eq!(session.document().store(), f.document.store());
 }
 
 struct ProtectTable(XiaomuDocument, Vec<NodeId>);
@@ -653,12 +974,22 @@ impl SessionPolicy for ProtectTable {
 }
 
 #[test]
-fn rejected_clear_and_marks_roll_back_atomic_target_marks_history_and_notifications() {
+fn rejected_content_and_marks_roll_back_atomic_target_marks_history_and_notifications() {
     for intent in [
         EditIntent::Backspace,
         EditIntent::Delete,
         EditIntent::ToggleMark { mark: Mark::Bold },
         EditIntent::SetMark { mark: Mark::Italic },
+        EditIntent::InsertText {
+            text: "blocked".into(),
+        },
+        EditIntent::PasteText {
+            text: "blocked".into(),
+        },
+        EditIntent::CommitComposition {
+            range: TextRange::empty(TextOffset::ZERO),
+            text: "blocked".into(),
+        },
     ] {
         let f = spanning();
         let mut session = DocumentSession::new_with_policy(
