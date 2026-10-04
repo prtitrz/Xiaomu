@@ -27,7 +27,10 @@ impl DocumentView {
                 return;
             }
         };
-        PlatformClipboard::new(&*cx).write_slice(&slice);
+        if !PlatformClipboard::new(&*cx).write_slice_for_cut(&slice) {
+            eprintln!("xiaomu: cut requires lossless structured clipboard metadata");
+            return;
+        }
         // Clipboard projection is read-only; Delete remains the one history
         // mutation for the whole cut command.
         self.apply_intent(EditIntent::Delete, window, cx);
