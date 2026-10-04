@@ -140,8 +140,8 @@ pub(crate) enum SelectionProjection {
 pub struct ParagraphView {
     pub(super) session: SharedSession,
     node: NodeId,
-    /// A frontend-only empty input surface anchored to a rectangular
-    /// selection. Its offsets never identify canonical cell content.
+    /// A frontend-only empty input surface anchored to an explicit range
+    /// selection. Its offsets never identify canonical document content.
     range_input: bool,
     focus_handle: FocusHandle,
     pub(super) last_layout: Option<BlockTextLayout>,
@@ -192,9 +192,9 @@ impl ParagraphView {
         }
     }
 
-    /// Reuses the ordinary native input/IME pipeline for a cell rectangle.
-    /// The cell identity is only a layout anchor; no document node is added.
-    pub(crate) fn for_cell_range(
+    /// Reuses native input/IME for a cell rectangle or complete root range.
+    /// The identity is only a layout anchor; no document node is added.
+    pub(crate) fn for_document_range(
         session: SharedSession,
         epoch: Rc<std::cell::Cell<u64>>,
         cell: NodeId,
@@ -248,13 +248,13 @@ impl ParagraphView {
 
     pub(crate) fn inline(&self) -> Option<InlineContent> {
         if self.range_input {
-            return self
-                .session
-                .borrow()
-                .selection()
+            let session = self.session.borrow();
+            let selection = session.selection();
+            let active = selection
                 .active_cell_range()
-                .filter(|range| range.anchor() == self.node)
-                .map(|_| InlineContent::empty());
+                .is_some_and(|range| range.anchor() == self.node)
+                || (selection.is_all(session.document()) && self.node == session.document().root());
+            return active.then(InlineContent::empty);
         }
         self.session
             .borrow()
@@ -318,6 +318,12 @@ impl ParagraphView {
         let session = self.session.borrow();
         let selection = session.selection();
         let document = session.document();
+        if selection.is_all(document) && !self.is_range_input() {
+            return SelectionProjection::Highlight {
+                start: 0,
+                end: self.canonical_text().len(),
+            };
+        }
 
         let endpoint = |position: DocumentPosition| match position {
             DocumentPosition::Inline(point) => {

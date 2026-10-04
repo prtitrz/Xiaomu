@@ -285,6 +285,11 @@ pub(crate) enum HistoryPolicy {
 /// How the session derives the selection after a plan commits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SelectionUpdate {
+    /// Select the complete root child range of the final snapshot.
+    ///
+    /// Host whole-document replacement/deletion uses this instead of retaining
+    /// stale pre-edit child counts. No text-endpoint inference is performed.
+    AllDocument,
     /// Collapse the caret right after the replacement text of the primary
     /// edit (InsertText / single-block paste / IME commit).
     CaretAfterReplacement,

@@ -78,7 +78,7 @@ impl DocumentView {
                     Err(error) => eprintln!("xiaomu: image import failed: {error:?}"),
                 }
             }
-            PlatformClipboardContent::Structured(slice) if code_block => {
+            PlatformClipboardContent::Structured(slice) if code_block && !slice.is_closed() => {
                 // CodeBlock is a plain-code surface. Xiaomu-native rich
                 // structure is flattened to the same interoperable text the
                 // system clipboard exposes, preserving canonical LF while

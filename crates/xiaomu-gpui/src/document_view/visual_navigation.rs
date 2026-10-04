@@ -54,6 +54,33 @@ impl DocumentView {
         if selection.is_collapsed() {
             return None;
         }
+        if selection.is_all(session.document()) {
+            let units = navigation::nav_units(session.document());
+            let edge = if forward {
+                units.last()?
+            } else {
+                units.first()?
+            };
+            return match edge {
+                navigation::NavUnit::Atomic(node) => Some(NavTarget::Atomic(*node)),
+                navigation::NavUnit::Text(block) => {
+                    let inline = session.document().node(block.node)?.content().as_inline()?;
+                    let offset = inline
+                        .offset_at(if forward { inline.len_bytes() } else { 0 })
+                        .ok()?;
+                    Some(NavTarget::Inline(InlinePoint::new(
+                        block.node,
+                        offset,
+                        if forward {
+                            inline.atom_count_at(offset)
+                        } else {
+                            0
+                        },
+                        CursorAffinity::Before,
+                    )))
+                }
+            };
+        }
         let (start, end) = selection.ordered(session.document()).ok()?;
         match if forward { end } else { start } {
             DocumentPosition::Inline(point) => Some(NavTarget::Inline(point)),

@@ -344,6 +344,7 @@ pub struct ClipboardSlice {
     plain_text: String,
     roots: Vec<ClipboardNode>,
     blocks: Vec<ClipboardBlock>,
+    closed: bool,
 }
 
 impl ClipboardSlice {
@@ -368,6 +369,7 @@ impl ClipboardSlice {
             plain_text,
             roots,
             blocks,
+            closed: false,
         }
     }
 
@@ -407,7 +409,24 @@ impl ClipboardSlice {
             plain_text,
             roots: vec![table],
             blocks,
+            closed: false,
         }
+    }
+
+    pub(crate) fn from_closed_roots(roots: Vec<ClipboardNode>) -> Self {
+        let mut slice = Self::from_roots(roots);
+        slice.closed = true;
+        slice
+    }
+
+    /// Whether the source explicitly selected whole root subtrees.
+    ///
+    /// Closed slices retain their outer block boundaries when pasted. They
+    /// must not be fitted with the legacy text-fragment merge rules. This is
+    /// source provenance, never inferred from roots or endpoint text coverage.
+    #[must_use]
+    pub const fn is_closed(&self) -> bool {
+        self.closed
     }
 
     /// Returns the plain-text fallback, with selected block boundaries as

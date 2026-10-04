@@ -82,6 +82,35 @@ impl DocumentSelection {
         }
     }
 
+    /// Selects the complete root child range, including empty and atomic blocks.
+    ///
+    /// This is an explicit structural selection. An inline range spanning all
+    /// text is deliberately not equivalent: it still retains its block shells.
+    #[must_use]
+    pub fn all(document: &XiaomuDocument) -> Self {
+        let root = document.root();
+        let count = document
+            .node(root)
+            .and_then(|node| node.content().as_children())
+            .expect("validated document root has children")
+            .len();
+        Self::new(NodeGap::new(root, 0), NodeGap::new(root, count))
+    }
+
+    /// Whether this is exactly the current root's complete child range.
+    ///
+    /// Both directions are accepted; partial, nested and mixed gap ranges,
+    /// inline endpoint ranges and active cell ranges are never Select All.
+    #[must_use]
+    pub fn is_all(&self, document: &XiaomuDocument) -> bool {
+        if self.cell_range.is_some() {
+            return false;
+        }
+        let all = Self::all(document);
+        (self.anchor == all.anchor && self.focus == all.focus)
+            || (self.anchor == all.focus && self.focus == all.anchor)
+    }
+
     /// Creates a collapsed caret at `position`.
     #[must_use]
     pub fn collapsed(position: impl Into<DocumentPosition>) -> Self {
