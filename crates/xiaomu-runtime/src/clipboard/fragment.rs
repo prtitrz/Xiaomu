@@ -539,7 +539,7 @@ pub(crate) fn validate_roots(roots: &[ClipboardNode]) -> Result<()> {
     fragment_document(roots).map(|_| ())
 }
 
-fn fragment_document(roots: &[ClipboardNode]) -> Result<XiaomuDocument> {
+pub(super) fn fragment_document(roots: &[ClipboardNode]) -> Result<XiaomuDocument> {
     let mut builder = NodeStoreBuilder::new();
     let children = roots
         .iter()
