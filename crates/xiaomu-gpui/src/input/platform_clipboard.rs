@@ -33,6 +33,14 @@ impl<'a> PlatformClipboard<'a> {
 
     /// Writes a structured Xiaomu slice with interoperable plain text.
     pub(crate) fn write_slice(&mut self, slice: &ClipboardSlice) {
+        // Explicit whole-root boundaries cannot survive a plain-text fallback.
+        // Preserve the existing clipboard when their metadata is not lossless.
+        if slice.is_closed() {
+            if !write_lossless_slice(slice, |item| self.app.write_to_clipboard(item)) {
+                eprintln!("xiaomu: closed clipboard copy requires lossless structured metadata");
+            }
+            return;
+        }
         let text = slice.plain_text().to_owned();
         let item = match encode_metadata(slice) {
             Ok(metadata) => gpui::ClipboardItem::new_string_with_metadata(text, metadata),
@@ -237,6 +245,37 @@ mod cut_tests {
         assert_eq!(session.selection(), before_selection);
         assert_eq!(session.history_depths(), before_history);
         assert!(session.document().node(image).is_some());
+    }
+
+    #[gpui::test]
+    fn closed_copy_keeps_previous_clipboard_when_metadata_exceeds_budget(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (mut session, _) = atomic_session(160);
+        let legacy = session.clipboard_slice().unwrap().unwrap();
+        let all = DocumentSelection::all(session.document());
+        session.set_document_selection(all).unwrap();
+        let closed = session.clipboard_slice().unwrap().unwrap();
+        assert!(closed.is_closed());
+        assert!(encode_metadata(&closed).is_err());
+        let before = session.document().clone();
+        let history = session.history_depths();
+        cx.update(|cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string("previous".into()));
+            PlatformClipboard::new(cx).write_slice(&closed);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some("previous")
+            );
+            // The legacy open-slice interoperability contract stays unchanged.
+            PlatformClipboard::new(cx).write_slice(&legacy);
+            let item = cx.read_from_clipboard().unwrap();
+            assert_eq!(item.text().as_deref(), Some(legacy.plain_text()));
+            assert!(item.metadata().is_none());
+        });
+        assert_eq!(session.document().store(), before.store());
+        assert_eq!(session.selection(), all);
+        assert_eq!(session.history_depths(), history);
     }
 
     #[test]

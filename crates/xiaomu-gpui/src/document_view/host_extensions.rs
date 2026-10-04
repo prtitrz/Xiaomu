@@ -24,6 +24,37 @@ impl DocumentView {
         self.list_marker_provider = provider;
     }
 
+    /// Root-range selection uses the same native range input proxy as cells.
+    pub(super) fn route_select_all(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.focused_child_composing(window, cx) {
+            return true;
+        }
+        let Some(router) = &self.command_router else {
+            return false;
+        };
+        let result = {
+            let session = self.session.borrow();
+            router.select_all(EditorCommandContext::from_session(&session))
+        };
+        match result {
+            Ok(None) => return false,
+            Ok(Some(selection)) => {
+                let outcome = self.session.borrow_mut().set_document_selection(selection);
+                match outcome {
+                    Ok(_) => {
+                        self.desired_x = None;
+                        self.sync_children(cx);
+                        self.route_focus(window, cx);
+                        cx.notify();
+                    }
+                    Err(error) => eprintln!("xiaomu: Select All rejected: {error}"),
+                }
+            }
+            Err(error) => eprintln!("xiaomu: host Select All rejected: {error}"),
+        }
+        true
+    }
+
     /// Returns true if consumed or composition blocks the command.
     pub(super) fn route_editor_command(
         &mut self,

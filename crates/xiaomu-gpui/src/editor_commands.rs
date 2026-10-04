@@ -68,7 +68,7 @@ pub enum CommandRoute {
     Intent(EditIntent),
 }
 
-/// Optional per-view routing for Tab and ordinary text paste.
+/// Optional per-view routing for Tab, ordinary text paste and Select All.
 ///
 /// Callbacks must be pure, read-only and non-reentrant. Do not borrow or mutate
 /// the editor session recursively, or perform external side effects. Runtime
@@ -79,6 +79,20 @@ pub enum CommandRoute {
 /// Install with [`EditorInstance::with_command_router`](crate::editor::EditorInstance::with_command_router)
 /// or [`DocumentView::set_command_router`](crate::document_view::DocumentView::set_command_router).
 pub trait EditorCommandRouter {
+    /// Optionally supplies an explicit selection for the Select All gesture.
+    ///
+    /// `None` preserves the original text-range behavior. Hosts opting into
+    /// `DocumentSelection::all(context.document())` must handle root-range
+    /// edits in their session policy; generic unsupported edits fail closed.
+    /// Returning an error consumes the gesture without changing session state.
+    /// Existing routers need not implement this method.
+    fn select_all(
+        &self,
+        _context: EditorCommandContext<'_>,
+    ) -> Result<Option<DocumentSelection>, PolicyError> {
+        Ok(None)
+    }
+
     /// Routes a gesture using the original, validated selection and snapshot.
     fn route(
         &self,

@@ -127,6 +127,19 @@ impl DocumentSession {
         self.install_selection(next)
     }
 
+    /// Installs an explicit document selection after validating every endpoint.
+    ///
+    /// This selection-only operation supports root-range Select All without
+    /// projecting it into text. It creates no document revision or history
+    /// entry. Invalid selections leave selection, marks and history unchanged.
+    pub fn set_document_selection(
+        &mut self,
+        selection: DocumentSelection,
+    ) -> Result<SessionOutcome, SessionError> {
+        selection.validate(&self.document)?;
+        self.install_selection(selection)
+    }
+
     /// Places both selection endpoints at exact mixed-inline positions.
     ///
     /// Frontends use this seam when layout or hit-testing resolves a caret to
