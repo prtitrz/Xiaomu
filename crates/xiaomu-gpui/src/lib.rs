@@ -36,6 +36,7 @@ pub mod inline_atom_display;
 mod inline_position;
 pub mod input;
 pub mod list_marker;
+pub(crate) mod table_capability;
 pub mod table_layout;
 pub mod table_viewport;
 

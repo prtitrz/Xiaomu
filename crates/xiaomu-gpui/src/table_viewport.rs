@@ -1,8 +1,9 @@
-//! Isolated same-frame width adapter for the table-layout prototype.
+//! Same-frame width adapter for explicitly enabled measured tables.
 //!
-//! This module is not connected to `DocumentView` or its edit-admission guards.
-//! It proves a possible public-API connection point, not completed editor or
-//! browser-CSS parity. The containing layout must supply a bounded viewport,
+//! `DocumentView` uses this only after per-instance opt-in, with independent
+//! per-table measurement admission. It does not imply browser-CSS parity or
+//! completed native GUI verification. The containing layout must supply a
+//! bounded viewport,
 //! such as the existing editor's `size_full()` pane; an intrinsically sized
 //! document cannot determine its own containing width/height with this API.
 //!
@@ -24,11 +25,11 @@
 //! with `VisualTestContext::draw` does not acquire that scope just because the
 //! test window happens to contain another root entity.
 //!
-//! A future `DocumentView` connection should keep state synchronization and
+//! The `DocumentView` connection keeps state synchronization and
 //! focus ownership outside this builder, clear geometry registries once when
 //! the builder starts, and build the current listener-bearing scroll container
-//! inside it using the same entity. A table failure still needs a visible
-//! placeholder plus edit rejection. No guard is removed by this adapter.
+//! inside it using the same entity. Table failures retain a visible placeholder
+//! plus edit rejection. This adapter alone never grants edit permission.
 
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId,

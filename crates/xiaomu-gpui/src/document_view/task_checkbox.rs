@@ -24,16 +24,27 @@ fn control_id(item: NodeId) -> SharedString {
     format!("task-checkbox-{item:?}").into()
 }
 
+pub(super) struct TaskItemLayout {
+    pub in_quote: bool,
+    pub list_depth: usize,
+    pub index: usize,
+    pub width: Option<super::measured_table::BlockLayoutWidth>,
+}
+
 impl DocumentView {
     pub(super) fn render_task_item(
         &self,
         item: NodeId,
         children: Vec<NodeId>,
-        in_quote: bool,
-        list_depth: usize,
-        index: usize,
+        layout: TaskItemLayout,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
+        let TaskItemLayout {
+            in_quote,
+            list_depth,
+            index,
+            width,
+        } = layout;
         let checked = self
             .session
             .borrow()
@@ -84,13 +95,25 @@ impl DocumentView {
         // in this content column. Nested ordinary/task lists add their own
         // indent inside it rather than repeating an absolute ancestor depth.
         let mut content = div().flex().flex_col().flex_1().min_w_0();
+        let child_width = width.map(|width| {
+            width.inset(px(
+                MARKER_COLUMN * list_depth.saturating_sub(1) as f32 + MARKER_COLUMN
+            ))
+        });
         for (child_index, child) in children.into_iter().enumerate() {
             content = content.child(
                 div()
                     .debug_selector(|| format!("task-content-{child:?}"))
                     .w_full()
                     .min_w_0()
-                    .child(self.render_block_tree(child, in_quote, 0, index + child_index, cx)),
+                    .child(self.render_block_tree_at_width(
+                        child,
+                        in_quote,
+                        0,
+                        index + child_index,
+                        child_width,
+                        cx,
+                    )),
             );
         }
         div()
