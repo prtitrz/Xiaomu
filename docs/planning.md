@@ -1,5 +1,10 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-05后继：构造期固定`HistoryOptions`提供默认兼容的successful-traversal选区
+capture及独立empty-history保持state选项。13项Runtime public/fault隔离回归、
+全库1307测试/strict门禁通过；consumer按真实factory显式接线、GUI另验。时间分组、selection-only分组和非历史
+正文bookmark mapping仍未实现，不能合称完整PM history，见[契约](history-traversal-options.md)。
+
 2026-10-05后继独立stage：宿主显式`SessionPolicy::prepare_cut`与同session独占
 `PreparedCut`复用现有commit完整预检，平台lossless item全部准备后再write→publish。
 全库1294测试、Runtime9状态/历史/allocator回归、6借用compile-fail和7实际虚拟GPUI

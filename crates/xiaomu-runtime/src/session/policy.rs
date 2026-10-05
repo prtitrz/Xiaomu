@@ -139,6 +139,14 @@ pub enum IntentDisposition {
 /// rather than recursively dispatching another intent or repairing listeners.
 /// The session can roll back its own state, not a callback's external effects.
 pub trait SessionPolicy {
+    /// Chooses immutable history traversal behavior at session construction.
+    ///
+    /// Defaults retain recorded selections and historical empty-stack behavior.
+    /// The value is captured once, never queried during Undo/Redo or publication.
+    fn history_options(&self) -> super::HistoryOptions {
+        super::HistoryOptions::new()
+    }
+
     /// Optionally supplies one dedicated, isolated CellRange Cut plan.
     ///
     /// `None` preserves the frontend's legacy route. A supplied plan is used
@@ -229,6 +237,7 @@ impl DocumentSession {
     ) -> Result<Self, SessionError> {
         let mut session = Self::new(document, selection)?;
         policy.validate_document(&session.document)?;
+        session.history_options = policy.history_options();
         session.policy = Some(policy);
         Ok(session)
     }
