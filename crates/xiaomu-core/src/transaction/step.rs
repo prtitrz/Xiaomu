@@ -277,6 +277,33 @@ pub enum TransactionStep {
         /// Exclusive last logical column to remove; at most the column count.
         end: usize,
     },
+    /// Isolates a rectangle's boundaries without expanding spans to unit cells.
+    ///
+    /// The current table must contain the entire rectangle; callers perform
+    /// any logical-axis growth first. Crossing cells are partitioned at top,
+    /// bottom, left, then right, producing at most five rectangular fragments
+    /// per original cell. The fragment containing the original top-left keeps
+    /// its identity and complete rich content. Other fragments receive fresh
+    /// same-kind cells containing one empty paragraph with empty attributes.
+    ///
+    /// Non-geometric cell attributes and all table/row identities and raw
+    /// attributes survive. Only changed spans are written. Actual column cuts
+    /// slice explicit widths, with all-zero slices becoming null; row-only
+    /// cuts preserve the entire width attribute, including missing/null.
+    /// Host defaults, width reconciliation and replacement are caller policy.
+    ///
+    /// Existing content positions and cell identities survive; row gaps map
+    /// across newly inserted cells. An already closed rectangle emits no maps,
+    /// inverse steps or IDs (normal transaction revision semantics still apply).
+    /// Malformed geometry, bounds, identity exhaustion and checked resource
+    /// limits fail atomically. Admission accounts for generated nodes and
+    /// owned attributes/child vectors before cloning; it is not an RSS bound.
+    IsolateTableRect {
+        /// Existing table containing the entire rectangle.
+        table: NodeId,
+        /// Nonempty half-open rectangle in logical row/column coordinates.
+        rect: TableRect,
+    },
     /// Merges a closed logical rectangle containing at least two cell origins.
     ///
     /// The geometric top-left cell keeps its identity, kind and non-geometric

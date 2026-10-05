@@ -10,7 +10,7 @@ use crate::{Error, Result};
 mod tests;
 
 /// Opaque inverse of a merge, split, logical row/column edit, rectangle
-/// replacement, or restoration.
+/// replacement, boundary isolation, or restoration.
 ///
 /// Produced only by transaction application. Applying it requires every
 /// affected live payload to match its recorded post-edit state and every

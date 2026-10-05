@@ -1,5 +1,12 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-05后继：Core `IsolateTableRect { table, rect }` 以至多五片隔离跨界 cell，
+原top-left身份与rich子树保留，新片只建同kind空段落；不做span面积级unit展开。
+typed guarded inverse复用原TableEdit，row/table元数据、切列宽度、allocator高水位
+与精确Undo/Redo通过20新回归（含225矩形），全库1412/106 binaries+6docs和strict
+门禁通过。预算为保守owned-payload会计而非RSS保证；不代表原版PM等价或产品GUI
+已通过，宿主source/unsafe位置/defaults/repair仍是后继独立接线。
+
 2026-10-05后继：Core 只读 `can_allocate_node_ids(count)` 供宿主在临时表格骨架构造前
 预检真实剩余身份容量；不暴露 ID、不预留或放宽事务验证。两项新回归覆盖零/近 u64 边界、
 clone 无修改与 Undo 后高水位/Redo 身份，workspace 1392 tests + 6 docs、fmt/strict Clippy

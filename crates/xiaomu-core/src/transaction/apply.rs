@@ -155,6 +155,9 @@ impl ApplyContext {
             TransactionStep::DeleteTableColumnsLogical { table, start, end } => {
                 self.apply_delete_table_columns_logical(*table, *start, *end)
             }
+            TransactionStep::IsolateTableRect { table, rect } => {
+                self.apply_isolate_table_rect(*table, *rect)
+            }
             TransactionStep::MergeTableCells { table, rect } => {
                 self.apply_merge_table_cells(*table, *rect)
             }

@@ -10,9 +10,9 @@ use std::mem::size_of;
 use crate::document::{AttrValue, NodeAttrs};
 use crate::{Error, Result};
 
-const MAX_OUTPUT_ATTR_BYTES: usize = 64 * 1024 * 1024;
-const MAX_OUTPUT_ATTR_VALUES: usize = 1_000_000;
-const MAX_ATTR_DEPTH: usize = 64;
+pub(in crate::transaction::apply) const MAX_OUTPUT_ATTR_BYTES: usize = 64 * 1024 * 1024;
+pub(in crate::transaction::apply) const MAX_OUTPUT_ATTR_VALUES: usize = 1_000_000;
+pub(in crate::transaction::apply) const MAX_ATTR_DEPTH: usize = 64;
 
 pub(super) fn check_split_attrs(attrs: &NodeAttrs, cells: usize) -> Result<()> {
     let mut budget = AttributeExpansion {

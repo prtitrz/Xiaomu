@@ -2,6 +2,7 @@
 
 mod delete;
 mod insert;
+mod isolate;
 
 #[cfg(test)]
 mod tests;
@@ -85,9 +86,18 @@ impl TableEdit {
     }
 
     fn allocate(&mut self, kind: NodeKind, content: NodeContent) -> Result<NodeId> {
+        self.allocate_with_attrs(kind, NodeAttrs::empty(), content)
+    }
+
+    fn allocate_with_attrs(
+        &mut self,
+        kind: NodeKind,
+        attrs: NodeAttrs,
+        content: NodeContent,
+    ) -> Result<NodeId> {
         let id = NodeId::from_allocated(self.next_id);
         let next = self.next_id.checked_add(1).ok_or(Error::NodeIdExhausted)?;
-        let node = Node::new(id, kind, NodeAttrs::empty(), content)?;
+        let node = Node::new(id, kind, attrs, content)?;
         self.replacement.insert(id, node);
         self.next_id = next;
         Ok(id)
