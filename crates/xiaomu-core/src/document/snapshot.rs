@@ -61,6 +61,20 @@ impl XiaomuDocument {
         self.next_node_id
     }
 
+    /// Whether this snapshot has capacity for `count` fresh node identities.
+    ///
+    /// This read-only preflight follows the allocator's checked-add rule and
+    /// includes identities consumed before Undo. It does not reserve identities
+    /// or validate an edit, and cannot replace transaction-time validation.
+    /// Zero identities fit even when the identity space is exhausted.
+    #[must_use]
+    pub fn can_allocate_node_ids(&self, count: usize) -> bool {
+        u64::try_from(count)
+            .ok()
+            .and_then(|count| self.next_node_id.checked_add(count))
+            .is_some()
+    }
+
     /// Returns the canonical schema version.
     #[must_use]
     pub const fn version(&self) -> DocumentVersion {
@@ -252,6 +266,10 @@ fn register_edge(
     stack.push((child_id, true));
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "allocation_capacity_tests.rs"]
+mod allocation_capacity_tests;
 
 #[cfg(test)]
 mod tests {

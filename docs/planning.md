@@ -1,5 +1,10 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-05后继：Core 只读 `can_allocate_node_ids(count)` 供宿主在临时表格骨架构造前
+预检真实剩余身份容量；不暴露 ID、不预留或放宽事务验证。两项新回归覆盖零/近 u64 边界、
+clone 无修改与 Undo 后高水位/Redo 身份，workspace 1392 tests + 6 docs、fmt/strict Clippy
+已过。该查询本身不代表宿主增长粘贴或真实 GUI 已验收，见[模型边界](architecture.md#document-value-layer)。
+
 2026-10-05后继：显式`HistoryTimestamp`与独立typing-delay/selection-only选项，
 成功publication才记时，全grouping状态失败回滚；GPUI每EditorInstance共享单调时钟
 给所有输入surface。全库1390/106 binaries、Runtime621、GPUI400与strict门禁通过。

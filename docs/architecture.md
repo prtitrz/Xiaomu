@@ -96,6 +96,11 @@ XiaomuDocument
 
 `NodeId` 稳定且 opaque。内部 representation 不属于公开 contract，普通外部 API 不能从 raw integer 任意构造 NodeId。当前确定性 allocator 由 `NodeStoreBuilder` 持有，失败构建不会消耗 ID。
 
+`XiaomuDocument::can_allocate_node_ids(count)` 是 snapshot 上的只读容量预检，按实际 allocator
+的 checked-add 规则计算，包含 Undo 后仍保留的已消耗身份高水位。零个身份在耗尽时也可容纳。
+查询不暴露 raw ID/高水位、不预留容量、不校验编辑；事务应用时的分配检查仍是最终权威。
+宿主可用它在构造大规模临时表格骨架前拒绝不可分配的计划，不能用最大存活 ID 代替。
+
 `HeadingLevel` 校验 built-in heading 范围 `1..=6`。`NodeKind` 提供 built-in structural semantics，并支持 extension-defined custom key。
 
 `NodeKind::TaskList` / `TaskItem` 是独立 builtin 容器，不转换成普通列表。TaskList 只接 TaskItem；TaskItem 接普通 block（可嵌套 task/ordinary list、Code、Image、Quote、Table）。Core 允许空容器与任意合法首 block；宿主持久化的 paragraph-first/nonempty 规则归 codec / final SessionPolicy 校验。`checked` 仅存在 NodeAttrs，missing / null / false / true 原样保存，错误类型由 `InvalidTaskItemChecked` 拒绝；读取不补默认值，未知 Core attrs 仍保留。Task clipboard 条件写 v12，显式保存 open/closed，遍历包括 table-cell payload；旧非 Task wire 不变，旧版本拒绝新 kind。默认 PasteSlice 在 policy 之后、任何 fitting/state 改动之前返回 `UnsupportedEdit`，防止 task wrapper 被单段 paste 静默丢失；generic Markdown 明确拒绝 Task。此为 canonical/clipboard 基础，未包含 task 命令、checkbox UI 或原生验收。见 [ADR 0011](adr/0011-typed-task-lists.md)。
