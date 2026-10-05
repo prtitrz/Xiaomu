@@ -41,12 +41,34 @@ pub(crate) fn export_selection(
     purpose: ClipboardExportPurpose,
     spec: ClipboardExportSpec,
 ) -> Result<Option<ClipboardSlice>, crate::session::SessionError> {
-    use crate::session::{PolicyError, SessionError};
-    use export::CellRangeExport;
     // Cut safety precedes all borrowed scans, cloning and platform side effects.
     if purpose == ClipboardExportPurpose::Cut && selection.active_cell_range().is_some() {
-        return Err(SessionError::UnsupportedTableOperation);
+        return Err(crate::session::SessionError::UnsupportedTableOperation);
     }
+    export_with_spec(document, selection, spec)
+}
+
+/// Only the session's dedicated prepared-Cut coordinator may use this after
+/// explicit Cut policy admission. Projection-only callers cannot bypass the
+/// public Cut guard or substitute the Copy purpose.
+pub(crate) fn export_prepared_cell_cut(
+    document: &xiaomu_core::document::XiaomuDocument,
+    selection: crate::session::DocumentSelection,
+    spec: ClipboardExportSpec,
+) -> Result<Option<ClipboardSlice>, crate::session::SessionError> {
+    if selection.active_cell_range().is_none() {
+        return Err(crate::session::SessionError::UnsupportedTableOperation);
+    }
+    export_with_spec(document, selection, spec)
+}
+
+fn export_with_spec(
+    document: &xiaomu_core::document::XiaomuDocument,
+    selection: crate::session::DocumentSelection,
+    spec: ClipboardExportSpec,
+) -> Result<Option<ClipboardSlice>, crate::session::SessionError> {
+    use crate::session::{PolicyError, SessionError};
+    use export::CellRangeExport;
     let clipped_budget = if selection.active_cell_range().is_some()
         && matches!(spec.cell_ranges(), CellRangeExport::Clipped(_))
     {

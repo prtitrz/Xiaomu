@@ -1,5 +1,11 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-05后继独立stage：宿主显式`SessionPolicy::prepare_cut`与同session独占
+`PreparedCut`复用现有commit完整预检，平台lossless item全部准备后再write→publish。
+全库1294测试、Runtime9状态/历史/allocator回归、6借用compile-fail和7实际虚拟GPUI
+协调器测试已过；产品原factory矩阵、严格门禁与原生GUI分开验收。投影-only opt-in
+Cut仍拒绝，默认legacy保持原边界，不宣称OS确认或跨系统crash原子，见[契约](prepared-table-cut.md)。
+
 2026-10-05后继：显式 `with_clipped_cell_ranges(NodeAttrs)` 已从恢复源码重建并
 重新通过Runtime541、全workspace/all-targets1278、strict Clippy/fmt/source-size/
 dependency-boundary门禁。30个新增用例涵盖四边裁切、rich保留/清空、行metadata、

@@ -3,13 +3,20 @@
 use super::{DocumentView, EditorRejectionReason, EditorRejectionStage};
 use crate::block_view::{ClipboardCopy, ClipboardCut, ClipboardPaste};
 use crate::editor_commands::{CodePasteSource, EditorCommand};
-use crate::input::platform_clipboard::{PlatformClipboard, PlatformClipboardContent};
+use crate::input::platform_clipboard::{
+    PlatformClipboard, PlatformClipboardContent, prepare_lossless_slice,
+};
 use gpui::{Context, Window};
 use xiaomu_core::document::NodeKind;
 use xiaomu_runtime::clipboard::{
     ClipboardExportPurpose, normalize_multiline_paste_text, normalize_paste_text,
 };
-use xiaomu_runtime::session::EditIntent;
+use xiaomu_runtime::session::{EditIntent, SessionError, SessionOutcome};
+
+enum CutRejection {
+    Session(SessionError),
+    Metadata,
+}
 
 impl DocumentView {
     pub(crate) fn copy(&mut self, _: &ClipboardCopy, _: &mut Window, cx: &mut Context<Self>) {
@@ -36,6 +43,56 @@ impl DocumentView {
     }
 
     pub(crate) fn cut(&mut self, _: &ClipboardCut, window: &mut Window, cx: &mut Context<Self>) {
+        // Admission precedes every clipboard write, including the legacy path.
+        // These presentation/composition guards are deliberately silent.
+        if self.selection_has_hidden_table_endpoint() || self.focused_child_composing(window, cx) {
+            return;
+        }
+        let prepared_outcome = {
+            let mut session = self.session.borrow_mut();
+            let result = match session.prepare_cut() {
+                Ok(Some(prepared)) => match prepare_lossless_slice(prepared.clipboard_slice()) {
+                    Some(item) => {
+                        // Stock GPUI's writer is synchronous, returns unit and
+                        // does not call into this session. Keep the same borrow
+                        // until the exact prevalidated candidate is published.
+                        PlatformClipboard::new(&*cx).write_prepared_item(item);
+                        Ok(Some(prepared.publish()))
+                    }
+                    None => Err(CutRejection::Metadata),
+                },
+                Ok(None) => Ok(None),
+                Err(error) => Err(CutRejection::Session(error)),
+            };
+            drop(session);
+            result
+        };
+        // Both the opaque guard and RefMut are gone before rejection emission,
+        // view synchronization or any other operation that reborrows session.
+        match prepared_outcome {
+            Ok(Some(outcome)) => {
+                self.finish_cut(outcome, window, cx);
+                return;
+            }
+            Ok(None) => {}
+            Err(CutRejection::Session(error)) => {
+                eprintln!("xiaomu: cut preparation failed: {error}");
+                self.emit_session_rejection(EditorRejectionStage::ClipboardCut, &error, cx);
+                return;
+            }
+            Err(CutRejection::Metadata) => {
+                self.emit_rejection(
+                    EditorRejectionStage::ClipboardCut,
+                    EditorRejectionReason::ClipboardMetadata,
+                    cx,
+                );
+                return;
+            }
+        }
+
+        // No dedicated policy opted in: preserve the historical projection /
+        // write / generic Delete route. Its Delete can still reject after a
+        // write; prepared-Cut semantic atomicity does not extend to this path.
         let projected = self
             .session
             .borrow()
@@ -58,9 +115,20 @@ impl DocumentView {
             );
             return;
         }
-        // Clipboard projection is read-only; Delete remains the one history
-        // mutation for the whole cut command.
         self.apply_intent(EditIntent::Delete, window, cx);
+    }
+
+    fn finish_cut(&mut self, outcome: SessionOutcome, window: &mut Window, cx: &mut Context<Self>) {
+        self.desired_x = None;
+        if outcome != SessionOutcome::NoChange {
+            self.epoch.set(self.epoch.get() + 1);
+        }
+        if outcome == SessionOutcome::DocumentChanged {
+            self.sync_children(cx);
+            self.route_focus(window, cx);
+            self.request_focus_scroll(cx);
+        }
+        cx.notify();
     }
 
     pub(crate) fn paste(

@@ -33,6 +33,9 @@ pub(crate) mod paste_hierarchy;
 mod paste_table;
 mod plan;
 mod policy;
+mod prepared_cut;
+#[cfg(test)]
+mod prepared_cut_tests;
 mod resolve;
 mod selection;
 mod split;
@@ -52,6 +55,7 @@ pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
 pub use listener::DocumentChangeListener;
 pub use outcome::{SessionError, SessionOutcome};
 pub use policy::{IntentDisposition, PolicyError, SessionContext, SessionPolicy};
+pub use prepared_cut::PreparedCut;
 pub use selection::CellRange;
 pub use selection::DocumentPosition;
 pub use selection::DocumentSelection;

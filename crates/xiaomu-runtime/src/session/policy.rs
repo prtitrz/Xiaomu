@@ -139,14 +139,27 @@ pub enum IntentDisposition {
 /// rather than recursively dispatching another intent or repairing listeners.
 /// The session can roll back its own state, not a callback's external effects.
 pub trait SessionPolicy {
+    /// Optionally supplies one dedicated, isolated CellRange Cut plan.
+    ///
+    /// `None` preserves the frontend's legacy route. A supplied plan is used
+    /// only by [`DocumentSession::prepare_cut`], together with this policy's
+    /// explicit Cut export spec. Projection-only Cut stays independently
+    /// refused. No platform write or live mutation happens in this callback.
+    /// Generic Delete is not a substitute for the host's exact Cut contract.
+    fn prepare_cut(&self, _context: SessionContext<'_>) -> Result<Option<EditPlan>, PolicyError> {
+        Ok(None)
+    }
+
     /// Selects explicit clipboard export rules before projection or writes.
     ///
     /// This is pure and read-only like other policy callbacks. `None` retains
     /// historical unit-cell geometry, plain text and metadata behavior. An
     /// error rejects Copy/Cut before touching the platform clipboard. Hosts
     /// must reject unsupported Cut purposes here, not in the later Delete.
-    /// Opted-in CellRange Cut is also rejected by Runtime until atomic source
-    /// deletion is supported. The callback cannot supply arbitrary text.
+    /// Projection-only opted-in CellRange Cut is always rejected by Runtime.
+    /// A host supplying a dedicated [`Self::prepare_cut`] plan can use the
+    /// scoped session preparation API instead. The callback cannot supply
+    /// arbitrary text or authorize a later fallible generic Delete.
     fn clipboard_export_spec(
         &self,
         _context: SessionContext<'_>,
@@ -177,6 +190,17 @@ pub trait SessionPolicy {
 }
 
 impl DocumentSession {
+    pub(super) fn prepare_cut_plan(&self) -> Result<Option<EditPlan>, PolicyError> {
+        self.policy.as_ref().map_or(Ok(None), |policy| {
+            policy.prepare_cut(SessionContext {
+                document: &self.document,
+                selection: self.selection,
+                stored_marks: self.stored_marks.as_ref(),
+                input_rule_undo_available: self.input_rule_undo_available_at(self.selection),
+            })
+        })
+    }
+
     pub(crate) fn clipboard_export_spec(
         &self,
         purpose: ClipboardExportPurpose,

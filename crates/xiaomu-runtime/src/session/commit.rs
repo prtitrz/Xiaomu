@@ -8,8 +8,28 @@ use super::*;
 use xiaomu_core::mapping::StepMap;
 use xiaomu_core::transaction::{Transaction, TransactionOrigin};
 
+/// A completely evaluated candidate. Only its owning session may publish it;
+/// callers keep that session mutably borrowed from preparation to publication.
+pub(super) struct PreparedCommit {
+    document: XiaomuDocument,
+    selection: DocumentSelection,
+    history: HistoryEntry,
+    stored_marks_after: Option<Option<MarkSet>>,
+    input_rule_undo: Option<std::rc::Rc<input_rule_undo::InputRuleUndoToken>>,
+}
+
 impl DocumentSession {
-    pub(super) fn commit(&mut self, mut plan: EditPlan) -> Result<SessionOutcome, SessionError> {
+    pub(super) fn commit(&mut self, plan: EditPlan) -> Result<SessionOutcome, SessionError> {
+        let prepared = self.prepare_commit(plan)?;
+        Ok(self.publish_prepared_commit(prepared))
+    }
+
+    /// All fallible Core, selection, policy and inverse preparation is shared
+    /// by ordinary commits and scoped external-publication commands.
+    pub(super) fn prepare_commit(
+        &self,
+        mut plan: EditPlan,
+    ) -> Result<PreparedCommit, SessionError> {
         let before_selection = self.selection;
         let group = history::history_group_for_plan(&plan);
         let applied = plan
@@ -45,22 +65,34 @@ impl DocumentSession {
             .map(|spec| self.prepare_input_rule_undo(spec, applied.document(), after_selection))
             .transpose()?;
 
-        self.history.record(HistoryEntry {
-            redo,
-            undo,
-            before_selection: self.history_selection_before.unwrap_or(before_selection),
-            after_selection,
-            group,
-        });
-        self.document = applied.into_document();
-        self.selection = after_selection;
-        self.input_rule_undo = input_rule_undo;
-        if let Some(marks) = stored_marks_after {
+        Ok(PreparedCommit {
+            document: applied.into_document(),
+            selection: after_selection,
+            history: HistoryEntry {
+                redo,
+                undo,
+                before_selection: self.history_selection_before.unwrap_or(before_selection),
+                after_selection,
+                group,
+            },
+            stored_marks_after,
+            input_rule_undo,
+        })
+    }
+
+    /// No ordinary validation or reapplication occurs after external writes.
+    /// Allocation failure, listener panic and process termination are not an
+    /// atomic transaction with another process's clipboard.
+    pub(super) fn publish_prepared_commit(&mut self, prepared: PreparedCommit) -> SessionOutcome {
+        self.history.record(prepared.history);
+        self.document = prepared.document;
+        self.selection = prepared.selection;
+        self.input_rule_undo = prepared.input_rule_undo;
+        if let Some(marks) = prepared.stored_marks_after {
             self.stored_marks = marks;
         }
         self.notify_document_changed();
-
-        Ok(SessionOutcome::DocumentChanged)
+        SessionOutcome::DocumentChanged
     }
 
     /// Commits a multi-stage command as one history entry.

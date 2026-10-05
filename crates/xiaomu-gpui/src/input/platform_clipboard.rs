@@ -51,7 +51,7 @@ impl<'a> PlatformClipboard<'a> {
         // Preserve the existing clipboard unless the complete descriptor and
         // tree survive the same decoder used by platform reads.
         if slice.requires_lossless_transport() {
-            let written = write_lossless_slice(slice, |item| self.app.write_to_clipboard(item));
+            let written = write_lossless_slice(slice, |item| self.write_prepared_item(item));
             if !written {
                 eprintln!("xiaomu: clipboard copy requires lossless structured metadata");
             }
@@ -66,7 +66,7 @@ impl<'a> PlatformClipboard<'a> {
                 gpui::ClipboardItem::new_string(text)
             }
         };
-        self.app.write_to_clipboard(item);
+        self.write_prepared_item(item);
         true
     }
 
@@ -75,8 +75,18 @@ impl<'a> PlatformClipboard<'a> {
     /// A failed encode or decode must not replace the platform clipboard or
     /// authorize removal of canonical source content. Ordinary Copy keeps
     /// its interoperable plain-text fallback through `write_slice`.
+    /// `true` means codec preflight passed and the stock writer was invoked;
+    /// GPUI returns unit and supplies no OS clipboard acknowledgment.
     pub(crate) fn write_slice_for_cut(&mut self, slice: &ClipboardSlice) -> bool {
-        write_lossless_slice(slice, |item| self.app.write_to_clipboard(item))
+        write_lossless_slice(slice, |item| self.write_prepared_item(item))
+    }
+
+    /// Invokes the synchronous stock GPUI writer with an already owned item.
+    /// There is no recoverable acknowledgment or OS/crash atomicity guarantee.
+    pub(crate) fn write_prepared_item(&self, item: gpui::ClipboardItem) {
+        #[cfg(test)]
+        write_observation::record();
+        self.app.write_to_clipboard(item);
     }
 
     /// Reads valid native content or foreign/legacy fallbacks.
@@ -105,8 +115,7 @@ impl<'a> PlatformClipboard<'a> {
 
 impl TextClipboard for PlatformClipboard<'_> {
     fn write_text(&mut self, text: String) {
-        self.app
-            .write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        self.write_prepared_item(gpui::ClipboardItem::new_string(text));
     }
 
     fn read_text(&self) -> Option<String> {
@@ -117,20 +126,51 @@ impl TextClipboard for PlatformClipboard<'_> {
 /// The write callback is reached only after exact structured round-trip
 /// validation, including the decoder's untrusted-metadata limits.
 fn write_lossless_slice(slice: &ClipboardSlice, write: impl FnOnce(gpui::ClipboardItem)) -> bool {
-    let Ok(metadata) = encode_metadata(slice) else {
+    let Some(item) = prepare_lossless_slice(slice) else {
         return false;
+    };
+    write(item);
+    true
+}
+
+/// Builds an owned platform item without reading or writing any clipboard.
+/// The actual receiving decoder must retain the complete structured slice.
+pub(crate) fn prepare_lossless_slice(slice: &ClipboardSlice) -> Option<gpui::ClipboardItem> {
+    let Ok(metadata) = encode_metadata(slice) else {
+        return None;
     };
     if !matches!(
         decode_metadata_checked(slice.plain_text(), &metadata),
         ClipboardMetadataDecode::Valid(decoded) if &decoded == slice
     ) {
-        return false;
+        return None;
     }
-    write(gpui::ClipboardItem::new_string_with_metadata(
+    Some(gpui::ClipboardItem::new_string_with_metadata(
         slice.plain_text().to_owned(),
         metadata,
-    ));
-    true
+    ))
+}
+
+/// Passive test instrumentation: never substitutes a writer, payload or result.
+#[cfg(test)]
+pub(crate) mod write_observation {
+    use std::cell::Cell;
+
+    thread_local! {
+        static CALLS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(super) fn record() {
+        CALLS.with(|calls| calls.set(calls.get() + 1));
+    }
+
+    pub(crate) fn reset() {
+        CALLS.with(|calls| calls.set(0));
+    }
+
+    pub(crate) fn calls() -> usize {
+        CALLS.with(Cell::get)
+    }
 }
 
 /// Classify native metadata before considering any platform fallback flavor.

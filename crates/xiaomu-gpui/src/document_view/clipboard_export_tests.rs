@@ -24,6 +24,9 @@ use xiaomu_runtime::session::{
 struct Seen {
     exports: Vec<ClipboardExportPurpose>,
     deletes: usize,
+    cut_preparations: usize,
+    cut_candidates: usize,
+    cut_candidate_writes: Vec<usize>,
 }
 
 struct ExportPolicy {
@@ -375,7 +378,13 @@ fn closed_cell_cut_is_rejected_before_clipboard_and_delete_policy(cx: &mut TestA
         }
         action(&m, ClipboardExportPurpose::Cut, cx);
         assert_eq!(clipboard(cx), previous);
-        assert_eq!(m.seen.borrow().exports, [ClipboardExportPurpose::Cut]);
+        if rich {
+            // The unmeasured spanning-table endpoint is now rejected before
+            // any Cut projection, dedicated policy or clipboard operation.
+            assert!(m.seen.borrow().exports.is_empty());
+        } else {
+            assert_eq!(m.seen.borrow().exports, [ClipboardExportPurpose::Cut]);
+        }
         assert_eq!(m.seen.borrow().deletes, 0);
         before.assert_unchanged(&m);
     }
@@ -437,3 +446,6 @@ fn legacy_open_copy_retains_plain_text_fallback_when_encode_fails(cx: &mut TestA
     assert!(item.metadata().is_none());
     before.assert_unchanged(&m);
 }
+
+#[path = "clipboard_cut_prepared_tests.rs"]
+mod prepared_cut_tests;

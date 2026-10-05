@@ -10,10 +10,12 @@
 后者也适用于普通全篇复制，不局限于 CellRange。
 投影描述是可重算规则，不接收宿主自报的任意文本或摘要。
 
-本阶段 opt-in CellRange Cut 在克隆、投影、平台写入之前明确拒绝。
-不能先覆盖剪贴板，再依靠不支持的 Delete 保留源文档。
-实际 GPUI Cut 回归须同时证明原剪贴板（含 metadata）、文档、选择和历史未变。
-完整 Cut 原子化与 revision/selection 绑定的 prepared delete 留待后续。
+投影-only opt-in CellRange Cut仍在克隆、投影、平台写入之前明确拒绝。
+后继显式`prepare_cut`策略可提供完整删除计划，Runtime返回独占原session的
+`PreparedCut`；完整候选/Core/选择/policy/inverse/redo及lossless item预检全部通过后，
+才一次平台写入并发布同一个candidate。不能先覆盖剪贴板再调用可能拒绝的Delete。
+默认legacy路径保持兼容，不把专用路径保证扩大到所有Cut；OS writer无确认、crash
+与外部ownership边界明确保留，详见[prepared Cut契约](prepared-table-cut.md)。
 
 ## 结构和来源
 
