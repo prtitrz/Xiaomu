@@ -438,12 +438,20 @@ Runtime clipboard 已从 P2 的纯文本 seam 升级为 frontend-neutral structu
 
 2026-10-04 的 opt-in 导出增量见 [表格导出契约](table-clipboard-export.md)：
 `SessionPolicy::clipboard_export_spec(context, Copy/Cut)` 在投影与平台写入之前运行。
-默认仍保持历史 unit/TSV/wire 行为；显式配置可复制几何闭合的含跨度 CellRange，
+默认仍保持历史 unit/TSV/wire 行为；显式Closed配置可复制几何闭合的含跨度 CellRange，
 并独立采用可重算的 LF/LF text-between 文本。CellRange 来源固定 open 1/1、
 区分 Rows 与 Table 根；全篇/完整节点来源为 closed 0/0，二者不会互相推断。
 新 v14 使用固定传输前缀与严格 JSON；`RejectedNative` 禁止 Text/Image fallback。
 投影前借用预算预扫；未知自定义文本语义拒绝；新 CellRange Cut 在写剪贴板前拒绝。
-该增量不包含矩形 Paste/clipping 或真实 OS 剪贴板验收。
+该默认消费端门禁不因导出能力而开放，也不代表真实 OS 剪贴板验收。
+
+`with_clipped_cell_ranges(NodeAttrs)`另行选择精确源bbox裁切，节点默认值由宿主提供。
+从上/左进入的cell只保留kind和裁后attrs，rich forest换成一个空Paragraph；仅右/底
+裁切保持全部内容。输出按裁后origin排序，行metadata属于所选原物理行，横裁全0
+colwidth变null而纯纵裁保留原数组。借用完整源、roots frame与重复默认P预算在
+任何payload克隆前完成；不消耗源/目标allocator，既有验证树仍使用临时本地ID。
+spec改Clone、内部Arc共享默认attrs；geometry builder替换整个模式，旧Closed
+准入与预算不变。CellRange仍v14/open1/1，Cut、默认Paste与Code降级门禁未扩大。
 
 ```text
 DocumentSelection
@@ -740,7 +748,7 @@ Cell 编辑（P5.2）复用既有 intent，无表格特例事务：Tab/Shift+Tab
 
 行列操作（P5.3）：插入走 `InsertTableRow { table, index }` 与 `InsertTableColumn { table, index }`。列插入使每行都新增 cell，所以一次 Core step 产生多个 `NodeInserted` map（每行一个，指向实际 cell），保证所有行的 `NodeGap` 都准确平移；不能只报告首行，也不能把插入节点伪装成 descendant paragraph。删除走单事务 `RemoveNode` 组合，Core 只验证最终快照；最后一行/列 fail closed。Runtime 先校验表身份/index，被删子树内 caret/selection 收敛到 `CaretAtGap`，其余 `MapExisting`；undo 恢复同一批 node id（含 atom）。测试：`p5_row_column_ops.rs`、`p5_review_regressions.rs` 与 Core `table_model.rs`。
 
-Cell 选区与 clipboard（P5.5及后续逻辑网格）：`DocumentSelection` 携带 `Option<CellRange>`，端点为同表 cell identity；`CellRange::cells` 保留无跨度矩阵契约。跨度另用 `logical_rect/unique_origins/is_closed_rect`，origin规则排除从矩形上方/左方跨入的cell，不重复覆盖slot。矩形非 collapsed，不暴露成single-node text selection；text端点为合法停靠位置。通用Delete/Backspace清空选中origin的内容、每格留空Paragraph并保cell身份/attrs/形状；Toggle/Set/RemoveMark递归处理选中子树与inline atoms，一次全范围决定和一次历史。typing/plain paste/IME按unique origins替换，在gesture anchor接文本，其它选中cell留空P；空range proxy的IME仅接受0..0，普通inline范围不受影响。partial跨度clipboard与未定义结构命令仍拒绝。产品head-cell输入与整表Backspace删除需宿主显式策略。merge后的CellRange两端按Core身份映射到survivor，Undo恢复原内容、身份和逆向矩形。
+Cell 选区与 clipboard（P5.5及后续逻辑网格）：`DocumentSelection` 携带 `Option<CellRange>`，端点为同表 cell identity；`CellRange::cells` 保留无跨度矩阵契约。跨度另用 `logical_rect/unique_origins/is_closed_rect`，origin规则排除从矩形上方/左方跨入的cell，不重复覆盖slot。矩形非 collapsed，不暴露成single-node text selection；text端点为合法停靠位置。通用Delete/Backspace清空选中origin的内容、每格留空Paragraph并保cell身份/attrs/形状；Toggle/Set/RemoveMark递归处理选中子树与inline atoms，一次全范围决定和一次历史。typing/plain paste/IME按unique origins替换，在gesture anchor接文本，其它选中cell留空P；空range proxy的IME仅接受0..0，普通inline范围不受影响。默认partial跨度clipboard与未定义结构命令仍拒绝，宿主显式Clipped Copy独立使用所有相交origins。产品head-cell输入与整表Backspace删除需宿主显式策略。merge后的CellRange两端按Core身份映射到survivor，Undo恢复原内容、身份和逆向矩形。
 
 Clipboard 捕获完整合法子树（含 quote/list、atomic、嵌套 table、marks、inline atoms）及 table/row/cell/block attrs。`Table { rows, row_attrs }` 的空 row_attrs 表示兼容旧载荷；非空行属性写 wire v6，普通表仍 v5。匹配 range paste 替换 cell 内容与 attrs、保留目标 table/row attrs；1×1 粘入 cell 时在 caret 所属直接 child block 后追加；兄弟表插入完整重建所有层级 attrs。非表片段可填充矩形各 cell 内容；尺寸不符/未定义落点 fail closed。hidden validated stages 统一提交一次 history，任何失败不发布中间文档。Table Markdown 导出仍 fail closed。回归见 `p5_cell_range_clipboard.rs`、`p5_review_regressions.rs`、`p5_rich_table_clipboard.rs`。
 

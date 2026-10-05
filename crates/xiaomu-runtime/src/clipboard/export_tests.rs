@@ -17,7 +17,7 @@ impl SessionPolicy for Policy {
         _: SessionContext<'_>,
         _: ClipboardExportPurpose,
     ) -> Result<Option<ClipboardExportSpec>, PolicyError> {
-        Ok(Some(self.0))
+        Ok(Some(self.0.clone()))
     }
 }
 
@@ -285,7 +285,7 @@ fn legacy_defaults_and_independent_projection_options_are_preserved() {
     let text_only =
         ClipboardExportSpec::new().with_text_projection(ClipboardTextProjection::TextBetweenLfV1);
     assert_eq!(
-        copied_range(&spanning, 0, 5, Some(text_only)),
+        copied_range(&spanning, 0, 5, Some(text_only.clone())),
         Err(SessionError::UnsupportedTableOperation)
     );
     let structure_only = copied_range(

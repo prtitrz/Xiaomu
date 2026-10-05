@@ -1,5 +1,9 @@
 //! Explicit, deterministic host clipboard export options and provenance.
 
+use std::sync::Arc;
+
+use xiaomu_core::document::NodeAttrs;
+
 /// The platform action requesting a clipboard export.
 ///
 /// Cut must be rejected here when the host cannot safely remove the selected
@@ -63,10 +67,21 @@ impl ClipboardSourceBoundary {
 /// Structure and plain-text projection are independent. The default options
 /// retain unit-only cell projection and the historical plain text. Returning
 /// `None` from the policy also retains the historical wire format.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Cloning these options shares the immutable fill attributes. Their payload
+/// is not copied until the export's borrowed resource preflight succeeds.
+/// Unlike the original options, this type is `Clone`, not `Copy`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ClipboardExportSpec {
-    closed_cell_ranges: bool,
+    cell_ranges: CellRangeExport,
     text_projection: Option<ClipboardTextProjection>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) enum CellRangeExport {
+    #[default]
+    Unit,
+    Closed,
+    Clipped(Arc<NodeAttrs>),
 }
 
 impl ClipboardExportSpec {
@@ -74,7 +89,7 @@ impl ClipboardExportSpec {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            closed_cell_ranges: false,
+            cell_ranges: CellRangeExport::Unit,
             text_projection: None,
         }
     }
@@ -82,10 +97,32 @@ impl ClipboardExportSpec {
     /// Enables whole-origin copying of geometrically closed logical rectangles.
     ///
     /// Nonclosed rectangles still reject. CellRange Cut remains unsupported and
-    /// is rejected before projection or any platform clipboard write.
+    /// is rejected before projection or any platform clipboard write. This
+    /// replaces a previous clipped mode and drops its unused fill attributes.
+    /// The builder is no longer `const`, because replacing that owned mode may
+    /// release its shared attributes.
     #[must_use]
-    pub const fn with_closed_cell_ranges(mut self) -> Self {
-        self.closed_cell_ranges = true;
+    pub fn with_closed_cell_ranges(mut self) -> Self {
+        self.cell_ranges = CellRangeExport::Closed;
+        self
+    }
+
+    /// Enables clipping at the exact logical cell-selection rectangle.
+    ///
+    /// Each intersecting origin is captured once. Cells entering from above or
+    /// the left retain their kind and cropped attributes but replace all their
+    /// children with one empty Paragraph using `empty_paragraph_attrs`. Cropping
+    /// only the right or bottom retains the complete original children. Width
+    /// arrays are cropped with columns; a horizontally cropped all-zero array
+    /// becomes null. Other attributes and selected physical rows are retained.
+    ///
+    /// The host supplies only its schema's default Paragraph attributes, never
+    /// arbitrary clipboard text or children. Their repeated cost is checked
+    /// before cloning. A later geometry builder replaces this mode. Copy keeps
+    /// CellRange open 1/1 provenance; this grants neither Paste fitting nor Cut.
+    #[must_use]
+    pub fn with_clipped_cell_ranges(mut self, empty_paragraph_attrs: NodeAttrs) -> Self {
+        self.cell_ranges = CellRangeExport::Clipped(Arc::new(empty_paragraph_attrs));
         self
     }
 
@@ -96,13 +133,13 @@ impl ClipboardExportSpec {
         self
     }
 
-    pub(crate) const fn closed_cell_ranges(self) -> bool {
-        self.closed_cell_ranges
+    pub(super) const fn cell_ranges(&self) -> &CellRangeExport {
+        &self.cell_ranges
     }
 
     /// Returns the independently selected plain-text algorithm.
     #[must_use]
-    pub const fn text_projection(self) -> Option<ClipboardTextProjection> {
+    pub const fn text_projection(&self) -> Option<ClipboardTextProjection> {
         self.text_projection
     }
 }

@@ -6,6 +6,8 @@
 //! `NodeId`s or frontend-specific types into Core.
 
 mod cell_export;
+#[cfg(test)]
+mod clipped_export_tests;
 mod export;
 mod export_budget;
 #[cfg(test)]
@@ -40,20 +42,40 @@ pub(crate) fn export_selection(
     spec: ClipboardExportSpec,
 ) -> Result<Option<ClipboardSlice>, crate::session::SessionError> {
     use crate::session::{PolicyError, SessionError};
+    use export::CellRangeExport;
     // Cut safety precedes all borrowed scans, cloning and platform side effects.
     if purpose == ClipboardExportPurpose::Cut && selection.active_cell_range().is_some() {
         return Err(SessionError::UnsupportedTableOperation);
     }
-    export_budget::document(document)
-        .map_err(|()| PolicyError::new("clipboard export exceeds bounded projection budget"))?;
+    let clipped_budget = if selection.active_cell_range().is_some()
+        && matches!(spec.cell_ranges(), CellRangeExport::Clipped(_))
+    {
+        Some(
+            export_budget::clipped_document(document).map_err(|()| {
+                PolicyError::new("clipboard export exceeds bounded projection budget")
+            })?,
+        )
+    } else {
+        export_budget::document(document)
+            .map_err(|()| PolicyError::new("clipboard export exceeds bounded projection budget"))?;
+        None
+    };
     selection.validate(document)?;
     if let Some(range) = selection.active_cell_range() {
-        if !spec.closed_cell_ranges() {
-            // Preserve the opt-in dimension separately from text projection.
-            // This check keeps historical unit-only geometry admission.
-            range.cells(document)?;
-        }
-        let (roots, boundary) = cell_export::capture(document, range)?;
+        let (roots, boundary) = match spec.cell_ranges() {
+            CellRangeExport::Unit => {
+                // Text projection alone retains historical unit-only geometry.
+                range.cells(document)?;
+                cell_export::capture(document, range)?
+            }
+            CellRangeExport::Closed => cell_export::capture(document, range)?,
+            CellRangeExport::Clipped(attrs) => cell_export::capture_clipped(
+                document,
+                range,
+                attrs,
+                clipped_budget.ok_or(SessionError::SelectionInvalid)?,
+            )?,
+        };
         return ClipboardSlice::from_export_roots(roots, boundary, spec.text_projection())
             .map(Some)
             .map_err(|()| {

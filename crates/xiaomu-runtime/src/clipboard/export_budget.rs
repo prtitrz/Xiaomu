@@ -7,6 +7,9 @@ use xiaomu_core::document::{
 
 use super::{ClipboardNode, ClipboardNodeContent};
 
+#[cfg(test)]
+mod tests;
+
 pub(super) const MAX_BYTES: usize = 16 * 1024 * 1024;
 const MAX_NODES: usize = 10_000;
 const MAX_VALUES: usize = 100_000;
@@ -210,6 +213,53 @@ impl Budget {
 /// conservative limit; no partial/truncated projection is produced.
 pub(super) fn document(document: &XiaomuDocument) -> Result<(), ()> {
     Budget::default().document_node(document, document.root(), 0)
+}
+
+/// A borrowed source preflight retained while planning clipped cell contents.
+pub(super) struct ClippedBudget {
+    budget: Budget,
+}
+
+impl ClippedBudget {
+    pub(super) fn reserve_empty_paragraphs(
+        &mut self,
+        attrs: &NodeAttrs,
+        count: usize,
+    ) -> Result<(), ()> {
+        if count == 0 {
+            return Ok(());
+        }
+        let mut cost = Budget::default();
+        // Exported table, row, cell and paragraph occupy depths 1 through 4.
+        // Conservatively reserve the complete synthetic node without relying
+        // on other layers’ content invariants or subtracting replaced forests.
+        cost.node(4)?;
+        cost.attrs(attrs, 4)?;
+        let nodes = cost.nodes.checked_mul(count).ok_or(())?;
+        let values = cost.values.checked_mul(count).ok_or(())?;
+        let bytes = cost.bytes.checked_mul(count).ok_or(())?;
+        let nodes = self.budget.nodes.checked_add(nodes).ok_or(())?;
+        if nodes > MAX_NODES {
+            return Err(());
+        }
+        let mut reserved = Budget {
+            nodes,
+            values: self.budget.values,
+            bytes: self.budget.bytes,
+        };
+        reserved.add(values, bytes)?;
+        self.budget = reserved;
+        Ok(())
+    }
+}
+
+/// Bounds source content and the roots envelope before any clipped capture.
+/// Legacy closed exports keep the original `document` threshold unchanged.
+pub(super) fn clipped_document(document: &XiaomuDocument) -> Result<ClippedBudget, ()> {
+    let mut budget = Budget::default();
+    budget.document_node(document, document.root(), 0)?;
+    budget.add(32, 1024)?;
+    Ok(ClippedBudget { budget })
 }
 
 pub(super) fn roots(roots: &[ClipboardNode]) -> Result<(), ()> {

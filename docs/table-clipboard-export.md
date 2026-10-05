@@ -1,12 +1,12 @@
 # 有界表格剪贴板导出契约
 
-2026-10-04，实施中；编译、测试与产品接入证据由合并验收补充。
+2026-10-05，Clipped Copy引擎重建：Runtime541、全库1278、strict Clippy/fmt/source/dependency门禁通过；产品接入和真实GUI另行验收。
 
 ## 宿主选择
 
 `SessionPolicy::clipboard_export_spec(context, purpose)` 是唯一只读导出入口。
 `purpose` 明确区分 Copy 与 Cut；默认 `None` 保持历史 unit-cell、TSV 和 v4–v13 行为。
-宿主可独立选择闭合逻辑矩形复制，以及 `TextBetweenLfV1` 文本投影。
+宿主可独立选择闭合逻辑矩形复制、精确源矩形裁切，以及 `TextBetweenLfV1` 文本投影。
 后者也适用于普通全篇复制，不局限于 CellRange。
 投影描述是可重算规则，不接收宿主自报的任意文本或摘要。
 
@@ -20,9 +20,31 @@
 闭合逻辑矩形保留每个实际行、row attrs、Header/body、span/colwidth、
 covered empty row，以及 cell 内文本、marks、typed HardBreak、图片和嵌套表格。
 每个 cell origin 仅捕获一次，不展开 unit skeleton，不复制 covered slot。
-跨边界 span 的非闭合矩形目前拒绝；不能静默扩选、裁剪或 flatten。
-真实工厂的 18 个 Copy oracle 中先实现 11 个几何闭合案例；7 个非闭合案例
-用于保持明确拒绝，后续 clipping 必须以原工厂结果实现。
+`with_closed_cell_ranges()`仍拒绝跨边界span，不会自动扩选或裁切；原18个
+Copy oracle的11闭合成功/7非闭合拒绝继续作为该模式的兼容契约。
+
+`with_clipped_cell_ranges(empty_paragraph_attrs)`显式启用源矩形裁切。宿主只提供
+其空Paragraph默认attrs，不提供任意文本、子树或callback；例如产品默认值
+textAlign:null与indent:false由宿主传入，不硬编码进Runtime。
+`ClipboardExportSpec`改为Clone而非Copy，内部Arc共享不可变attrs，避免在预算前
+深拷贝。geometry builder替换整个模式并释放不用的attrs；closed builder不再const，
+`text_projection()`改借用self。其余0.x API变化均在rustdoc记录。
+
+裁切不扩张endpoint完整cell形成的bbox。每个相交物理origin仅捕获一次，包括从
+上方/左侧进入的origin，再按裁后(row,column)排序。上/左进入者清除全部富子树，
+替换为一个带宿主默认attrs的空Paragraph；只裁右/底边者保留全部原rich forest。
+Header/body和未知cell attrs保留，只重写确实变化的span；横裁colwidth取对应片段，
+若其中无正值则变null，纯纵裁保持原全0数组。所选原物理行的attrs与covered空行
+继续保留，不随移入cell携带其原origin行metadata。PM tableRow的空schema不能单独
+证明这些非空Runtime metadata，需原生专测。
+
+新模式先对完整借用源、roots frame做资源预检，再用有界仅含ID/geometry的临时表
+确定裁切。克隆attrs/forest之前按clear数量checked_mul/add保留完整生成空Paragraph
+的节点、结构和depth4 attrs预算；不扣除被替换forest，边界因此有意保守。count0
+不遍历无用默认attrs。Closed模式预算不改，后续roots/wire验证仍独立。
+Copy不消耗源或目标文档allocator、不把ID写进DTO/wire；已有完整结构验证仍使用
+临时NodeStoreBuilder本地ID，不能宣称整个Copy调用链完全不创建NodeId。
+裁后carrier可编码不替代宿主对原始完整文档的准入，未知内容不能先清除再放行。
 
 `source_boundary` 与 `text_projection` 分别保存和验证：
 
@@ -70,7 +92,7 @@ body 必须通过有界 duplicate-key 检查；不得先用 JSON last-wins 决�
 
 复制不会开启 CellRange Paste。后续同尺寸闭合矩形替换需要 Core 语义步骤、
 真实 fresh IDs、精确选择映射和单 history Undo/Redo；重复铺排、grow、
-非闭合 clipping、caret paste、外部 HTML 与未知 attrs 准入分别验收。
+非闭合目标拟合、caret paste、外部 HTML 与未知 attrs 准入分别验收。
 宿主工厂 Node oracle、Rust 测试和真实产品 GUI 是独立证据。
 # Exact rectangle replacement foundation
 

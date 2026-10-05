@@ -1,5 +1,12 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-05后继：显式 `with_clipped_cell_ranges(NodeAttrs)` 已从恢复源码重建并
+重新通过Runtime541、全workspace/all-targets1278、strict Clippy/fmt/source-size/
+dependency-boundary门禁。30个新增用例涵盖四边裁切、rich保留/清空、行metadata、
+width零值、v14/Closed/默认兼容和借用预算。spec从Copy变Clone且共享默认attrs，
+Core/GPUI/default Paste/Cut权限未扩大；详见[表格导出契约](table-clipboard-export.md)。
+消费者真实factory20 Copy/42 Paste证据已独立重生成，接入与原生GUI另行验收。
+
 2026-10-05：在精确 v10 基底 `d918ad72` 上重新构建 per-view
 `EditorRejection` API。新环境 Rust1.97.1 下全 workspace/all-targets 1248 tests
 及strict Clippy/fmt/source/dependency/vendor门禁通过，包含9个公开路由事件回归、
@@ -7,7 +14,7 @@ composition静默与排队metadata拒绝stamp回归；不是丢失本地提交
 `f60ba48` 或旧原生证据的恢复。宿主可按 Entity 绑定固定、无正文的拒绝反馈，
 既有 `EditorHooks` 不变；内容无关的发出时revision供宿主过滤后来编辑已超越的
 排队拒绝，精确覆盖与排除边界见 [architecture](architecture.md#multi-block-documentview)。
-新原生宿主验收独立进行，Clipped Copy 后续仍未接入本检查点。
+该拒绝反馈检查点的新原生宿主验收独立进行；其之后的Clipped Copy增量见上文。
 
 2026-10-04：[显式全篇选择](adr/0010-explicit-root-selection.md) 修复host CtrlA与普通全文text range混淆的问题。每实例opt-in root gaps、closed clipboard v11、原生range输入/焦点与失败保护已具844全库测试/strictClippy证据；真实产品GUI待复验。旧默认router和普通open剪贴板拟合保持原边界。
 

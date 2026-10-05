@@ -1,10 +1,21 @@
-//! Opt-in closed logical rectangles retain real physical origin rows.
+//! Explicit cell-range exports retain real physical origin rows.
+
+mod clipped;
 
 use xiaomu_core::document::{NodeAttrs, NodeKind, XiaomuDocument};
 
 use super::projection::whole_fragment;
 use super::{ClipboardCellRangeRoot, ClipboardNode, ClipboardNodeContent, ClipboardSourceBoundary};
 use crate::session::{CellRange, SessionError};
+
+pub(super) fn capture_clipped(
+    document: &XiaomuDocument,
+    range: CellRange,
+    empty_paragraph_attrs: &NodeAttrs,
+    budget: super::export_budget::ClippedBudget,
+) -> Result<(Vec<ClipboardNode>, ClipboardSourceBoundary), SessionError> {
+    clipped::capture(document, range, empty_paragraph_attrs, budget)
+}
 
 pub(super) fn capture(
     document: &XiaomuDocument,
