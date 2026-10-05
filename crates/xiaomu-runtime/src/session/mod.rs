@@ -51,6 +51,7 @@ mod table_commands_tests;
 #[cfg(test)]
 mod table_geometry_tests;
 mod task_checked;
+mod text_input_marks;
 
 pub use history::HistoryStack;
 pub use history_options::{EmptyHistoryBehavior, HistoryOptions, HistorySelectionMode};
@@ -63,6 +64,7 @@ pub use prepared_cut::PreparedCut;
 pub use selection::CellRange;
 pub use selection::DocumentPosition;
 pub use selection::DocumentSelection;
+pub use text_input_marks::DefaultTextInputMarks;
 
 use xiaomu_core::document::{InlineContent, MarkSet, NodeId, XiaomuDocument};
 use xiaomu_core::selection::{InlinePoint, TextPoint, TextSelection};
@@ -79,6 +81,7 @@ pub struct DocumentSession {
     selection: DocumentSelection,
     history: HistoryStack,
     history_options: HistoryOptions,
+    default_text_input_marks: DefaultTextInputMarks,
     stored_marks: Option<MarkSet>,
     listeners: Vec<Box<dyn DocumentChangeListener>>,
     policy: Option<Box<dyn SessionPolicy>>,
@@ -106,6 +109,7 @@ impl DocumentSession {
             selection,
             history: HistoryStack::new(),
             history_options: HistoryOptions::new(),
+            default_text_input_marks: DefaultTextInputMarks::PreservePending,
             stored_marks: None,
             listeners: Vec::new(),
             policy: None,
@@ -130,6 +134,12 @@ impl DocumentSession {
     #[must_use]
     pub const fn history_options(&self) -> HistoryOptions {
         self.history_options
+    }
+
+    /// Returns default text-input mark behavior captured at construction.
+    #[must_use]
+    pub const fn default_text_input_marks(&self) -> DefaultTextInputMarks {
+        self.default_text_input_marks
     }
 
     /// Returns the single-block Core selection when the whole selection

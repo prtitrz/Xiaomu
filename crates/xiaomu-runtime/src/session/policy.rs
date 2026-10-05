@@ -139,6 +139,14 @@ pub enum IntentDisposition {
 /// rather than recursively dispatching another intent or repairing listeners.
 /// The session can roll back its own state, not a callback's external effects.
 pub trait SessionPolicy {
+    /// Chooses fixed mark consumption for default nonempty inline text input.
+    ///
+    /// Independent from history options. Host plans and other commands retain
+    /// their existing explicit marks-after semantics.
+    fn default_text_input_marks(&self) -> super::DefaultTextInputMarks {
+        super::DefaultTextInputMarks::PreservePending
+    }
+
     /// Chooses immutable history traversal behavior at session construction.
     ///
     /// Defaults retain recorded selections and historical empty-stack behavior.
@@ -238,6 +246,7 @@ impl DocumentSession {
         let mut session = Self::new(document, selection)?;
         policy.validate_document(&session.document)?;
         session.history_options = policy.history_options();
+        session.default_text_input_marks = policy.default_text_input_marks();
         session.policy = Some(policy);
         Ok(session)
     }

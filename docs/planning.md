@@ -1,5 +1,11 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-05后继：独立构造期`DefaultTextInputMarks`仅让显式宿主在默认非空inline
+InsertText/CommitComposition成功计划后恢复marks继承，默认/空输入/host plans/删除/
+split/raw/staged不变；13个public-API回归、全库1320/104 binaries与严格门禁通过。
+消费发生在原子publication中，
+不拆typing组、不在listener后补修，见[范围](default-text-input-marks.md)。
+
 2026-10-05后继：构造期固定`HistoryOptions`提供默认兼容的successful-traversal选区
 capture及独立empty-history保持state选项。13项Runtime public/fault隔离回归、
 全库1307测试/strict门禁通过；consumer按真实factory显式接线、GUI另验。时间分组、selection-only分组和非历史

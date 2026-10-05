@@ -372,7 +372,20 @@ impl DocumentSession {
 
         match action {
             PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
-            PlannedAction::Commit(plan) => self.commit(plan),
+            PlannedAction::Commit(mut plan) => {
+                // Consume only after input is fully planned, so the canonical
+                // inserted content still uses the pending marks. The existing
+                // atomic commit applies this before listeners are notified.
+                // Never turn default typing into a host Apply/isolation unit.
+                if self.default_text_input_marks == DefaultTextInputMarks::ConsumePending
+                    && matches!(intent,
+                        EditIntent::InsertText { text }
+                        | EditIntent::CommitComposition { text, .. } if !text.is_empty())
+                {
+                    plan = plan.with_stored_marks(None);
+                }
+                self.commit(plan)
+            }
             PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
         }
     }
