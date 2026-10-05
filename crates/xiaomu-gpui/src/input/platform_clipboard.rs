@@ -29,6 +29,10 @@ pub(crate) enum PlatformClipboardContent {
     },
 }
 
+/// Recognized native metadata must never degrade to another clipboard flavor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NativeMetadataRejection;
+
 /// Clipboard adapter backed by the GPUI app clipboard.
 pub(crate) struct PlatformClipboard<'a> {
     app: &'a App,
@@ -41,15 +45,17 @@ impl<'a> PlatformClipboard<'a> {
     }
 
     /// Writes a structured Xiaomu slice with interoperable plain text.
-    pub(crate) fn write_slice(&mut self, slice: &ClipboardSlice) {
+    /// Returns false only when required lossless transport refused the write.
+    pub(crate) fn write_slice(&mut self, slice: &ClipboardSlice) -> bool {
         // Boundaries and explicit text projections cannot survive a fallback.
         // Preserve the existing clipboard unless the complete descriptor and
         // tree survive the same decoder used by platform reads.
         if slice.requires_lossless_transport() {
-            if !write_lossless_slice(slice, |item| self.app.write_to_clipboard(item)) {
+            let written = write_lossless_slice(slice, |item| self.app.write_to_clipboard(item));
+            if !written {
                 eprintln!("xiaomu: clipboard copy requires lossless structured metadata");
             }
-            return;
+            return written;
         }
         let text = slice.plain_text().to_owned();
         let item = match encode_metadata(slice) {
@@ -61,6 +67,7 @@ impl<'a> PlatformClipboard<'a> {
             }
         };
         self.app.write_to_clipboard(item);
+        true
     }
 
     /// Writes only a fully round-trippable structured slice for Cut.
@@ -76,13 +83,23 @@ impl<'a> PlatformClipboard<'a> {
     ///
     /// Rejected recognized native metadata never falls through to text or
     /// pixels: losing its descriptor could change the meaning of a paste.
-    pub(crate) fn read_content(&self) -> Option<PlatformClipboardContent> {
+    pub(crate) fn read_content_checked(
+        &self,
+    ) -> Result<Option<PlatformClipboardContent>, NativeMetadataRejection> {
         #[cfg(test)]
         if let Some(content) = mixed_tests::take_content() {
-            return Some(content);
+            return Ok(Some(content));
         }
-        let item = self.app.read_from_clipboard()?;
-        decode_item(item)
+        let Some(item) = self.app.read_from_clipboard() else {
+            return Ok(None);
+        };
+        decode_item_checked(item)
+    }
+
+    /// Existing transport fixtures only need the accepted content.
+    #[cfg(test)]
+    pub(crate) fn read_content(&self) -> Option<PlatformClipboardContent> {
+        self.read_content_checked().ok().flatten()
     }
 }
 
@@ -117,28 +134,48 @@ fn write_lossless_slice(slice: &ClipboardSlice, write: impl FnOnce(gpui::Clipboa
 }
 
 /// Classify native metadata before considering any platform fallback flavor.
-fn decode_item(item: gpui::ClipboardItem) -> Option<PlatformClipboardContent> {
+fn decode_item_checked(
+    item: gpui::ClipboardItem,
+) -> Result<Option<PlatformClipboardContent>, NativeMetadataRejection> {
     let text = item.text();
     let decoded = item.metadata().map_or(
         ClipboardMetadataDecode::ForeignOrLegacyFallback,
         |metadata| decode_metadata_checked(text.as_deref().unwrap_or_default(), metadata),
     );
-    decode_transport(text, decoded, item.into_entries())
+    decode_transport_checked(text, decoded, item.into_entries())
 }
 
 /// Even a native empty-body slice requires an actual platform text flavor.
+fn decode_transport_checked(
+    text: Option<String>,
+    decoded: ClipboardMetadataDecode,
+    entries: impl IntoIterator<Item = gpui::ClipboardEntry>,
+) -> Result<Option<PlatformClipboardContent>, NativeMetadataRejection> {
+    match decoded {
+        ClipboardMetadataDecode::Valid(slice) if text.is_some() => {
+            Ok(Some(PlatformClipboardContent::Structured(slice)))
+        }
+        ClipboardMetadataDecode::Valid(_) | ClipboardMetadataDecode::RejectedNative => {
+            Err(NativeMetadataRejection)
+        }
+        ClipboardMetadataDecode::ForeignOrLegacyFallback => Ok(decode_fallback(text, entries)),
+    }
+}
+
+#[cfg(test)]
+fn decode_item(item: gpui::ClipboardItem) -> Option<PlatformClipboardContent> {
+    decode_item_checked(item).ok().flatten()
+}
+
+#[cfg(test)]
 fn decode_transport(
     text: Option<String>,
     decoded: ClipboardMetadataDecode,
     entries: impl IntoIterator<Item = gpui::ClipboardEntry>,
 ) -> Option<PlatformClipboardContent> {
-    match decoded {
-        ClipboardMetadataDecode::Valid(slice) if text.is_some() => {
-            Some(PlatformClipboardContent::Structured(slice))
-        }
-        ClipboardMetadataDecode::Valid(_) | ClipboardMetadataDecode::RejectedNative => None,
-        ClipboardMetadataDecode::ForeignOrLegacyFallback => decode_fallback(text, entries),
-    }
+    decode_transport_checked(text, decoded, entries)
+        .ok()
+        .flatten()
 }
 
 /// Retains image-first transport while keeping any accompanying raw text.

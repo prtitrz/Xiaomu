@@ -1,6 +1,6 @@
 //! Clipboard actions preserve transport identity before optional host routing.
 
-use super::DocumentView;
+use super::{DocumentView, EditorRejectionReason, EditorRejectionStage};
 use crate::block_view::{ClipboardCopy, ClipboardCut, ClipboardPaste};
 use crate::editor_commands::{CodePasteSource, EditorCommand};
 use crate::input::platform_clipboard::{PlatformClipboard, PlatformClipboardContent};
@@ -13,32 +13,49 @@ use xiaomu_runtime::session::EditIntent;
 
 impl DocumentView {
     pub(crate) fn copy(&mut self, _: &ClipboardCopy, _: &mut Window, cx: &mut Context<Self>) {
-        match self
+        let slice = self
             .session
             .borrow()
-            .clipboard_slice_for(ClipboardExportPurpose::Copy)
-        {
-            Ok(Some(slice)) => PlatformClipboard::new(&*cx).write_slice(&slice),
+            .clipboard_slice_for(ClipboardExportPurpose::Copy);
+        match slice {
+            Ok(Some(slice)) => {
+                if !PlatformClipboard::new(&*cx).write_slice(&slice) {
+                    self.emit_rejection(
+                        EditorRejectionStage::ClipboardCopy,
+                        EditorRejectionReason::ClipboardMetadata,
+                        cx,
+                    );
+                }
+            }
             Ok(None) => {}
-            Err(error) => eprintln!("xiaomu: clipboard projection failed: {error}"),
+            Err(error) => {
+                eprintln!("xiaomu: clipboard projection failed: {error}");
+                self.emit_session_rejection(EditorRejectionStage::ClipboardCopy, &error, cx);
+            }
         }
     }
 
     pub(crate) fn cut(&mut self, _: &ClipboardCut, window: &mut Window, cx: &mut Context<Self>) {
-        let slice = match self
+        let projected = self
             .session
             .borrow()
-            .clipboard_slice_for(ClipboardExportPurpose::Cut)
-        {
+            .clipboard_slice_for(ClipboardExportPurpose::Cut);
+        let slice = match projected {
             Ok(Some(slice)) => slice,
             Ok(None) => return,
             Err(error) => {
                 eprintln!("xiaomu: clipboard projection failed: {error}");
+                self.emit_session_rejection(EditorRejectionStage::ClipboardCut, &error, cx);
                 return;
             }
         };
         if !PlatformClipboard::new(&*cx).write_slice_for_cut(&slice) {
             eprintln!("xiaomu: cut requires lossless structured clipboard metadata");
+            self.emit_rejection(
+                EditorRejectionStage::ClipboardCut,
+                EditorRejectionReason::ClipboardMetadata,
+                cx,
+            );
             return;
         }
         // Clipboard projection is read-only; Delete remains the one history
@@ -55,8 +72,17 @@ impl DocumentView {
         if self.focused_child_composing(window, cx) {
             return;
         }
-        let Some(content) = PlatformClipboard::new(&*cx).read_content() else {
-            return;
+        let content = match PlatformClipboard::new(&*cx).read_content_checked() {
+            Ok(Some(content)) => content,
+            Ok(None) => return,
+            Err(_) => {
+                self.emit_rejection(
+                    EditorRejectionStage::ClipboardPaste,
+                    EditorRejectionReason::ClipboardMetadata,
+                    cx,
+                );
+                return;
+            }
         };
         let code_block = matches!(self.focused_node_kind(), Some(NodeKind::CodeBlock));
         match content {

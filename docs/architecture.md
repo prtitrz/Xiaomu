@@ -556,6 +556,20 @@ IME composition 的 preedit 保持 frontend-local，不推进 document revision�
 
 `DocumentView` 持有共享 session，并按文档序为 inline-bearing block 挂载 `ParagraphView`。焦点跟随 `DocumentSelection` focus node 路由。
 
+`DocumentView` 实现可选的 `EventEmitter<EditorRejection>`。事件只携带固定的
+`EditorRejectionStage` / `EditorRejectionReason`，不携带正文、剪贴板、attrs 或
+policy 任意字符串；失败 session 借用释放、回滚完成后才发出。宿主对具体 Entity
+订阅并自持 subscription，负责忽略旧 view、展示与清除反馈。事件不推进 document /
+selection listener、history、epoch 或 dirty，也不改 `EditorHooks` 必填接口。
+覆盖范围限 `apply_edit_intent`、host command routing、Copy/Cut 投影和无损传输、
+已识别 native Paste metadata 拒绝；成功、NoChange、composition guard 保持静默。
+直接 ParagraphView typing/IME、直接 session 调用、selection/navigation、history、
+persistence、image import 和返回 Result 的 `apply_edit_transaction` 不在此事件流内。
+这不是通用错误或保存状态流。事件同时记录发出时内容无关的
+`DocumentRevision`；宿主先匹配Entity，再与当前canonical revision比较，可过滤
+同一次外层GPUI update中被后续成功编辑超越的旧诊断。它仍不是完整session快照、
+保存时间或跨实例时钟，selection/persistence不能从该stamp推断。
+
 P4.1 新增 `DocumentView::inline_focus_point` 与 `DocumentView::inline_selection_points`，将现有 Runtime selection/focus 投影为 `InlinePoint`。当前纯文本路径仍得到 ordinal 0；后续 atom placement 出现后，上层 GPUI API 不需要再次更名或另建平行 position 类型。
 
 Left / Right 保持 Unicode scalar navigation，并在 soft-wrap 共享 logical offset 上先通过 `CursorAffinity` 跨越上一视觉行末尾 / 下一视觉行开头两个 caret state。Home / End 解析当前 visual row 首尾。Up / Down 读取最近一次 `BlockTextLayout` 的 wrapped geometry；`desired_x` 只保存在 `DocumentView` frontend transient state，连续纵向移动保持视觉列，越过 block 边界时在相邻 inline block 的首 / 末 visual row 上按同一 x 求最近合法 Core offset。Shift 版本只改变 selection focus，anchor 继续由 Runtime document selection 持有。

@@ -27,6 +27,8 @@ mod measured_table_tests;
 pub(crate) mod mouse;
 pub(crate) mod navigation;
 mod node_selection;
+mod rejection;
+pub use rejection::{EditorRejection, EditorRejectionReason, EditorRejectionStage};
 mod table_block;
 pub(crate) mod table_guard;
 #[cfg(test)]
@@ -286,8 +288,8 @@ impl DocumentView {
     /// shared session directly. An active native composition ignores the
     /// command. Otherwise the session's policy runs normally; accepted edits
     /// invalidate layout, sync child views, restore focus and request caret
-    /// scrolling using the built-in action behavior. Rejections are logged
-    /// and leave canonical session state unchanged.
+    /// scrolling using the built-in action behavior. Rejections are logged,
+    /// emit [`EditorRejection`], and leave canonical session state unchanged.
     pub fn apply_edit_intent(
         &mut self,
         intent: EditIntent,
@@ -373,7 +375,10 @@ impl DocumentView {
                 }
                 cx.notify();
             }
-            Err(error) => eprintln!("xiaomu: intent rejected: {error}"),
+            Err(error) => {
+                eprintln!("xiaomu: intent rejected: {error}");
+                self.emit_session_rejection(EditorRejectionStage::Intent, &error, cx);
+            }
         }
     }
 

@@ -1,5 +1,14 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-05：在精确 v10 基底 `d918ad72` 上重新构建 per-view
+`EditorRejection` API。新环境 Rust1.97.1 下全 workspace/all-targets 1248 tests
+及strict Clippy/fmt/source/dependency/vendor门禁通过，包含9个公开路由事件回归、
+composition静默与排队metadata拒绝stamp回归；不是丢失本地提交
+`f60ba48` 或旧原生证据的恢复。宿主可按 Entity 绑定固定、无正文的拒绝反馈，
+既有 `EditorHooks` 不变；内容无关的发出时revision供宿主过滤后来编辑已超越的
+排队拒绝，精确覆盖与排除边界见 [architecture](architecture.md#multi-block-documentview)。
+新原生宿主验收独立进行，Clipped Copy 后续仍未接入本检查点。
+
 2026-10-04：[显式全篇选择](adr/0010-explicit-root-selection.md) 修复host CtrlA与普通全文text range混淆的问题。每实例opt-in root gaps、closed clipboard v11、原生range输入/焦点与失败保护已具844全库测试/strictClippy证据；真实产品GUI待复验。旧默认router和普通open剪贴板拟合保持原边界。
 
 > Status: **EARLY / INDEPENDENT PROJECT**
