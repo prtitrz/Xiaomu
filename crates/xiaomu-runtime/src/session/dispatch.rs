@@ -20,6 +20,7 @@ impl DocumentSession {
     pub(super) fn apply_default_intent(
         &mut self,
         intent: &EditIntent,
+        timestamp: Option<HistoryTimestamp>,
     ) -> Result<SessionOutcome, SessionError> {
         if matches!(intent, EditIntent::InsertHorizontalRule) {
             return Err(SessionError::UnsupportedEdit);
@@ -68,7 +69,8 @@ impl DocumentSession {
         // Policy has already seen the logical command. Normalize only inside
         // default dispatch, so hosts never need to guess a clipboard's origin.
         if matches!(intent, EditIntent::InsertLineBreak) {
-            return self.apply_default_intent(&EditIntent::PasteText { text: "\n".into() });
+            return self
+                .apply_default_intent(&EditIntent::PasteText { text: "\n".into() }, timestamp);
         }
         // An explicitly addressed checkbox never edits or collapses the
         // current selection, including rectangular and structural selections.
@@ -384,7 +386,7 @@ impl DocumentSession {
                 {
                     plan = plan.with_stored_marks(None);
                 }
-                self.commit(plan)
+                self.commit_at(plan, timestamp)
             }
             PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
         }

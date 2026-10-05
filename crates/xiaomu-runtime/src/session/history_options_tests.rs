@@ -28,6 +28,8 @@ use super::{
 
 mod editing_state;
 mod faults;
+mod timed_failures;
+mod timed_staged_faults;
 mod traversal;
 
 fn transaction() -> Transaction {
@@ -296,13 +298,13 @@ impl From<&HistoryEntry> for EntryImage {
 struct HistoryImage {
     undo: Vec<EntryImage>,
     redo: Vec<EntryImage>,
-    group_open: bool,
+    grouping: super::history::GroupingState,
 }
 
 // Observe full transactions and selections, not just stack depths. Restore each
-// stack's exact order and the grouping bit; no production inspection API needed.
+// stack's exact order and full grouping state; no production inspection API needed.
 fn history_image(s: &mut DocumentSession) -> HistoryImage {
-    let group_open = s.history.typing_group_open();
+    let grouping = s.history.grouping_state();
     let mut undo = Vec::new();
     while let Some(entry) = s.history.take_undo() {
         undo.push(entry);
@@ -319,11 +321,11 @@ fn history_image(s: &mut DocumentSession) -> HistoryImage {
     for entry in redo.into_iter().rev() {
         s.history.restore_redo(entry);
     }
-    s.history.restore_typing_group(group_open);
+    s.history.restore_grouping_state(grouping);
     HistoryImage {
         undo: undo_image,
         redo: redo_image,
-        group_open,
+        grouping,
     }
 }
 
@@ -370,4 +372,14 @@ impl Snapshot {
         assert_eq!(s.listeners.len(), self.listener_count);
         assert_eq!(*events.borrow(), self.events);
     }
+}
+
+fn timed_insert(s: &mut DocumentSession, text: &str, millis: u64) {
+    assert_eq!(
+        s.apply_intent_at(
+            &EditIntent::InsertText { text: text.into() },
+            super::HistoryTimestamp::from_millis(millis),
+        ),
+        Ok(SessionOutcome::DocumentChanged),
+    );
 }

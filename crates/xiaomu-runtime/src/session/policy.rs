@@ -6,7 +6,8 @@ use crate::clipboard::{ClipboardExportPurpose, ClipboardExportSpec};
 use xiaomu_core::document::{MarkSet, XiaomuDocument};
 
 use super::{
-    DocumentSelection, DocumentSession, EditIntent, EditPlan, SessionError, SessionOutcome,
+    DocumentSelection, DocumentSession, EditIntent, EditPlan, HistoryTimestamp, SessionError,
+    SessionOutcome,
 };
 
 /// A host-defined reason for refusing an intent or document snapshot.
@@ -147,7 +148,7 @@ pub trait SessionPolicy {
         super::DefaultTextInputMarks::PreservePending
     }
 
-    /// Chooses immutable history traversal behavior at session construction.
+    /// Chooses immutable history behavior at session construction.
     ///
     /// Defaults retain recorded selections and historical empty-stack behavior.
     /// The value is captured once, never queried during Undo/Redo or publication.
@@ -261,6 +262,19 @@ impl DocumentSession {
         self.apply_intent_with_selection(self.selection, intent)
     }
 
+    /// Applies one intent with explicit time from this session's clock domain.
+    ///
+    /// Only successful eligible typing uses the timestamp, and only when the
+    /// session opts into a typing delay. Untimed defaults ignore it. Missing
+    /// time through the older methods isolates typing in an opted-in session.
+    pub fn apply_intent_at(
+        &mut self,
+        intent: &EditIntent,
+        timestamp: HistoryTimestamp,
+    ) -> Result<SessionOutcome, SessionError> {
+        self.apply_intent_with_selection_inner(self.selection, intent, Some(timestamp))
+    }
+
     /// Applies an intent at a validated target selection as one atomic action.
     ///
     /// Platform replacement ranges can use this instead of first publishing
@@ -273,6 +287,29 @@ impl DocumentSession {
         &mut self,
         selection: DocumentSelection,
         intent: &EditIntent,
+    ) -> Result<SessionOutcome, SessionError> {
+        self.apply_intent_with_selection_inner(selection, intent, None)
+    }
+
+    /// Applies an atomic target-selection intent with explicit session time.
+    ///
+    /// A changed target still closes the current group, even when pure
+    /// selection movement is configured to preserve grouping. Time does not
+    /// weaken native typing eligibility or any command's isolation policy.
+    pub fn apply_intent_with_selection_at(
+        &mut self,
+        selection: DocumentSelection,
+        intent: &EditIntent,
+        timestamp: HistoryTimestamp,
+    ) -> Result<SessionOutcome, SessionError> {
+        self.apply_intent_with_selection_inner(selection, intent, Some(timestamp))
+    }
+
+    fn apply_intent_with_selection_inner(
+        &mut self,
+        selection: DocumentSelection,
+        intent: &EditIntent,
+        timestamp: Option<HistoryTimestamp>,
     ) -> Result<SessionOutcome, SessionError> {
         selection.validate(&self.document)?;
         // Preflight deliberately precedes even transient state changes.
@@ -305,7 +342,7 @@ impl DocumentSession {
                 session.history.break_group();
             }
             let outcome = match disposition {
-                IntentDisposition::Continue => session.apply_default_intent(intent),
+                IntentDisposition::Continue => session.apply_default_intent(intent, timestamp),
                 IntentDisposition::NoChange => Ok(SessionOutcome::NoChange),
                 IntentDisposition::StoredMarks(marks) => {
                     if !session.selection.is_collapsed()
@@ -353,7 +390,7 @@ impl DocumentSession {
     ) -> Result<SessionOutcome, SessionError> {
         let selection = self.selection;
         let marks = self.stored_marks.clone();
-        let group_open = self.history.typing_group_open();
+        let grouping = self.history.grouping_state();
         let history_selection_before = self.history_selection_before;
         let input_rule_undo = self.input_rule_undo.clone();
         let result = operation(self);
@@ -361,7 +398,7 @@ impl DocumentSession {
         if result.is_err() {
             self.selection = selection;
             self.stored_marks = marks;
-            self.history.restore_typing_group(group_open);
+            self.history.restore_grouping_state(grouping);
             self.input_rule_undo = input_rule_undo;
         }
         result

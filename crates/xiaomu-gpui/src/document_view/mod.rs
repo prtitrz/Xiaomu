@@ -18,6 +18,7 @@ mod block_tree;
 pub(crate) mod cache_key;
 pub(crate) mod cell_selection;
 mod clipboard;
+mod history_clock;
 mod host_extensions;
 mod host_transaction;
 pub(crate) mod markers;
@@ -79,6 +80,7 @@ use visual_navigation::NavStep;
 /// A multi-block editor view over one shared session.
 pub struct DocumentView {
     session: SharedSession,
+    history_clock: Option<crate::history_clock::SharedHistoryClock>,
     /// Render generation: bumped on every edit so block layout caches
     /// invalidate.
     epoch: Rc<Cell<u64>>,
@@ -119,11 +121,13 @@ pub struct DocumentView {
 }
 
 impl DocumentView {
-    /// Creates the document view over one shared session.
+    /// Creates an unstamped view over one shared session. Timed sessions
+    /// isolate its edits; use `new_with_history_clock` to share a clock.
     #[must_use]
     pub fn new(session: SharedSession) -> Self {
         Self {
             session,
+            history_clock: None,
             epoch: Rc::new(Cell::new(0)),
             registry: Rc::new(RefCell::new(Vec::new())),
             cell_registry: Rc::new(RefCell::new(Vec::new())),
@@ -305,7 +309,7 @@ impl DocumentView {
             return;
         }
         self.desired_x = None;
-        let outcome = self.session.borrow_mut().apply_intent(&intent);
+        let outcome = self.apply_runtime_intent(&intent);
         match outcome {
             Ok(outcome) => {
                 if outcome != xiaomu_runtime::session::SessionOutcome::NoChange {
@@ -551,11 +555,12 @@ impl DocumentView {
                     pool.remove(position)
                 } else {
                     let view = cx.new(|cx| {
-                        ParagraphView::new(
+                        ParagraphView::new_with_optional_history_clock(
                             session.clone(),
                             epoch.clone(),
                             registry.clone(),
                             node,
+                            self.history_clock.clone(),
                             cx,
                         )
                     });

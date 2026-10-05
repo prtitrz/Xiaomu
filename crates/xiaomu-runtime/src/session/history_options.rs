@@ -1,4 +1,4 @@
-//! Immutable per-session choices for history traversal, not typing grouping.
+//! Immutable per-session choices for history traversal and explicit typing grouping.
 
 /// Which selection is restored when traversing a recorded history entry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -27,14 +27,33 @@ pub enum EmptyHistoryBehavior {
     PreserveEditingState,
 }
 
-/// Fixed history traversal options chosen at session construction.
+/// Grouping behavior for ordinary successful selection installation.
 ///
-/// These do not add time-based grouping, transaction mapping for unrecorded
-/// canonical edits, or a history-policy callback during live traversal.
+/// Atomic target replacement and existing CellRange convergence paths retain
+/// their separate barriers, even when a later navigation action is a no-op.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SelectionOnlyGrouping {
+    /// End the current typing group, retaining historical behavior.
+    #[default]
+    Close,
+    /// Keep the current group and its last edit time. The next edit must still
+    /// satisfy exact selection continuity and native typing eligibility.
+    /// Pending marks and input-rule tokens retain their existing semantics.
+    Preserve,
+}
+
+/// Fixed history options chosen once at session construction.
+///
+/// Timed grouping and selection-only preservation are independent opt-ins.
+/// No ambient clock, transaction mapping for unrecorded canonical edits, or
+/// live history-policy callback is introduced.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HistoryOptions {
     selection: HistorySelectionMode,
     empty: EmptyHistoryBehavior,
+    typing_group_delay_ms: Option<u64>,
+    selection_only_grouping: SelectionOnlyGrouping,
 }
 
 impl HistoryOptions {
@@ -44,6 +63,8 @@ impl HistoryOptions {
         Self {
             selection: HistorySelectionMode::Recorded,
             empty: EmptyHistoryBehavior::ClearPendingMarks,
+            typing_group_delay_ms: None,
+            selection_only_grouping: SelectionOnlyGrouping::Close,
         }
     }
 
@@ -59,6 +80,38 @@ impl HistoryOptions {
     pub const fn with_empty_behavior(mut self, behavior: EmptyHistoryBehavior) -> Self {
         self.empty = behavior;
         self
+    }
+
+    /// Enables a sliding typing timeout in explicit session-clock milliseconds.
+    ///
+    /// Only eligible typing edits participate. The inclusive delay is measured
+    /// from the previous successful typing edit, never from selection movement.
+    /// Missing or regressing timestamps commit normally as separate undo units
+    /// and close the anchor; they do not lower the accepted clock high-water mark.
+    #[must_use]
+    pub const fn with_typing_group_delay_ms(mut self, delay_ms: u64) -> Self {
+        self.typing_group_delay_ms = Some(delay_ms);
+        self
+    }
+
+    /// Selects whether ordinary direct selection installation closes the group.
+    /// Atomic target replacement and CellRange convergence keep their boundaries.
+    #[must_use]
+    pub const fn with_selection_only_grouping(mut self, grouping: SelectionOnlyGrouping) -> Self {
+        self.selection_only_grouping = grouping;
+        self
+    }
+
+    /// Returns the typing delay, or `None` for unchanged timeless grouping.
+    #[must_use]
+    pub const fn typing_group_delay_ms(self) -> Option<u64> {
+        self.typing_group_delay_ms
+    }
+
+    /// Returns the independent selection-only grouping behavior.
+    #[must_use]
+    pub const fn selection_only_grouping(self) -> SelectionOnlyGrouping {
+        self.selection_only_grouping
     }
 
     /// Returns the fixed selection restoration mode.

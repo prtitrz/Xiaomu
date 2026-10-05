@@ -14,21 +14,35 @@ pub(super) struct PreparedCommit {
     document: XiaomuDocument,
     selection: DocumentSelection,
     history: HistoryEntry,
+    timestamp: Option<HistoryTimestamp>,
     stored_marks_after: Option<Option<MarkSet>>,
     input_rule_undo: Option<std::rc::Rc<input_rule_undo::InputRuleUndoToken>>,
 }
 
 impl DocumentSession {
     pub(super) fn commit(&mut self, plan: EditPlan) -> Result<SessionOutcome, SessionError> {
-        let prepared = self.prepare_commit(plan)?;
+        self.commit_at(plan, None)
+    }
+
+    pub(super) fn commit_at(
+        &mut self,
+        plan: EditPlan,
+        timestamp: Option<HistoryTimestamp>,
+    ) -> Result<SessionOutcome, SessionError> {
+        let prepared = self.prepare_commit_at(plan, timestamp)?;
         Ok(self.publish_prepared_commit(prepared))
     }
 
     /// All fallible Core, selection, policy and inverse preparation is shared
     /// by ordinary commits and scoped external-publication commands.
-    pub(super) fn prepare_commit(
+    pub(super) fn prepare_commit(&self, plan: EditPlan) -> Result<PreparedCommit, SessionError> {
+        self.prepare_commit_at(plan, None)
+    }
+
+    fn prepare_commit_at(
         &self,
         mut plan: EditPlan,
+        timestamp: Option<HistoryTimestamp>,
     ) -> Result<PreparedCommit, SessionError> {
         let before_selection = self.selection;
         let group = history::history_group_for_plan(&plan);
@@ -75,6 +89,7 @@ impl DocumentSession {
                 after_selection,
                 group,
             },
+            timestamp,
             stored_marks_after,
             input_rule_undo,
         })
@@ -84,7 +99,11 @@ impl DocumentSession {
     /// Allocation failure, listener panic and process termination are not an
     /// atomic transaction with another process's clipboard.
     pub(super) fn publish_prepared_commit(&mut self, prepared: PreparedCommit) -> SessionOutcome {
-        self.history.record(prepared.history);
+        self.history.record(
+            prepared.history,
+            prepared.timestamp,
+            self.history_options.typing_group_delay_ms(),
+        );
         self.document = prepared.document;
         self.selection = prepared.selection;
         self.input_rule_undo = prepared.input_rule_undo;
@@ -190,13 +209,17 @@ impl DocumentSession {
         };
 
         self.validate_candidate(&current)?;
-        self.history.record(HistoryEntry {
-            redo,
-            undo,
-            before_selection: self.history_selection_before.unwrap_or(before_selection),
-            after_selection,
-            group: HistoryGroup::Isolated,
-        });
+        self.history.record(
+            HistoryEntry {
+                redo,
+                undo,
+                before_selection: self.history_selection_before.unwrap_or(before_selection),
+                after_selection,
+                group: HistoryGroup::Isolated,
+            },
+            None,
+            self.history_options.typing_group_delay_ms(),
+        );
         self.document = current;
         self.selection = after_selection;
         self.input_rule_undo = None;

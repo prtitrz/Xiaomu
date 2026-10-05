@@ -8,10 +8,10 @@
 
 use super::*;
 
-struct StablePolicy;
+struct StablePolicy(HistoryOptions);
 impl SessionPolicy for StablePolicy {
     fn history_options(&self) -> HistoryOptions {
-        capture_options()
+        self.0
     }
     fn validate_document(&self, document: &XiaomuDocument) -> Result<(), PolicyError> {
         if document
@@ -25,27 +25,30 @@ impl SessionPolicy for StablePolicy {
     }
 }
 
-fn seeded(f: &Fixture) -> (DocumentSession, Events) {
+fn seeded(f: &Fixture, options: HistoryOptions) -> (DocumentSession, Events) {
     let mut s = DocumentSession::new_with_policy(
         f.document.clone(),
         caret(f.first, 0),
-        Box::new(StablePolicy),
+        Box::new(StablePolicy(options)),
     )
     .unwrap();
     let events = listen(&mut s);
-    insert(&mut s, "a");
+    timed_insert(&mut s, "a", 1_000);
     select(&mut s, caret(f.second, 0));
-    insert(&mut s, "b");
+    timed_insert(&mut s, "b", 1_100);
     select(&mut s, caret(f.first, 1));
-    insert(&mut s, "c");
+    timed_insert(&mut s, "c", 1_200);
+    let grouping = s.history.grouping_state();
     s.undo().unwrap();
     assert_eq!(s.history_depths(), (2, 1));
     select(&mut s, caret(f.first, 3));
 
-    // This combined private state is intentionally adversarial. Real selection
-    // setters close groups and discard tokens; do not call it publicly reachable.
+    // This combined private state is intentionally adversarial. Successful
+    // traversal closes groups and real selection setters discard tokens. We
+    // restore the previous full anchor only to exercise rollback sentinels;
+    // do not call this combined state publicly reachable.
     s.stored_marks = Some(MarkSet::new([Mark::Bold]).unwrap());
-    s.history.restore_typing_group(true);
+    s.history.restore_grouping_state(grouping);
     s.history_selection_before = Some(caret(f.second, 1));
     let selection = s.selection();
     let spec = InputRuleUndoSpec::new(transaction(), selection).unwrap();
@@ -78,7 +81,7 @@ fn target_mut(entry: &mut HistoryEntry, direction: Direction) -> &mut DocumentSe
 }
 
 fn corrupt(s: &mut DocumentSession, f: &Fixture, direction: Direction, fault: Fault) -> EntryImage {
-    let group = s.history.typing_group_open();
+    let grouping = s.history.grouping_state();
     let mut entry = direction.take(s);
     let original = EntryImage::from(&entry);
     match fault {
@@ -111,12 +114,12 @@ fn corrupt(s: &mut DocumentSession, f: &Fixture, direction: Direction, fault: Fa
         }
     }
     direction.restore(s, entry);
-    s.history.restore_typing_group(group);
+    s.history.restore_grouping_state(grouping);
     original
 }
 
 fn repair(s: &mut DocumentSession, direction: Direction, fault: Fault, original: EntryImage) {
-    let group = s.history.typing_group_open();
+    let grouping = s.history.grouping_state();
     let mut entry = direction.take(s);
     // Restore only the intentionally corrupted field, not the entire entry. A
     // premature write to the opposite captured selection must not be hidden.
@@ -135,7 +138,7 @@ fn repair(s: &mut DocumentSession, direction: Direction, fault: Fault, original:
         }
     }
     direction.restore(s, entry);
-    s.history.restore_typing_group(group);
+    s.history.restore_grouping_state(grouping);
 }
 
 fn assert_twins(
@@ -185,11 +188,11 @@ fn allocation_probe(s: &mut DocumentSession) -> NodeId {
         .unwrap()[index]
 }
 
-fn rejected_traversal_preserves_every_field_and_retry(fault: Fault) {
+fn rejected_traversal_preserves_every_field_and_retry(fault: Fault, options: HistoryOptions) {
     for direction in [Direction::Undo, Direction::Redo] {
         let f = fixture("abcdef");
-        let (mut s, events) = seeded(&f);
-        let (mut control, control_events) = seeded(&f);
+        let (mut s, events) = seeded(&f, options);
+        let (mut control, control_events) = seeded(&f, options);
         let original = corrupt(&mut s, &f, direction, fault);
         let before = Snapshot::capture(&mut s, &events);
         let error = direction.run(&mut s).unwrap_err();
@@ -227,7 +230,9 @@ fn rejected_traversal_preserves_every_field_and_retry(fault: Fault) {
             direction.opposite().run(&mut control),
             Ok(SessionOutcome::DocumentChanged)
         );
-        assert_eq!(s.selection(), retry_source);
+        if options.selection_mode() == HistorySelectionMode::CaptureOnTraversal {
+            assert_eq!(s.selection(), retry_source);
+        }
         assert_twins(&mut s, &mut control, &events, &control_events);
         assert_eq!(allocation_probe(&mut s), allocation_probe(&mut control));
         assert_twins(&mut s, &mut control, &events, &control_events);
@@ -236,17 +241,17 @@ fn rejected_traversal_preserves_every_field_and_retry(fault: Fault) {
 
 #[test]
 fn private_core_fault_preserves_undo_and_redo_entries_transients_listeners_and_retry() {
-    rejected_traversal_preserves_every_field_and_retry(Fault::Core);
+    rejected_traversal_preserves_every_field_and_retry(Fault::Core, capture_options());
 }
 
 #[test]
 fn private_invalid_target_selection_preserves_both_stacks_and_does_not_capture_on_failure() {
-    rejected_traversal_preserves_every_field_and_retry(Fault::Selection);
+    rejected_traversal_preserves_every_field_and_retry(Fault::Selection, capture_options());
 }
 
 #[test]
 fn private_candidate_fault_uses_stable_policy_and_preserves_both_stacks_and_retry() {
-    rejected_traversal_preserves_every_field_and_retry(Fault::Candidate);
+    rejected_traversal_preserves_every_field_and_retry(Fault::Candidate, capture_options());
 }
 
 #[test]
@@ -288,4 +293,26 @@ fn unrecorded_canonical_mapping_is_not_provided_by_selection_capture() {
     let before = Snapshot::capture(&mut bypassed, &events);
     assert_eq!(bypassed.redo(), Err(SessionError::SelectionInvalid));
     before.assert_unchanged(&mut bypassed, &events);
+}
+
+#[test]
+fn private_timed_traversal_faults_restore_anchor_and_high_water_for_all_options() {
+    for selection_mode in [
+        HistorySelectionMode::Recorded,
+        HistorySelectionMode::CaptureOnTraversal,
+    ] {
+        for empty in [
+            EmptyHistoryBehavior::ClearPendingMarks,
+            EmptyHistoryBehavior::PreserveEditingState,
+        ] {
+            let options = HistoryOptions::new()
+                .with_typing_group_delay_ms(500)
+                .with_selection_only_grouping(super::super::SelectionOnlyGrouping::Preserve)
+                .with_selection_mode(selection_mode)
+                .with_empty_behavior(empty);
+            for fault in [Fault::Core, Fault::Selection, Fault::Candidate] {
+                rejected_traversal_preserves_every_field_and_retry(fault, options);
+            }
+        }
+    }
 }

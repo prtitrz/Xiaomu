@@ -1,5 +1,11 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-05后继：显式`HistoryTimestamp`与独立typing-delay/selection-only选项，
+成功publication才记时，全grouping状态失败回滚；GPUI每EditorInstance共享单调时钟
+给所有输入surface。全库1390/106 binaries、Runtime621、GPUI400与strict门禁通过。
+默认不变，缺失/倒退时间仅隔离不丢输入，IME/host等旧边界保持；产品原oracle回放/
+opt-in/真实GUI另验，不称完整PM history，见[时间契约](timed-history-options.md)。
+
 2026-10-05后继：独立构造期`DefaultTextInputMarks`仅让显式宿主在默认非空inline
 InsertText/CommitComposition成功计划后恢复marks继承，默认/空输入/host plans/删除/
 split/raw/staged不变；13个public-API回归、全库1320/104 binaries与严格门禁通过。

@@ -24,6 +24,7 @@ mod history;
 mod history_options;
 #[cfg(test)]
 mod history_options_tests;
+mod history_timestamp;
 mod image;
 mod input_rule_undo;
 mod intent;
@@ -54,7 +55,10 @@ mod task_checked;
 mod text_input_marks;
 
 pub use history::HistoryStack;
-pub use history_options::{EmptyHistoryBehavior, HistoryOptions, HistorySelectionMode};
+pub use history_options::{
+    EmptyHistoryBehavior, HistoryOptions, HistorySelectionMode, SelectionOnlyGrouping,
+};
+pub use history_timestamp::HistoryTimestamp;
 pub use input_rule_undo::InputRuleUndoSpec;
 pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
 pub use listener::DocumentChangeListener;
@@ -168,6 +172,14 @@ impl DocumentSession {
     #[must_use]
     pub fn history_depths(&self) -> (usize, usize) {
         (self.history.undo_depth(), self.history.redo_depth())
+    }
+
+    /// Ends typing grouping before the next edit, without changing document,
+    /// selection, pending marks, input-rule token, either stack or listeners.
+    /// Repeated calls are idempotent. This is a before-only boundary; the next
+    /// eligible typing edit may open a fresh group.
+    pub fn close_history_group(&mut self) {
+        self.history.break_group();
     }
 
     /// Registers a change listener.

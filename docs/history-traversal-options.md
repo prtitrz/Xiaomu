@@ -1,5 +1,9 @@
 # Immutable history traversal options
 
+The following explicit-timing stage is documented separately in
+[timed history options](timed-history-options.md). Its default-compatible options
+and frontend clock do not replace the traversal guarantees below.
+
 2026-10-05. `SessionPolicy::history_options()` is evaluated once at construction.
 Its value is copied into the session and cannot be replaced while it is live.
 Defaults preserve the existing recorded-selection/empty-stack behavior.
@@ -41,8 +45,8 @@ Private Core, selection and candidate-policy fault sentinels are explicitly
 separated from publicly reachable workflows; they verify complete entries,
 transients, notifications and repaired retries against unaffected controls.
 
-This does not implement ProseMirror history's map-only entries for unrecorded
-canonical edits, bookmark fallback after such edits, wall-clock grouping delay
-or selection-move grouping rules. The host's actual factory oracle and native
+This traversal option alone does not implement ProseMirror map-only entries or
+bookmark fallback. The separate timed stage adds bounded native typing delay and
+ordinary selection preservation, not all PM grouping. The host's actual factory oracle and native
 consumer/GUI conformance remain separate from these generic library guarantees.
 Do not label selection capture as complete ProseMirror history compatibility.

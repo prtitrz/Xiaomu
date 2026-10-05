@@ -422,14 +422,14 @@ impl From<&HistoryEntry> for EntryImage {
 struct HistoryImage {
     undo: Vec<EntryImage>,
     redo: Vec<EntryImage>,
-    group_open: bool,
+    grouping: super::history::GroupingState,
 }
 
 // Existing crate-private stack operations let tests compare complete history
 // transactions without adding production inspection APIs. Restore identical
-// entries in identical order and restore the grouping bit before returning.
+// entries in identical order and restore full grouping state before returning.
 fn history_image(session: &mut DocumentSession) -> HistoryImage {
-    let group_open = session.history.typing_group_open();
+    let grouping = session.history.grouping_state();
     let mut undo = Vec::new();
     while let Some(entry) = session.history.take_undo() {
         undo.push(entry);
@@ -446,11 +446,11 @@ fn history_image(session: &mut DocumentSession) -> HistoryImage {
     for entry in redo.into_iter().rev() {
         session.history.park_undone(entry);
     }
-    session.history.restore_typing_group(group_open);
+    session.history.restore_grouping_state(grouping);
     HistoryImage {
         undo: undo_image,
         redo: redo_image,
-        group_open,
+        grouping,
     }
 }
 
@@ -589,3 +589,4 @@ fn assert_future_allocation_matches(session: &mut DocumentSession, control: &mut
 
 mod atomicity;
 mod publish;
+mod timed;
