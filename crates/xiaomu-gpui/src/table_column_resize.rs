@@ -43,7 +43,7 @@ pub struct TableColumnResizeIntent {
     pub column: usize,
     /// Measured width at pointer-down, before any transient preview.
     pub initial_width: u32,
-    /// Requested exact width after applying the configured minimum.
+    /// Requested integer width after the minimum and native pointer projection.
     pub width: u32,
     /// Canonical revision captured at pointer-down; must still be current.
     pub revision: DocumentRevision,
@@ -80,10 +80,14 @@ pub struct TableColumnResize {
 impl TableColumnResize {
     /// Creates a capability; install it with `set_table_column_resize`.
     ///
-    /// Invalid configuration is inert. Only integral measured starting widths
-    /// and integral resulting widths are supported. Fractional/nonfinite or
-    /// oversized results cancel, with no rounding or canonical-model extension.
-    /// Pointer coordinates may be fractional if their delta yields an integer.
+    /// Invalid configuration is inert; fractional measured starting widths are
+    /// unsupported. Finite `f32` logical pointer coordinates are widened to `f64`
+    /// before computing the delta from the original down. Add that delta to the
+    /// integral initial width, clamp to the configured minimum, then round the
+    /// positive target to nearest integer (exact halves upward). Nonfinite
+    /// coordinates and unrounded targets above 1,000,000 cancel. This explicit
+    /// native pointer policy does not round canonical attributes or extend the
+    /// document model; a browser may preserve fractional resulting widths.
     /// Release without movement is delivered too; the host decides whether its
     /// canonical width hint needs changing. Mouse-leave alone does not cancel.
     pub fn new(

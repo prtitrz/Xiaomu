@@ -614,6 +614,9 @@ handle/minimum/last-column 配置与 host guard/commit callbacks。命中来自�
 cell edges，嵌套表只选最近表，已有 cell-range handle 保持优先；preview 使用真实子树重排，
 不改 canonical document、revision、selection 或 history。宿主拥有 logical-column attrs
 映射、readonly/owner/session lifecycle 与 policy、一次事务和 persistence，Core/Runtime 不扩张。
+起始 measured 宽度仍须整数；native fractional pointer delta 从原 down 计算，先 clamp minimum，
+再投影到最近整数（正目标的精确 .5 向上），不转换 canonical fractional attrs，
+与原版 PM 保留小数的语义边界明确分开。
 已测量的 release 同步交付；严格同子树/同 tracks 的 width-only commit 可继承真实测量 admission，
 避免下一原生输入在 repaint 前丢失。未测量的 release-only 坐标需要一帧，期间变更会取消，
 不能称完整 PM mouseup 等价；详见[契约与边界](measured-column-resize.md)。
