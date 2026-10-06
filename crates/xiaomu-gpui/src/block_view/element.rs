@@ -10,8 +10,8 @@ use std::rc::Rc;
 
 use gpui::{
     App, AvailableSpace, Bounds, Element, ElementId, ElementInputHandler, Entity, GlobalElementId,
-    IntoElement, LayoutId, PaintQuad, Pixels, SharedString, Size, Style, TextAlign, Window, fill,
-    point, px, relative, rgba, size,
+    IntoElement, LayoutId, PaintQuad, Pixels, SharedString, Size, Style, Window, fill, point, px,
+    relative, rgba, size,
 };
 use xiaomu_core::selection::CursorAffinity;
 
@@ -82,6 +82,7 @@ impl Element for ParagraphElement {
         let cached_key = (!composing).then_some(view.cache_key).flatten();
         let node = view.node();
         let epoch = view.epoch.get();
+        let alignment = view.block_alignment;
 
         let fonts = FontCatalog::from_system(window.text_system());
         let BlockTextStyle {
@@ -91,6 +92,11 @@ impl Element for ParagraphElement {
             line_height,
         } = block_text_style(window, view.active_code_presentation(), &fonts);
         let runs = text_runs(&segments, font.clone(), color, &fonts);
+        let aligned_decorations = alignment
+            .is_some_and(|alignment| alignment != crate::block_alignment::BlockAlignment::Left)
+            && runs
+                .iter()
+                .any(|run| run.underline.is_some() || run.strikethrough.is_some());
         let fingerprint =
             style_fingerprint(&display_text, &font, color, font_size, line_height, &runs);
         let text = SharedString::new(display_text.as_ref());
@@ -109,7 +115,9 @@ impl Element for ParagraphElement {
                 });
 
                 let cache_key = wrap_width.map(|width| {
-                    LayoutCacheKey::new(node, epoch, f32::from(width)).with_style(fingerprint)
+                    LayoutCacheKey::new(node, epoch, f32::from(width))
+                        .with_style(fingerprint)
+                        .with_alignment(alignment, width)
                 });
                 // None is not a cache identity: intrinsic width probes have
                 // no key, and a painted preedit deliberately has no key too.
@@ -136,6 +144,34 @@ impl Element for ParagraphElement {
                         BlockTextLayout::new(Vec::new(), line_height)
                     }
                 };
+                let width = wrap_width.unwrap_or(layout.size().width);
+                let mut layout = layout.with_alignment(alignment, width);
+                if aligned_decorations && !layout.paint_lines().is_empty() {
+                    let mut plain = runs.clone();
+                    for run in &mut plain {
+                        run.underline = None;
+                        run.strikethrough = None;
+                    }
+                    match window.text_system().shape_text(
+                        text.clone(),
+                        font_size,
+                        &plain,
+                        wrap_width,
+                        None,
+                    ) {
+                        Ok(carrier) => {
+                            layout = layout.with_decoration_carrier(
+                                carrier.into_iter().collect(),
+                                runs.clone(),
+                            )
+                        }
+                        Err(error) => {
+                            eprintln!("xiaomu: aligned decoration layout failed: {error}");
+                            layout = BlockTextLayout::new(Vec::new(), line_height)
+                                .with_alignment(alignment, width);
+                        }
+                    }
+                }
                 let size = measured_size(&layout, wrap_width);
                 measured_state.0.borrow_mut().replace(layout);
                 size
@@ -158,12 +194,14 @@ impl Element for ParagraphElement {
         let cache_key = (!composing).then(|| {
             LayoutCacheKey::new(view.node(), view.epoch.get(), f32::from(bounds.size.width))
                 .with_style(request_layout.1)
+                .with_alignment(view.block_alignment, bounds.size.width)
         });
         let layout = request_layout
             .0
             .borrow()
             .clone()
-            .unwrap_or_else(|| BlockTextLayout::new(Vec::new(), request_layout.2));
+            .unwrap_or_else(|| BlockTextLayout::new(Vec::new(), request_layout.2))
+            .with_alignment(view.block_alignment, bounds.size.width);
 
         let caret = view
             .composing_caret_byte()
@@ -279,12 +317,15 @@ impl Element for ParagraphElement {
             .take()
             .unwrap_or_else(|| BlockTextLayout::new(Vec::new(), request_layout.2));
         let mut origin = bounds.origin;
-        for line in layout.lines() {
+        for line in layout.paint_lines() {
             if let Err(error) = line.paint(
                 origin,
                 layout.line_height(),
-                TextAlign::default(),
-                Some(bounds),
+                layout.alignment().text_align(),
+                Some(Bounds::new(
+                    bounds.origin,
+                    size(layout.alignment_width(), bounds.size.height),
+                )),
                 window,
                 cx,
             ) {
@@ -292,6 +333,7 @@ impl Element for ParagraphElement {
             }
             origin.y += line.size(layout.line_height()).height;
         }
+        layout.paint_aligned_decorations(bounds.origin, window);
 
         if focus_handle.is_focused(window)
             && let Some(cursor) = prepaint.cursor.take()

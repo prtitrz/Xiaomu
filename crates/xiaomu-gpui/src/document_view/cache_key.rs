@@ -18,6 +18,8 @@ pub(crate) struct LayoutCacheKey {
     epoch: u64,
     width_whole_px: i32,
     style: u64,
+    alignment: Option<crate::block_alignment::BlockAlignment>,
+    aligned_width: Option<u32>,
 }
 
 impl LayoutCacheKey {
@@ -34,11 +36,25 @@ impl LayoutCacheKey {
             epoch,
             width_whole_px: width_px.round() as i32,
             style: 0,
+            alignment: Default::default(),
+            aligned_width: None,
         }
     }
     /// Includes effective shaping and paint inputs, not just document edits.
     pub(crate) const fn with_style(mut self, style: u64) -> Self {
         self.style = style;
+        self
+    }
+
+    /// Opt-in row geometry depends on the exact, potentially fractional width.
+    /// Keep absent-provider legacy left-layout cache quantization unchanged.
+    pub(crate) fn with_alignment(
+        mut self,
+        alignment: Option<crate::block_alignment::BlockAlignment>,
+        width: gpui::Pixels,
+    ) -> Self {
+        self.alignment = alignment;
+        self.aligned_width = alignment.map(|_| f32::from(width).to_bits());
         self
     }
 }
@@ -126,5 +142,24 @@ mod tests {
         assert_ne!(base, LayoutCacheKey::new(second, 0, 300.0), "node");
         assert_ne!(base, LayoutCacheKey::new(first, 0, 301.0), "width");
         assert_ne!(base.with_style(1), base.with_style(2), "render style");
+    }
+
+    #[test]
+    fn optional_alignment_and_fractional_container_width_are_cache_inputs() {
+        use crate::block_alignment::BlockAlignment;
+        let (node, _) = two_paragraph_ids();
+        let legacy = LayoutCacheKey::new(node, 0, 320.1);
+        assert_eq!(legacy, LayoutCacheKey::new(node, 0, 320.4));
+        let mut previous = legacy;
+        for alignment in [
+            BlockAlignment::Left,
+            BlockAlignment::Center,
+            BlockAlignment::Right,
+        ] {
+            let key = legacy.with_alignment(Some(alignment), gpui::px(320.1));
+            assert_ne!(key, previous);
+            assert_ne!(key, legacy.with_alignment(Some(alignment), gpui::px(320.4)));
+            previous = key;
+        }
     }
 }

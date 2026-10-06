@@ -804,6 +804,17 @@ Harness writer 现统一写 fixture v5：`table` / `row` / `cell` 与 `end` 容�
 - `cargo-deny` 检查 dependency source / license policy；
 - `engineering-rules.md` 约束实现与文档同步。
 
+## Optional block alignment geometry
+
+`EditorInstance::with_block_alignment_provider` / `DocumentView::set_block_alignment_provider`
+install a pure, host-resolved `BlockAlignmentProvider` for current inline-bearing nodes.
+None keeps the legacy path; explicit Left/Center/Right share cached visual rows for paint,
+caret, selection, pointer, vertical navigation and native bounds. The provider does not
+interpret product attributes or edit canonical state. Aligned wrapped decoration repair
+retains the original stock GPUI glyph/cluster/wrap Arc, uses public paint primitives and
+does not change dependencies or composition ownership. See [the full contract and native
+boundaries](block-alignment.md).
+
 ## Linux stock-GPUI unmark semantics
 
 Linux `unmark_text` now preserves a nonempty, non-rejected overlay through the existing canonical composition commit path before stock GPUI dispatches its pointer event. Explicit empty cancellation and already-committed input remain no-ops on subsequent unmark. No input-owner protocol, pointer wait barrier or dependency patch is introduced; focus-out and non-Linux callback handling remain unchanged. See [scope, regressions and native evidence boundaries](linux-unmark-preservation.md).

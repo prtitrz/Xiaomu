@@ -6,8 +6,16 @@
 
 use std::ops::Range;
 
+use crate::block_alignment::BlockAlignment;
 use gpui::{Bounds, Pixels, Point, Size, WrappedLine, point, px, size};
 use xiaomu_core::selection::CursorAffinity;
+
+#[path = "aligned_decorations.rs"]
+mod aligned_decorations;
+
+#[cfg(test)]
+#[path = "alignment_layout_tests.rs"]
+mod alignment_tests;
 
 /// Measured wrapped text for one block.
 ///
@@ -21,6 +29,13 @@ pub(crate) struct BlockTextLayout {
     lines: Vec<WrappedLine>,
     line_height: Pixels,
     size: Size<Pixels>,
+    rows: Vec<VisualRow>,
+    alignment: BlockAlignment,
+    alignment_enabled: bool,
+    alignment_width: Pixels,
+    paint_lines: Option<Vec<WrappedLine>>,
+    decoration_runs: Vec<gpui::TextRun>,
+    decorations: Vec<aligned_decorations::Stroke>,
 }
 
 impl BlockTextLayout {
@@ -32,11 +47,50 @@ impl BlockTextLayout {
             measured.height += line_size.height;
         }
         measured.height = measured.height.max(line_height);
-        Self {
+        let mut layout = Self {
             lines,
             line_height,
             size: measured,
+            rows: Vec::new(),
+            alignment: BlockAlignment::Left,
+            alignment_enabled: false,
+            alignment_width: measured.width,
+            paint_lines: None,
+            decoration_runs: Vec::new(),
+            decorations: Vec::new(),
+        };
+        layout.rows = layout.measure_rows();
+        layout
+    }
+
+    /// Painting and all coordinate consumers use this exact text-box width.
+    pub(super) fn aligned(mut self, alignment: BlockAlignment, width: Pixels) -> Self {
+        self.alignment = alignment;
+        self.alignment_enabled = true;
+        self.alignment_width = width;
+        for row in &mut self.rows {
+            row.x = alignment.offset(width, row.width);
         }
+        self
+    }
+
+    pub(super) fn with_alignment(self, alignment: Option<BlockAlignment>, width: Pixels) -> Self {
+        match alignment {
+            Some(alignment) => self.aligned(alignment, width),
+            None => self,
+        }
+    }
+
+    pub(super) fn has_alignment(&self) -> bool {
+        self.alignment_enabled
+    }
+
+    pub(super) fn alignment(&self) -> BlockAlignment {
+        self.alignment
+    }
+
+    pub(super) fn alignment_width(&self) -> Pixels {
+        self.alignment_width
     }
 
     pub(super) fn size(&self) -> Size<Pixels> {
@@ -47,11 +101,45 @@ impl BlockTextLayout {
         self.line_height
     }
 
+    #[cfg(test)]
     pub(super) fn lines(&self) -> &[WrappedLine] {
         &self.lines
     }
 
+    pub(super) fn paint_lines(&self) -> &[WrappedLine] {
+        self.paint_lines.as_deref().unwrap_or(&self.lines)
+    }
+
+    pub(super) fn with_decoration_carrier(
+        mut self,
+        mut carrier: Vec<WrappedLine>,
+        runs: Vec<gpui::TextRun>,
+    ) -> Self {
+        assert_eq!(carrier.len(), self.lines.len());
+        for (paint, original) in carrier.iter_mut().zip(&self.lines) {
+            // Only decoration metadata comes from the stripped shape. Keep
+            // the original glyph/cluster/wrap layout byte-for-byte identical.
+            assert_eq!(paint.text, original.text);
+            **paint = std::sync::Arc::clone(&**original);
+        }
+        self.paint_lines = Some(carrier);
+        self.decoration_runs = runs;
+        self.decorations = self.decoration_strokes();
+        self
+    }
+
     pub(super) fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
+        let row_ix = row_for_caret(&self.rows, index, CursorAffinity::Before)?;
+        let row = &self.rows[row_ix];
+        let offset = row.x;
+        if self.alignment_enabled
+            && let Some(line) = self.lines.get(row.logical_line)
+        {
+            return Some(point(
+                row.x + line.unwrapped_layout.x_for_index(index - row.logical_start) - row.start_x,
+                row.y,
+            ));
+        }
         let mut logical_start = 0usize;
         let mut y = Pixels::ZERO;
 
@@ -61,14 +149,14 @@ impl BlockTextLayout {
                 let local = index - logical_start;
                 return line
                     .position_for_index(local, self.line_height)
-                    .map(|position| point(position.x, position.y + y));
+                    .map(|position| point(position.x + offset, position.y + y));
             }
             logical_start = logical_end.saturating_add(1);
             y += line.size(self.line_height).height;
         }
 
         if self.lines.is_empty() && index == 0 {
-            Some(point(Pixels::ZERO, Pixels::ZERO))
+            Some(point(offset, Pixels::ZERO))
         } else {
             None
         }
@@ -80,7 +168,7 @@ impl BlockTextLayout {
         affinity: CursorAffinity,
     ) -> Option<Point<Pixels>> {
         let rows = self.visual_rows();
-        let row_ix = row_for_caret(&rows, index, affinity)?;
+        let row_ix = row_for_caret(rows, index, affinity)?;
         let row = &rows[row_ix];
 
         if affinity.is_after()
@@ -88,7 +176,7 @@ impl BlockTextLayout {
             && row.range.start == index
             && rows[row_ix - 1].range.end == index
         {
-            return Some(point(Pixels::ZERO, row.y));
+            return Some(point(row.x, row.y));
         }
 
         self.position_for_index(index)
@@ -113,7 +201,7 @@ impl BlockTextLayout {
         down: bool,
     ) -> Option<(usize, CursorAffinity)> {
         let rows = self.visual_rows();
-        let current = row_for_caret(&rows, index, affinity)?;
+        let current = row_for_caret(rows, index, affinity)?;
         let target = if down {
             current
                 .checked_add(1)
@@ -121,7 +209,7 @@ impl BlockTextLayout {
         } else {
             current.checked_sub(1)?
         };
-        Some(self.target_for_row_x(&rows, target, desired_x))
+        Some(self.target_for_row_x(rows, target, desired_x))
     }
 
     pub(crate) fn edge_row_target(
@@ -131,7 +219,7 @@ impl BlockTextLayout {
     ) -> Option<(usize, CursorAffinity)> {
         let rows = self.visual_rows();
         let row_ix = if last { rows.len().checked_sub(1)? } else { 0 };
-        Some(self.target_for_row_x(&rows, row_ix, desired_x))
+        Some(self.target_for_row_x(rows, row_ix, desired_x))
     }
 
     pub(crate) fn visual_line_edge(
@@ -141,12 +229,12 @@ impl BlockTextLayout {
         to_end: bool,
     ) -> Option<(usize, CursorAffinity)> {
         let rows = self.visual_rows();
-        let row_ix = row_for_caret(&rows, index, affinity)?;
+        let row_ix = row_for_caret(rows, index, affinity)?;
         let row = &rows[row_ix];
         if to_end {
             Some((row.range.end, CursorAffinity::Before))
         } else {
-            Some((row.range.start, affinity_for_row_start(&rows, row_ix)))
+            Some((row.range.start, affinity_for_row_start(rows, row_ix)))
         }
     }
 
@@ -174,6 +262,19 @@ impl BlockTextLayout {
         if position.y < Pixels::ZERO {
             return 0;
         }
+        if self.alignment_enabled {
+            let row = &self.rows[row_for_y(&self.rows, position.y, self.line_height)];
+            let line = &self.lines[row.logical_line];
+            let x = position.x - row.x + row.start_x;
+            let local = if x <= row.start_x {
+                row.range.start - row.logical_start
+            } else if x >= row.start_x + row.width {
+                row.range.end - row.logical_start
+            } else {
+                line.unwrapped_layout.closest_index_for_x(x)
+            };
+            return (row.logical_start + local).clamp(row.range.start, row.range.end);
+        }
 
         let mut logical_start = 0usize;
         let mut y = Pixels::ZERO;
@@ -181,7 +282,8 @@ impl BlockTextLayout {
             let line_size = line.size(self.line_height);
             let bottom = y + line_size.height;
             if position.y <= bottom {
-                let local_position = point(position.x, position.y - y);
+                let row_ix = row_for_y(&self.rows, position.y, self.line_height);
+                let local_position = point(position.x - self.rows[row_ix].x, position.y - y);
                 let local = line
                     .closest_index_for_position(local_position, self.line_height)
                     .unwrap_or_else(|edge| edge);
@@ -196,10 +298,10 @@ impl BlockTextLayout {
 
     pub(crate) fn caret_for_position(&self, position: Point<Pixels>) -> (usize, CursorAffinity) {
         let rows = self.visual_rows();
-        let row_ix = row_for_y(&rows, position.y, self.line_height);
+        let row_ix = row_for_y(rows, position.y, self.line_height);
         let index = self.closest_index_for_position(position);
         let affinity = if index == rows[row_ix].range.start {
-            affinity_for_row_start(&rows, row_ix)
+            affinity_for_row_start(rows, row_ix)
         } else {
             CursorAffinity::Before
         };
@@ -220,11 +322,20 @@ impl BlockTextLayout {
             }
 
             let start_x = if start == visual.range.start {
-                Pixels::ZERO
+                if self.alignment_enabled {
+                    let line = &self.lines[visual.logical_line];
+                    visual.x
+                        + line
+                            .unwrapped_layout
+                            .x_for_index(start - visual.logical_start)
+                        - visual.start_x
+                } else {
+                    visual.x
+                }
             } else {
                 self.position_for_index(start)
                     .map(|position| position.x)
-                    .unwrap_or(Pixels::ZERO)
+                    .unwrap_or(visual.x)
             };
             let end_x = self
                 .position_for_index(end)
@@ -254,26 +365,43 @@ impl BlockTextLayout {
         rects
     }
 
-    fn visual_rows(&self) -> Vec<VisualRow> {
+    fn visual_rows(&self) -> &[VisualRow] {
+        &self.rows
+    }
+
+    fn measure_rows(&self) -> Vec<VisualRow> {
         let mut rows = Vec::new();
         let mut logical_start = 0usize;
         let mut y = Pixels::ZERO;
 
-        for line in &self.lines {
+        for (logical_line, line) in self.lines.iter().enumerate() {
             let mut row_start = 0usize;
+            let mut start_x = Pixels::ZERO;
             for boundary in line.wrap_boundaries() {
                 let run = &line.runs()[boundary.run_ix];
-                let row_end = run.glyphs[boundary.glyph_ix].index;
+                let glyph = &run.glyphs[boundary.glyph_ix];
+                let row_end = glyph.index;
                 rows.push(VisualRow {
                     range: logical_start + row_start..logical_start + row_end,
                     y,
+                    width: glyph.position.x - start_x,
+                    x: Pixels::ZERO,
+                    logical_line,
+                    logical_start,
+                    start_x,
                 });
                 row_start = row_end;
+                start_x = glyph.position.x;
                 y += self.line_height;
             }
             rows.push(VisualRow {
                 range: logical_start + row_start..logical_start + line.len(),
                 y,
+                width: line.unwrapped_layout.width - start_x,
+                x: Pixels::ZERO,
+                logical_line,
+                logical_start,
+                start_x,
             });
             y += self.line_height;
             logical_start += line.len().saturating_add(1);
@@ -283,6 +411,11 @@ impl BlockTextLayout {
             rows.push(VisualRow {
                 range: 0..0,
                 y: Pixels::ZERO,
+                width: Pixels::ZERO,
+                x: Pixels::ZERO,
+                logical_line: 0,
+                logical_start: 0,
+                start_x: Pixels::ZERO,
             });
         }
         rows
@@ -388,4 +521,9 @@ fn row_for_y(rows: &[VisualRow], y: Pixels, line_height: Pixels) -> usize {
 struct VisualRow {
     range: Range<usize>,
     y: Pixels,
+    width: Pixels,
+    x: Pixels,
+    logical_line: usize,
+    logical_start: usize,
+    start_x: Pixels,
 }
