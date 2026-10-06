@@ -1,5 +1,11 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-06原生回归修复：column resize 保留整数 measured 起点约束，明确将从原 down
+计算的 fractional native pointer 目标 clamp minimum 后投影为最近整数（精确 .5 向上）。
+stock X11 16.16 decode 的普通40px拖动不再因约40.0006px delta被拒绝；原版 PM 保留小数，
+此差异不扩张 canonical schema 或转换原始 JSON。纯计算与 virtual dispatch 回归不替代
+修正 candidate 的真实 GUI 验收，见[宽度契约](measured-column-resize.md)。
+
 2026-10-06独立后继：GPUI 在已 paint 的 focused selection-head 几何变化后请求 stock IME
 坐标刷新，抑制稳定帧、后台与 hidden input 的重复通知，不改 Core/Runtime/GPUI 或原生
 composition 协议。X11 composing 期间的同步旧-layout 查询仍独立保留，不能称候选位置

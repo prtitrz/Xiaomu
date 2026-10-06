@@ -95,5 +95,14 @@ pub(super) fn drag_width(initial: u32, start_x: f32, current_x: f32, minimum: u3
     if !start_x.is_finite() || !current_x.is_finite() {
         return None;
     }
-    integral_width((initial as f32 + current_x - start_x).max(minimum as f32))
+    // GPUI supplies f32 logical coordinates, including subpixel native decoding.
+    // Widen each operand before arithmetic; this cannot recover prior precision.
+    // Subtract first so equal large coordinates preserve the initial width.
+    let delta = f64::from(current_x) - f64::from(start_x);
+    let width = (f64::from(initial) + delta).max(f64::from(minimum));
+    // Refuse oversized raw requests before rounding; do not silently clamp them.
+    // The positive target rounds to nearest integer, with exact halves upward.
+    (1.0..=1_000_000.0)
+        .contains(&width)
+        .then_some(width.round() as u32)
 }

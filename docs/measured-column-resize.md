@@ -41,9 +41,23 @@ the innermost containing table owns a hit. The existing seven-pixel cell-range
 handle retains priority. Scroll clipping and outside-left boundaries are checked.
 A successful drag focuses this editor's existing selection without changing it.
 
-Measured starts and results must be positive integral widths at most 1,000,000.
-Fractional/nonfinite results are refused, never rounded. Fractional pointer
-coordinates are supported when their difference produces an exact integer width.
+Measured starting widths must be positive integers at most 1,000,000; fractional
+starts remain unsupported. Native pointer coordinates may be fractional. Widen
+the received `f32` coordinates separately to `f64`, subtract the original down
+from the current position, add the integral initial width, clamp to the explicit
+minimum, then round the positive target to nearest integer (exact halves upward).
+Every move and release uses the original down, never accumulated rounded deltas.
+Nonfinite coordinates and unrounded targets above 1,000,000 are refused. Widening
+does not recover precision already lost by the platform's `f32` representation.
+
+This is an explicit native integer projection policy, not original-editor parity:
+ProseMirror tables 1.8.5 `draggedWidth` preserves fractional deltas/results. Neither
+canonical fractional widths nor a host's fractional JSON are silently converted.
+In stock GPUI 0.2.2 X11, the 16.16 event coordinate decode divides by 65,535;
+709→749 physical pixels at scale 1 arrive as approximately 709.0108→749.0114.
+The former exact-integrality test cancelled this ordinary 40-pixel gesture.
+The native projection yields 280 from initial 240 and that received delta.
+
 Preview overrides only the requested track in a copied layout plan; other auto
 tracks retain the native remaining-space policy. Actual child trees remeasure,
 wrap, position and publish native caret geometry at the new width, including

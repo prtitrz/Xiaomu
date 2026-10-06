@@ -16,6 +16,8 @@ use xiaomu_runtime::session::{DocumentSelection, DocumentSession};
 mod lifecycle;
 #[path = "mounted_tests.rs"]
 mod mounted;
+#[path = "pointer_quantization_tests.rs"]
+mod pointer_quantization;
 #[path = "timing_tests.rs"]
 mod timing;
 
@@ -194,13 +196,13 @@ fn edges_respect_spans_cell_handles_clip_and_last_column_policy() {
 }
 
 #[test]
-fn integer_width_contract_does_not_silently_round_fractional_values() {
+fn measured_width_contract_refuses_fractional_starts_and_invalid_configuration() {
     for unsupported in [0.0, 80.5, f32::NAN, f32::INFINITY, 1_000_001.0] {
         assert_eq!(integral_width(unsupported), None);
     }
     assert_eq!(integral_width(80.0), Some(80));
     assert_eq!(drag_width(80, 100.5, 140.5, 25), Some(120));
-    assert_eq!(drag_width(80, 100.5, 140.0, 25), None);
+    assert_eq!(drag_width(80, 100.5, 140.0, 25), Some(120));
     assert_eq!(drag_width(80, 100.0, -500.0, 25), Some(25));
     assert_eq!(drag_width(80, 100.0, f32::NAN, 25), None);
     assert!(

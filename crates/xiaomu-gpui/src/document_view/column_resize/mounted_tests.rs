@@ -398,10 +398,10 @@ fn column_resize_no_motion_callback_and_one_host_transaction_have_exact_undo(
 }
 
 #[gpui::test]
-fn column_resize_fractional_result_and_same_revision_different_document_cancel(
+fn column_resize_nonfinite_pointer_and_same_revision_different_document_cancel(
     cx: &mut TestAppContext,
 ) {
-    for fractional in [true, false] {
+    for nonfinite in [true, false] {
         let f = fixture(false);
         let session = session(&f);
         let commits = Rc::new(RefCell::new(Vec::new()));
@@ -414,8 +414,8 @@ fn column_resize_fractional_result_and_same_revision_different_document_cancel(
         );
         let p = edge(handle, cx);
         down(handle, p, cx);
-        if fractional {
-            movement(handle, p + point(px(0.5), px(0.0)), true, cx);
+        if nonfinite {
+            movement(handle, p + point(px(f32::NAN), px(0.0)), true, cx);
         } else {
             // A fresh snapshot can reuse all node IDs and the initial revision.
             let mut other =
