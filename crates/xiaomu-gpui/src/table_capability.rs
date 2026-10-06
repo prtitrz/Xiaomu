@@ -40,6 +40,12 @@ pub(crate) struct TableCapabilityKey {
     presentation: Vec<(NodeId, NodeKind, NodeAttrs)>,
 }
 
+impl TableCapabilityKey {
+    pub(crate) fn same_configuration(&self, other: &Self) -> bool {
+        self.configuration == other.configuration
+    }
+}
+
 /// Opt-in measurement successes belonging to one editor instance only.
 #[derive(Debug, Default)]
 pub(crate) struct TableCapability {

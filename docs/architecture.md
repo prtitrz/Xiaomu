@@ -597,6 +597,17 @@ Left / Right 保持 Unicode scalar navigation，并在 soft-wrap 共享 logical 
 
 layout cache key = `(node, editing epoch, rounded width)`；composition 期因虚拟文本不经过 document epoch 而绕过缓存。缓存复用必须有明确的 `Some(key)`，不能把两个 `None` 当作命中：intrinsic min/max-content 测量没有确定宽度，刚取消的 preedit 也没有缓存身份，误复用会在 composition 已清空后继续绘制下划线拼音。`block_view/element_tests.rs` 在取消后立即走这条真实测量路径，断言 shaped text 回到原正文且 snapshot/selection/history 不变；普通固定宽度窗口不足以覆盖这个回归。
 
+### Opt-in measured column resize
+
+`DocumentView::set_table_column_resize` 以独立、默认关闭的 GPUI capability 接收显式
+handle/minimum/last-column 配置与 host guard/commit callbacks。命中来自真实 measured
+cell edges，嵌套表只选最近表，已有 cell-range handle 保持优先；preview 使用真实子树重排，
+不改 canonical document、revision、selection 或 history。宿主拥有 logical-column attrs
+映射、readonly/owner/session lifecycle 与 policy、一次事务和 persistence，Core/Runtime 不扩张。
+已测量的 release 同步交付；严格同子树/同 tracks 的 width-only commit 可继承真实测量 admission，
+避免下一原生输入在 repaint 前丢失。未测量的 release-only 坐标需要一帧，期间变更会取消，
+不能称完整 PM mouseup 等价；详见[契约与边界](measured-column-resize.md)。
+
 ### Block projection
 
 当前 frontend projection 已区分：
