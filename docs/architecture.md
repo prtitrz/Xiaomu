@@ -565,6 +565,16 @@ editor.rs
 
 IME composition 的 preedit 保持 frontend-local，不推进 document revision，也不移动 Runtime canonical selection。composition state 只保存待替换的 canonical byte range、当前 preedit 与 preedit 内 UTF-16 selection；更新与 cancel 都不写 history。cancel 只丢弃 transient projection，因此 pending StoredMarks 不会因伪 caret movement 被清除。最终 commit 通过单个 `EditIntent::CommitComposition { range, text }` 进入 Runtime，使用与普通 typing 相同的 StoredMarks 规则，并形成恰好一个独立 undo unit。P3 composition 仍限制在单 block 内启动；该 byte-range / UTF-16 adapter 按完整 display text 工作，因此 canonical LF 不引入单独平台坐标系。
 
+`ParagraphElement` 在 paint 发布新的 `last_layout` / absolute bounds 后，用当前原生
+selection head（含 reversed selection）计算候选锚点。仅当前 active window 的 focused、
+可查询 input 在锚点变化时，经退出 Entity borrow 后调用 stock
+`Window::invalidate_character_coordinates`；稳定帧不重复请求，不额外 notify/强制绘制。
+此 API 在下一帧查询当前平台 handler；native bounds query 再核验实时 focus、Linux 的 window-active，
+拒绝换 owner 后尚未重画的旧 handler。既有 focus-out callback 清除 stamp，保证 retained
+hidden view 重现于同一位置仍能刷新；不改变 composition/commit/unmark/焦点归属。
+stock X11/Wayland 在 composing 时跳过显式 position update，而同步 preedit 回调仍可能查询旧 layout；
+这个后布局通知修复不解决该独立时序边界，原生候选位置必须另外实测。
+
 ### Multi-block DocumentView
 
 `DocumentView` 持有共享 session，并按文档序为 inline-bearing block 挂载 `ParagraphView`。焦点跟随 `DocumentSelection` focus node 路由。
@@ -596,6 +606,17 @@ Left / Right 保持 Unicode scalar navigation，并在 soft-wrap 共享 logical 
 `DocumentView` 持有一个 GPUI `ScrollHandle` 并绑定在 document scroll viewport。每个 `ParagraphView` 共享该 handle；focused block 在 prepaint 中根据 canonical focus 或 IME virtual caret 计算 window-space caret bounds，只请求保持 focus 可见所需的最小纵向滚动。滚动写入延迟到 next frame，避免同一 prepaint / paint pass 内各 child 观察到不同 scroll offset。
 
 layout cache key = `(node, editing epoch, rounded width)`；composition 期因虚拟文本不经过 document epoch 而绕过缓存。缓存复用必须有明确的 `Some(key)`，不能把两个 `None` 当作命中：intrinsic min/max-content 测量没有确定宽度，刚取消的 preedit 也没有缓存身份，误复用会在 composition 已清空后继续绘制下划线拼音。`block_view/element_tests.rs` 在取消后立即走这条真实测量路径，断言 shaped text 回到原正文且 snapshot/selection/history 不变；普通固定宽度窗口不足以覆盖这个回归。
+
+### Opt-in measured column resize
+
+`DocumentView::set_table_column_resize` 以独立、默认关闭的 GPUI capability 接收显式
+handle/minimum/last-column 配置与 host guard/commit callbacks。命中来自真实 measured
+cell edges，嵌套表只选最近表，已有 cell-range handle 保持优先；preview 使用真实子树重排，
+不改 canonical document、revision、selection 或 history。宿主拥有 logical-column attrs
+映射、readonly/owner/session lifecycle 与 policy、一次事务和 persistence，Core/Runtime 不扩张。
+已测量的 release 同步交付；严格同子树/同 tracks 的 width-only commit 可继承真实测量 admission，
+避免下一原生输入在 repaint 前丢失。未测量的 release-only 坐标需要一帧，期间变更会取消，
+不能称完整 PM mouseup 等价；详见[契约与边界](measured-column-resize.md)。
 
 ### Block projection
 

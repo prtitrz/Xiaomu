@@ -305,11 +305,18 @@ impl Element for ParagraphElement {
             registry.borrow_mut().push((node_id, bounds));
         }
 
-        self.view.update(cx, |view, _| {
+        let changed_ime_coordinates = self.view.update(cx, |view, cx| {
             view.last_layout = Some(layout);
             view.last_bounds = Some(bounds);
             view.cache_key = prepaint.cache_key;
+            view.ime_coordinates_changed(bounds, window, cx)
         });
+        if changed_ime_coordinates {
+            // The current input handler is registered for this frame and its
+            // painted layout is published.
+            // Stock GPUI defers its query; no nested view borrow or forced draw.
+            window.invalidate_character_coordinates();
+        }
     }
 }
 
@@ -386,6 +393,9 @@ mod code_presentation_tests {
             })
             .unwrap()
         });
+        handle
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
         cx.background_executor.run_until_parked();
         (handle, session, node)
     }

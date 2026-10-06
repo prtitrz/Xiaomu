@@ -172,10 +172,20 @@ impl EntityInputHandler for ParagraphView {
         &mut self,
         range_utf16: Range<usize>,
         element_bounds: Bounds<Pixels>,
-        _: &mut Window,
+        window: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        if self.input_is_hidden_by_table() {
+        // Stock GPUI may query the previously installed handler before the
+        // next draw after a focus/window switch. Candidate geometry belongs
+        // only to the current native owner, including deferred refreshes.
+        if !self.focus_handle.is_focused(window) || self.input_is_hidden_by_table() {
+            return None;
+        }
+        // Linux activation is synchronous before native IME queries. macOS
+        // and Windows can request geometry before their async active callback;
+        // preserve that existing geometry path rather than assuming its order.
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        if !window.is_window_active() {
             return None;
         }
         let layout = self.last_layout.as_ref()?;

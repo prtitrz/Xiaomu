@@ -131,6 +131,27 @@ impl TableLayoutPlan {
         })
     }
 
+    /// Overrides one track for a renderer-only preview. Canonical attributes
+    /// are neither modified nor interpreted as an edit. Other automatic tracks
+    /// keep the plan's ordinary remaining-space policy and minimum. Rebuild the
+    /// plan from the document to discard this override.
+    pub(crate) fn override_column_width(
+        &mut self,
+        column: usize,
+        width: u32,
+    ) -> Result<(), TableLayoutError> {
+        dimension(f64::from(width))?;
+        if width == 0 {
+            return Err(TableLayoutError::InvalidDimension);
+        }
+        let track = self
+            .fixed_columns
+            .get_mut(column)
+            .ok_or(TableLayoutError::InvalidDimension)?;
+        *track = Some(width as usize);
+        Ok(())
+    }
+
     /// Returns the table's stable identity.
     #[must_use]
     pub const fn table(&self) -> NodeId {

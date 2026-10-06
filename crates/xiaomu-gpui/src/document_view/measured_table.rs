@@ -12,6 +12,9 @@ use gpui::{
 use xiaomu_core::document::NodeId;
 use xiaomu_runtime::session::DocumentPosition;
 
+use super::column_resize::{
+    ResizeMeasurement, paint_resize_cursor, register_resize_pointer_handlers,
+};
 use super::{DocumentView, navigation};
 use crate::block_view::BlockBoundsRegistry;
 use crate::table_capability::{SharedTableCapability, TableCapabilityKey};
@@ -46,6 +49,7 @@ impl DocumentView {
             view.update(cx, |this, cx| {
                 this.registry.borrow_mut().clear();
                 this.cell_registry.borrow_mut().clear();
+                this.column_resize.clear_measurements();
                 let width = BlockLayoutWidth {
                     available: (viewport.width - window.rem_size() * 2.0).max(px(0.0)),
                     rem_size: window.rem_size(),
@@ -76,6 +80,9 @@ impl DocumentView {
                 .key(document, table)
                 .and_then(|key| {
                     let plan = TableLayoutPlan::from_document(document, table, Default::default())?;
+                    let plan = self
+                        .column_resize
+                        .preview_plan(plan, f32::from(width.available))?;
                     let geometry =
                         plan.layout(f32::from(width.available), &vec![0.0; plan.cells().len()])?;
                     let selection = session.selection();
@@ -106,10 +113,19 @@ impl DocumentView {
                             )
                         })
                         .collect::<Result<Vec<_>, _>>()?;
-                    Ok((key, plan, geometry, backgrounds, focused, highlighted))
+                    Ok((
+                        key,
+                        plan,
+                        geometry,
+                        backgrounds,
+                        focused,
+                        highlighted,
+                        document.clone(),
+                    ))
                 })
         };
-        let Ok((key, plan, geometry, backgrounds, focused, highlighted)) = prepared else {
+        let Ok((key, plan, geometry, backgrounds, focused, highlighted, document)) = prepared
+        else {
             self.table_capability.borrow_mut().revoke(table);
             return measured_placeholder(table);
         };
@@ -128,6 +144,7 @@ impl DocumentView {
             }
             .inset(px(CELL_HORIZONTAL_PADDING * 2.0));
             let mut content = div()
+                .debug_selector(move || format!("measured-table-cell-{id:?}"))
                 .id(gpui::SharedString::from(format!(
                     "measured-table-cell-{id:?}"
                 )))
@@ -200,11 +217,13 @@ impl DocumentView {
             );
             children.push(child);
         }
+        let placements = plan.cells().iter().map(|cell| cell.placement).collect();
         let Ok(element) = SpanningTableElement::new(plan, width.available, children) else {
             self.table_capability.borrow_mut().revoke(table);
             return measured_placeholder(table);
         };
         div()
+            .debug_selector(move || format!("measured-table-{table:?}"))
             .my_3()
             .w(px(geometry.width))
             .min_w(px(geometry.width))
@@ -214,6 +233,13 @@ impl DocumentView {
                 key,
                 capability: self.table_capability.clone(),
                 registry: self.cell_registry.clone(),
+                resize_measurements: self
+                    .column_resize
+                    .enabled()
+                    .then(|| self.column_resize.measurements.clone()),
+                document,
+                placements,
+                available: f32::from(width.available),
                 element,
             })
             .into_any_element()
@@ -235,6 +261,10 @@ struct AdmittedTable {
     key: Rc<TableCapabilityKey>,
     capability: SharedTableCapability,
     registry: BlockBoundsRegistry,
+    resize_measurements: Option<Rc<std::cell::RefCell<Vec<ResizeMeasurement>>>>,
+    document: xiaomu_core::document::XiaomuDocument,
+    placements: Vec<xiaomu_core::document::CellPlacement>,
+    available: f32,
     element: SpanningTableElement,
 }
 
@@ -281,6 +311,19 @@ impl Element for AdmittedTable {
         // Parent cells precede nested cells, so reverse hit testing selects
         // the innermost containing cell, including its blank lower region.
         if let Ok(geometry) = &request.geometry {
+            if let Some(measurements) = &self.resize_measurements {
+                measurements.borrow_mut().push(ResizeMeasurement {
+                    table: self.table,
+                    revision: self.document.revision(),
+                    document: self.document.clone(),
+                    key: self.key.clone(),
+                    origin: bounds.origin,
+                    available: self.available,
+                    clip: window.content_mask().bounds,
+                    geometry: geometry.clone(),
+                    placements: self.placements.clone(),
+                });
+            }
             self.registry.borrow_mut().extend(
                 geometry
                     .cells
@@ -323,7 +366,7 @@ impl IntoElement for FocusAfterMeasurement {
 
 impl Element for FocusAfterMeasurement {
     type RequestLayoutState = ();
-    type PrepaintState = ();
+    type PrepaintState = gpui::Hitbox;
     fn id(&self) -> Option<ElementId> {
         None
     }
@@ -343,11 +386,12 @@ impl Element for FocusAfterMeasurement {
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
-    ) {
+    ) -> gpui::Hitbox {
+        let hitbox = window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal);
         self.view.update(cx, |view, cx| {
             let owned = view
                 .focus_handle
@@ -385,6 +429,10 @@ impl Element for FocusAfterMeasurement {
             }
         });
         self.content.prepaint(window, cx);
+        self.view.update(cx, |view, cx| {
+            view.finish_column_resize_measurement(window, cx)
+        });
+        hitbox
     }
     fn paint(
         &mut self,
@@ -392,10 +440,12 @@ impl Element for FocusAfterMeasurement {
         _: Option<&InspectorElementId>,
         _: Bounds<Pixels>,
         _: &mut (),
-        _: &mut (),
+        hitbox: &mut gpui::Hitbox,
         window: &mut Window,
         cx: &mut App,
     ) {
+        register_resize_pointer_handlers(&self.view, hitbox.clone(), window, cx);
         self.content.paint(window, cx);
+        paint_resize_cursor(&self.view, hitbox, window, cx);
     }
 }

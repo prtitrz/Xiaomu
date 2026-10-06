@@ -18,6 +18,7 @@ mod block_tree;
 pub(crate) mod cache_key;
 pub(crate) mod cell_selection;
 mod clipboard;
+mod column_resize;
 mod history_clock;
 mod host_extensions;
 mod host_transaction;
@@ -29,6 +30,7 @@ pub(crate) mod mouse;
 pub(crate) mod navigation;
 mod node_selection;
 mod rejection;
+mod scroll_tree;
 pub use rejection::{EditorRejection, EditorRejectionReason, EditorRejectionStage};
 mod table_block;
 pub(crate) mod table_guard;
@@ -58,10 +60,7 @@ mod task_layout_tests;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gpui::{
-    App, Context, Entity, Focusable as _, MouseButton, Pixels, ScrollHandle, Window, div,
-    prelude::*, px,
-};
+use gpui::{App, Context, Entity, Focusable as _, Pixels, ScrollHandle, Window, prelude::*};
 
 use xiaomu_core::document::{ImageAttrs, ImageSource, NodeAttrs, NodeId, XiaomuDocument};
 use xiaomu_core::selection::InlinePoint;
@@ -90,6 +89,7 @@ pub struct DocumentView {
     /// Per-view measured-table admission, also held by retained input handlers.
     table_capability: crate::table_capability::SharedTableCapability,
     cell_drag_anchor: Option<NodeId>,
+    column_resize: column_resize::ColumnResizeState,
     range_input: Option<(NodeId, Entity<ParagraphView>)>,
     focus_handle: Option<gpui::FocusHandle>,
     /// Shared viewport scroll state. Focused blocks use it to keep the caret
@@ -133,6 +133,7 @@ impl DocumentView {
             cell_registry: Rc::new(RefCell::new(Vec::new())),
             table_capability: Rc::new(RefCell::new(Default::default())),
             cell_drag_anchor: None,
+            column_resize: Default::default(),
             range_input: None,
             focus_handle: None,
             scroll_handle: ScrollHandle::new(),
@@ -164,6 +165,8 @@ impl DocumentView {
     /// the explicit native sizing policy, not browser intrinsic-width parity.
     /// Hosts changing a mounted view should notify its context afterward.
     pub fn set_measured_table_layout(&mut self, enabled: bool) {
+        self.column_resize.cancel();
+        self.column_resize.clear_measurements();
         self.table_capability.borrow_mut().set_enabled(enabled);
     }
 
@@ -178,6 +181,8 @@ impl DocumentView {
     /// requires a fresh layout, including for retained native input handlers.
     /// Hosts changing a mounted view should notify its context afterward.
     pub fn set_measured_table_row_metadata(&mut self, metadata: NodeAttrs) {
+        self.column_resize.cancel();
+        self.column_resize.clear_measurements();
         self.table_capability
             .borrow_mut()
             .set_row_metadata(metadata);
@@ -587,6 +592,7 @@ impl DocumentView {
 
 impl Render for DocumentView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.validate_column_resize(cx);
         // A host policy may commit into another node/All/cell range. Capture
         // ownership before syncing drops the old proxy, and transfer focus
         // only if that proxy owned it, including range-to-range transitions.
@@ -623,69 +629,5 @@ impl Render for DocumentView {
         let tree = self.render_block_tree(root, false, 0, 0, cx);
 
         self.render_scroll_tree(tree, cx)
-    }
-}
-
-impl DocumentView {
-    fn render_scroll_tree(
-        &self,
-        tree: gpui::AnyElement,
-        cx: &mut Context<Self>,
-    ) -> gpui::AnyElement {
-        div()
-            .key_context("XiaomuDocument")
-            .track_focus(self.focus_handle.as_ref().expect("synced focus handle"))
-            .size_full()
-            .bg(gpui::white())
-            .p_4()
-            .line_height(px(28.0))
-            .text_size(px(20.0))
-            .text_color(gpui::black())
-            .cursor(gpui::CursorStyle::IBeam)
-            .id("xiaomu-document-scroll")
-            .track_scroll(&self.scroll_handle)
-            .overflow_y_scroll()
-            .when(self.table_capability.borrow().enabled(), |scroll| {
-                scroll.overflow_x_scroll()
-            })
-            .on_action(cx.listener(Self::backspace))
-            .on_action(cx.listener(Self::delete))
-            .on_action(cx.listener(Self::left))
-            .on_action(cx.listener(Self::right))
-            .on_action(cx.listener(Self::up))
-            .on_action(cx.listener(Self::down))
-            .on_action(cx.listener(Self::select_left))
-            .on_action(cx.listener(Self::select_right))
-            .on_action(cx.listener(Self::select_up))
-            .on_action(cx.listener(Self::select_down))
-            .on_action(cx.listener(Self::home))
-            .on_action(cx.listener(Self::end))
-            .on_action(cx.listener(Self::select_home))
-            .on_action(cx.listener(Self::select_end))
-            .on_action(cx.listener(Self::select_all))
-            .on_action(cx.listener(Self::select_cell))
-            .on_action(cx.listener(Self::escape_cell_range))
-            .on_action(cx.listener(Self::enter))
-            .on_action(cx.listener(Self::hard_break))
-            .on_action(cx.listener(Self::primary_modifier_enter))
-            .on_action(cx.listener(Self::tab_indent))
-            .on_action(cx.listener(Self::shift_tab_indent))
-            .on_action(cx.listener(Self::undo_entry))
-            .on_action(cx.listener(Self::redo_entry))
-            .on_action(cx.listener(Self::save_document))
-            .on_action(cx.listener(Self::copy))
-            .on_action(cx.listener(Self::cut))
-            .on_action(cx.listener(Self::paste))
-            .on_action(cx.listener(Self::toggle_bold))
-            .on_action(cx.listener(Self::toggle_italic))
-            .on_action(cx.listener(Self::toggle_code))
-            .on_action(cx.listener(Self::toggle_underline))
-            .on_action(cx.listener(Self::toggle_strike))
-            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_mouse_move(cx.listener(Self::on_mouse_move))
-            .child(tree)
-            .into_any_element()
     }
 }

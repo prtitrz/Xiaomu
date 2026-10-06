@@ -4,8 +4,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    AppContext as _, AvailableSpace, EntityInputHandler, ParentElement, Styled, TestAppContext,
-    VisualTestContext, div, point, px, size,
+    AppContext as _, AvailableSpace, EntityInputHandler, Focusable as _, ParentElement, Styled,
+    TestAppContext, VisualTestContext, div, point, px, size,
 };
 use xiaomu_core::document::{
     AttrValue, InlineContent, MarkSet, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStoreBuilder,
@@ -289,12 +289,25 @@ fn views(fixture: &Fixture, cx: &mut TestAppContext) -> ViewFixture {
                     )
                 })
             })
-            .collect()
+            .collect::<Vec<_>>()
     });
     let window = cx.update(|cx| {
         cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
             .unwrap()
     });
+    window
+        .update(cx, |_, window, cx| {
+            window.activate_window();
+            window.focus(
+                &views
+                    .last()
+                    .expect("fixture paragraph")
+                    .read(cx)
+                    .focus_handle(cx),
+            );
+        })
+        .unwrap();
+    cx.background_executor.run_until_parked();
     ViewFixture {
         session,
         bounds,
