@@ -73,6 +73,9 @@ pub(super) fn open(
         })
         .unwrap()
     });
+    window
+        .update(cx, |_, window, _| window.activate_window())
+        .unwrap();
     cx.background_executor.run_until_parked();
     (window, session, p)
 }

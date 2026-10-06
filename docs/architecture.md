@@ -565,6 +565,16 @@ editor.rs
 
 IME composition 的 preedit 保持 frontend-local，不推进 document revision，也不移动 Runtime canonical selection。composition state 只保存待替换的 canonical byte range、当前 preedit 与 preedit 内 UTF-16 selection；更新与 cancel 都不写 history。cancel 只丢弃 transient projection，因此 pending StoredMarks 不会因伪 caret movement 被清除。最终 commit 通过单个 `EditIntent::CommitComposition { range, text }` 进入 Runtime，使用与普通 typing 相同的 StoredMarks 规则，并形成恰好一个独立 undo unit。P3 composition 仍限制在单 block 内启动；该 byte-range / UTF-16 adapter 按完整 display text 工作，因此 canonical LF 不引入单独平台坐标系。
 
+`ParagraphElement` 在 paint 发布新的 `last_layout` / absolute bounds 后，用当前原生
+selection head（含 reversed selection）计算候选锚点。仅当前 active window 的 focused、
+可查询 input 在锚点变化时，经退出 Entity borrow 后调用 stock
+`Window::invalidate_character_coordinates`；稳定帧不重复请求，不额外 notify/强制绘制。
+此 API 在下一帧查询当前平台 handler；native bounds query 再核验实时 focus、Linux 的 window-active，
+拒绝换 owner 后尚未重画的旧 handler。既有 focus-out callback 清除 stamp，保证 retained
+hidden view 重现于同一位置仍能刷新；不改变 composition/commit/unmark/焦点归属。
+stock X11/Wayland 在 composing 时跳过显式 position update，而同步 preedit 回调仍可能查询旧 layout；
+这个后布局通知修复不解决该独立时序边界，原生候选位置必须另外实测。
+
 ### Multi-block DocumentView
 
 `DocumentView` 持有共享 session，并按文档序为 inline-bearing block 挂载 `ParagraphView`。焦点跟随 `DocumentSelection` focus node 路由。

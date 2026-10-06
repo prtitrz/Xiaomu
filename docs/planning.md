@@ -1,5 +1,10 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-06独立后继：GPUI 在已 paint 的 focused selection-head 几何变化后请求 stock IME
+坐标刷新，抑制稳定帧、后台与 hidden input 的重复通知，不改 Core/Runtime/GPUI 或原生
+composition 协议。X11 composing 期间的同步旧-layout 查询仍独立保留，不能称候选位置
+或整套 IME 原生验收已通过，见 [Input / IME](architecture.md#input--ime)。
+
 2026-10-06增量：GPUI 默认关闭的 measured column-resize capability 将真实列边缘、
 临时子树 reflow/caret geometry 与 host guard/单次 commit callback 分开。
 Core/Runtime/persistence 不变；整数宽度、嵌套/span、安全取消及原生输入连续性由专门回归覆盖。

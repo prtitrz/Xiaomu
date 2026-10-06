@@ -17,6 +17,7 @@ mod hard_break_display_tests;
 mod ime;
 #[cfg(test)]
 mod ime_atom_tests;
+mod ime_coordinates;
 mod ime_geometry;
 mod input_handler;
 mod layout;
@@ -152,6 +153,7 @@ pub struct ParagraphView {
     pub(super) last_layout: Option<BlockTextLayout>,
     pub(super) last_bounds: Option<Bounds<Pixels>>,
     pub(super) cache_key: Option<LayoutCacheKey>,
+    ime_coordinates: ime_coordinates::ImeCoordinates,
     /// Render generation shared with the owning document view.
     pub(super) epoch: Rc<std::cell::Cell<u64>>,
     pub(crate) bounds_registry: BlockBoundsRegistry,
@@ -224,6 +226,7 @@ impl ParagraphView {
             last_layout: None,
             last_bounds: None,
             cache_key: None,
+            ime_coordinates: Default::default(),
             epoch,
             bounds_registry,
             scroll_handle: None,
@@ -549,7 +552,10 @@ impl Render for ParagraphView {
                 Some(
                     window.on_focus_out(&self.focus_handle, cx, move |_, _, cx| {
                         if let Some(view) = entity.upgrade() {
-                            view.update(cx, |view, cx| view.cancel_if_composing(cx));
+                            view.update(cx, |view, cx| {
+                                view.ime_coordinates.clear();
+                                view.cancel_if_composing(cx);
+                            });
                         }
                     }),
                 );
