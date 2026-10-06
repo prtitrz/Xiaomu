@@ -200,3 +200,80 @@ fn revoked_table_callback_and_central_guard_do_not_sample(cx: &mut TestAppContex
     assert_eq!(text(&opened.session, opened.fixture.before), "ab");
     assert_eq!(opened.session.borrow().history_depths(), (1, 0));
 }
+
+#[gpui::test]
+fn atomic_host_target_refusal_preserves_timed_group_high_water(cx: &mut TestAppContext) {
+    for (next_time, depth) in [(1500, 1), (1501, 2)] {
+        let opened = open(cx);
+        opened.clock.milliseconds.set(1000);
+        cx.simulate_input(opened.handle.into(), "a");
+        let snapshot = Snapshot::capture(&opened);
+        opened.clock.milliseconds.set(5000);
+        let target = DocumentSelection::collapsed(point(&opened.session, opened.fixture.nested, 0));
+        opened
+            .handle
+            .update(cx, |view, window, cx| {
+                for text in ["?", "!", "#"] {
+                    view.apply_edit_intent_with_selection(
+                        target,
+                        EditIntent::InsertText { text: text.into() },
+                        window,
+                        cx,
+                    );
+                }
+            })
+            .unwrap();
+        assert_eq!(opened.clock.samples.get(), 4);
+        snapshot.assert_unchanged(&opened);
+        opened.clock.milliseconds.set(next_time);
+        cx.simulate_input(opened.handle.into(), "b");
+        assert_eq!(opened.session.borrow().history_depths(), (depth, 0));
+    }
+}
+
+#[gpui::test]
+fn atomic_host_target_keeps_same_target_typing_and_changed_target_barrier(cx: &mut TestAppContext) {
+    let opened = open(cx);
+    opened.clock.milliseconds.set(1000);
+    cx.simulate_input(opened.handle.into(), "a");
+    opened.clock.milliseconds.set(1100);
+    let same = opened.session.borrow().selection();
+    opened
+        .handle
+        .update(cx, |view, window, cx| {
+            view.apply_edit_intent_with_selection(
+                same,
+                EditIntent::InsertText { text: "b".into() },
+                window,
+                cx,
+            );
+        })
+        .unwrap();
+    assert_eq!(text(&opened.session, opened.fixture.before), "ab");
+    assert_eq!(opened.session.borrow().history_depths(), (1, 0));
+    let original = opened.session.borrow().selection();
+    let target = DocumentSelection::collapsed(point(&opened.session, opened.fixture.nested, 0));
+    opened.clock.milliseconds.set(1101);
+    opened
+        .handle
+        .update(cx, |view, window, cx| {
+            view.apply_edit_intent_with_selection(
+                target,
+                EditIntent::InsertText { text: "X".into() },
+                window,
+                cx,
+            );
+        })
+        .unwrap();
+    let after = opened.session.borrow().selection();
+    assert_eq!(opened.session.borrow().history_depths(), (2, 0));
+    assert_eq!(opened.counts.get(), (3, 0));
+    assert_eq!(opened.clock.samples.get(), 3);
+    opened.session.borrow_mut().undo().unwrap();
+    assert_eq!(opened.session.borrow().selection(), original);
+    assert_eq!(text(&opened.session, opened.fixture.before), "ab");
+    assert_eq!(text(&opened.session, opened.fixture.nested), "");
+    opened.session.borrow_mut().redo().unwrap();
+    assert_eq!(opened.session.borrow().selection(), after);
+    assert_eq!(text(&opened.session, opened.fixture.nested), "X");
+}

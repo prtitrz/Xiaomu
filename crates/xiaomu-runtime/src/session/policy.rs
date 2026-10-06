@@ -49,6 +49,7 @@ impl std::error::Error for PolicyError {}
 pub struct SessionContext<'a> {
     document: &'a XiaomuDocument,
     selection: DocumentSelection,
+    original_selection: DocumentSelection,
     stored_marks: Option<&'a MarkSet>,
     input_rule_undo_available: bool,
 }
@@ -72,6 +73,18 @@ impl<'a> SessionContext<'a> {
     #[must_use]
     pub const fn selection(self) -> DocumentSelection {
         self.selection
+    }
+
+    /// Returns the session selection from before this operation.
+    ///
+    /// An atomic target-selection intent may have a different [`Self::selection`].
+    /// This original selection remains valid in [`Self::document`] and lets a
+    /// policy preserve source-selection semantics without publishing a move.
+    /// Ordinary intents and clipboard preparation use the same original and
+    /// target selections. It is not a retained selection from an earlier edit.
+    #[must_use]
+    pub const fn original_selection(self) -> DocumentSelection {
+        self.original_selection
     }
 
     /// Returns explicit typing marks; `None` means surrounding-run inheritance.
@@ -212,6 +225,7 @@ impl DocumentSession {
             policy.prepare_cut(SessionContext {
                 document: &self.document,
                 selection: self.selection,
+                original_selection: self.selection,
                 stored_marks: self.stored_marks.as_ref(),
                 input_rule_undo_available: self.input_rule_undo_available_at(self.selection),
             })
@@ -227,6 +241,7 @@ impl DocumentSession {
                 SessionContext {
                     document: &self.document,
                     selection: self.selection,
+                    original_selection: self.selection,
                     stored_marks: self.stored_marks.as_ref(),
                     input_rule_undo_available: self.input_rule_undo_available_at(self.selection),
                 },
@@ -318,6 +333,7 @@ impl DocumentSession {
                 SessionContext {
                     document: &self.document,
                     selection,
+                    original_selection: self.selection,
                     stored_marks: if selection == self.selection {
                         self.stored_marks.as_ref()
                     } else {

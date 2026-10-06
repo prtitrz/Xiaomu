@@ -95,8 +95,8 @@ impl EditorRejectionReason {
 /// to discard a queued diagnostic after a later canonical edit. It is not a
 /// full immutable session snapshot, persistence timestamp or global sequence.
 ///
-/// Coverage is intentionally narrow: failed `apply_edit_intent` calls, host edit
-/// command routing, Copy/Cut projection or lossless transport, and rejected
+/// Coverage is intentionally narrow: failed `apply_edit_intent` and
+/// `apply_edit_intent_with_selection` calls, host edit command routing, Copy/Cut projection or lossless transport, and rejected
 /// native Paste metadata. Successful edits, `NoChange`, empty/unsupported foreign
 /// clipboards, legacy Copy text fallback, and composition/presentation guards do
 /// not emit. Direct `ParagraphView` typing and IME input, direct session calls,

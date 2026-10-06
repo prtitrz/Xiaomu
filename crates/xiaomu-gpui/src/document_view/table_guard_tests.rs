@@ -619,3 +619,32 @@ fn visible_whole_table_and_all_proxies_keep_native_input_eligibility(cx: &mut Te
     assert_eq!(s.borrow().document().store(), f.document.store());
     assert_eq!(s.borrow().history_depths(), (0, 0));
 }
+
+#[gpui::test]
+fn atomic_host_target_cannot_bypass_current_or_target_hidden_table_guard(cx: &mut TestAppContext) {
+    let f = fixture(Some("rowspan"));
+    let visible = caret(&f, f.before, 0);
+    let hidden = caret(&f, f.blocks[0], 0);
+    for (original, target) in [(visible, hidden), (hidden, visible)] {
+        let s = session(&f, original);
+        let handle = open(cx, s.clone());
+        handle
+            .update(cx, |view, window, cx| {
+                let epoch = view.epoch.get();
+                view.apply_edit_intent_with_selection(
+                    target,
+                    EditIntent::InsertText {
+                        text: "blocked".into(),
+                    },
+                    window,
+                    cx,
+                );
+                assert_eq!(view.epoch.get(), epoch);
+            })
+            .unwrap();
+        assert_eq!(s.borrow().document().store(), f.document.store());
+        assert_eq!(s.borrow().document().revision(), f.document.revision());
+        assert_eq!(s.borrow().selection(), original);
+        assert_eq!(s.borrow().history_depths(), (0, 0));
+    }
+}
