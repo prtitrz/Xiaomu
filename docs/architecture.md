@@ -96,6 +96,11 @@ XiaomuDocument
 
 `NodeId` 稳定且 opaque。内部 representation 不属于公开 contract，普通外部 API 不能从 raw integer 任意构造 NodeId。当前确定性 allocator 由 `NodeStoreBuilder` 持有，失败构建不会消耗 ID。
 
+`XiaomuDocument::can_allocate_node_ids(count)` 是 snapshot 上的只读容量预检，按实际 allocator
+的 checked-add 规则计算，包含 Undo 后仍保留的已消耗身份高水位。零个身份在耗尽时也可容纳。
+查询不暴露 raw ID/高水位、不预留容量、不校验编辑；事务应用时的分配检查仍是最终权威。
+宿主可用它在构造大规模临时表格骨架前拒绝不可分配的计划，不能用最大存活 ID 代替。
+
 `HeadingLevel` 校验 built-in heading 范围 `1..=6`。`NodeKind` 提供 built-in structural semantics，并支持 extension-defined custom key。
 
 `NodeKind::TaskList` / `TaskItem` 是独立 builtin 容器，不转换成普通列表。TaskList 只接 TaskItem；TaskItem 接普通 block（可嵌套 task/ordinary list、Code、Image、Quote、Table）。Core 允许空容器与任意合法首 block；宿主持久化的 paragraph-first/nonempty 规则归 codec / final SessionPolicy 校验。`checked` 仅存在 NodeAttrs，missing / null / false / true 原样保存，错误类型由 `InvalidTaskItemChecked` 拒绝；读取不补默认值，未知 Core attrs 仍保留。Task clipboard 条件写 v12，显式保存 open/closed，遍历包括 table-cell payload；旧非 Task wire 不变，旧版本拒绝新 kind。默认 PasteSlice 在 policy 之后、任何 fitting/state 改动之前返回 `UnsupportedEdit`，防止 task wrapper 被单段 paste 静默丢失；generic Markdown 明确拒绝 Task。此为 canonical/clipboard 基础，未包含 task 命令、checkbox UI 或原生验收。见 [ADR 0011](adr/0011-typed-task-lists.md)。
@@ -436,6 +441,23 @@ staged plan 的多个 Core transaction 对用户表现为一笔 history。undo �
 
 Runtime clipboard 已从 P2 的纯文本 seam 升级为 frontend-neutral structured clipboard：
 
+2026-10-04 的 opt-in 导出增量见 [表格导出契约](table-clipboard-export.md)：
+`SessionPolicy::clipboard_export_spec(context, Copy/Cut)` 在投影与平台写入之前运行。
+默认仍保持历史 unit/TSV/wire 行为；显式Closed配置可复制几何闭合的含跨度 CellRange，
+并独立采用可重算的 LF/LF text-between 文本。CellRange 来源固定 open 1/1、
+区分 Rows 与 Table 根；全篇/完整节点来源为 closed 0/0，二者不会互相推断。
+新 v14 使用固定传输前缀与严格 JSON；`RejectedNative` 禁止 Text/Image fallback。
+投影前借用预算预扫；未知自定义文本语义拒绝；新 CellRange Cut 在写剪贴板前拒绝。
+该默认消费端门禁不因导出能力而开放，也不代表真实 OS 剪贴板验收。
+
+`with_clipped_cell_ranges(NodeAttrs)`另行选择精确源bbox裁切，节点默认值由宿主提供。
+从上/左进入的cell只保留kind和裁后attrs，rich forest换成一个空Paragraph；仅右/底
+裁切保持全部内容。输出按裁后origin排序，行metadata属于所选原物理行，横裁全0
+colwidth变null而纯纵裁保留原数组。借用完整源、roots frame与重复默认P预算在
+任何payload克隆前完成；不消耗源/目标allocator，既有验证树仍使用临时本地ID。
+spec改Clone、内部Arc共享默认attrs；geometry builder替换整个模式，旧Closed
+准入与预算不变。CellRange仍v14/open1/1，Cut、默认Paste与Code降级门禁未扩大。
+
 ```text
 DocumentSelection
 → ClipboardSlice
@@ -546,6 +568,20 @@ IME composition 的 preedit 保持 frontend-local，不推进 document revision�
 ### Multi-block DocumentView
 
 `DocumentView` 持有共享 session，并按文档序为 inline-bearing block 挂载 `ParagraphView`。焦点跟随 `DocumentSelection` focus node 路由。
+
+`DocumentView` 实现可选的 `EventEmitter<EditorRejection>`。事件只携带固定的
+`EditorRejectionStage` / `EditorRejectionReason`，不携带正文、剪贴板、attrs 或
+policy 任意字符串；失败 session 借用释放、回滚完成后才发出。宿主对具体 Entity
+订阅并自持 subscription，负责忽略旧 view、展示与清除反馈。事件不推进 document /
+selection listener、history、epoch 或 dirty，也不改 `EditorHooks` 必填接口。
+覆盖范围限 `apply_edit_intent`、host command routing、Copy/Cut 投影和无损传输、
+已识别 native Paste metadata 拒绝；成功、NoChange、composition guard 保持静默。
+直接 ParagraphView typing/IME、直接 session 调用、selection/navigation、history、
+persistence、image import 和返回 Result 的 `apply_edit_transaction` 不在此事件流内。
+这不是通用错误或保存状态流。事件同时记录发出时内容无关的
+`DocumentRevision`；宿主先匹配Entity，再与当前canonical revision比较，可过滤
+同一次外层GPUI update中被后续成功编辑超越的旧诊断。它仍不是完整session快照、
+保存时间或跨实例时钟，selection/persistence不能从该stamp推断。
 
 P4.1 新增 `DocumentView::inline_focus_point` 与 `DocumentView::inline_selection_points`，将现有 Runtime selection/focus 投影为 `InlinePoint`。当前纯文本路径仍得到 ordinal 0；后续 atom placement 出现后，上层 GPUI API 不需要再次更名或另建平行 position 类型。
 
@@ -711,13 +747,15 @@ P4.9 的实现与三平台 CI 于 2026-09-05 完成。2026-10-01 审计更正了
 
 ## P5.1-P5.2 Table 模型与 Cell 编辑事实
 
+`TransactionStep::IsolateTableRect { table, rect }` 在已容纳目标的逻辑网格上隔离矩形边界，复用逻辑轴编辑的 staged `TableEdit` 和 guarded `RestoreTableCells`。按 top/bottom 后 left/right 的条带分解，每个 crossing origin 至多五片；原 top-left 片保留原 ID 和完整 rich forest，其余片分配同 kind cell 与空 attrs Paragraph。只修改必要 span；仅实际列裁切的 colwidth slice 将全零转为 null，单纯行裁切和未触及 attrs 保真。table/row 身份与原始 attrs 保留，row gaps 通过逐个新 cell 的 mapping 平移，Undo/Redo 恢复首次分配身份。闭合矩形不产生 maps、inverse 或 ID；整个 transaction 仍沿既有 revision 语义。借用 preflight 在 owned patch 构造前累计 fragments、paragraph、attrs、child-ID vectors 和保守 payload passes，沿用现有 grid、64 MiB / 100 万 values / 64 层 attrs 界限；这是 Core admission，不是 RSS 保证。增长、最终替换、宿主默认值和宽度修复仍归调用方；该安全几何操作不声明任何宿主或原版编辑器行为等价。
+
 表格是普通树节点（`NodeKind::Table / TableRow / TableCell`），canonical 不变量（行数 ≥1、列数一致、cell 非空）由 `validate_tree` 持有，违规为 `Error::InvalidTableStructure`；`allows_child` 禁止 TableRow 进入 Document/Quote/ListItem/TableCell、禁止 cell 直接携带 InlineAtom。cell 支持完整 block 子树与嵌套表。构造不能经 `InsertNode` validated staging 表达，因此 Core 提供 `InsertTable { parent, index, rows, columns }` 与 `InsertTableRow { table, index }`：新 cell 含空 Paragraph，map 指向实际插入的 table/row，Runtime 按需解析新 row 内首个 inline 后代作 caret 目标；inverse 删除整子树，degenerate 输入 fail closed。Runtime `EditIntent::InsertTable` 在聚焦块后插入整表（单 isolated history entry，caret 原地保留）。
 
 Cell 编辑（P5.2）复用既有 intent，无表格特例事务：Tab/Shift+Tab 走 `EditIntent::MoveToNextCell / MoveToPreviousCell`（`session/table.rs`），caret-only 导航——无事务、无 history；Atomic 焦点（cell 内 HR/Image）同样导航，Gap 焦点不导航。表内最后一个 cell 上 Tab 触发 `InsertTableRow` 并把 caret 落在新行首 cell，redo 经 `inverse(undo)` 恢复同一批 node id。cell 内 Enter/Backspace/Delete/typing/IME 全部走既有 parent-generic 路径：Backspace 在 cell 首段起点是有意 no-op（不跨 cell / 跨行 join），Enter 在 cell 内段落 split 留在原 cell，typing 在 cell 内照常 coalesce，IME commit 保持 isolated entry + stored marks 语义。测试：`crates/xiaomu-core/tests/table_model.rs`、`crates/xiaomu-runtime/tests/p5_cell_editing.rs`。
 
 行列操作（P5.3）：插入走 `InsertTableRow { table, index }` 与 `InsertTableColumn { table, index }`。列插入使每行都新增 cell，所以一次 Core step 产生多个 `NodeInserted` map（每行一个，指向实际 cell），保证所有行的 `NodeGap` 都准确平移；不能只报告首行，也不能把插入节点伪装成 descendant paragraph。删除走单事务 `RemoveNode` 组合，Core 只验证最终快照；最后一行/列 fail closed。Runtime 先校验表身份/index，被删子树内 caret/selection 收敛到 `CaretAtGap`，其余 `MapExisting`；undo 恢复同一批 node id（含 atom）。测试：`p5_row_column_ops.rs`、`p5_review_regressions.rs` 与 Core `table_model.rs`。
 
-Cell 选区与 clipboard（P5.5及后续逻辑网格）：`DocumentSelection` 携带 `Option<CellRange>`，端点为同表 cell identity；`CellRange::cells` 保留无跨度矩阵契约。跨度另用 `logical_rect/unique_origins/is_closed_rect`，origin规则排除从矩形上方/左方跨入的cell，不重复覆盖slot。矩形非 collapsed，不暴露成single-node text selection；text端点为合法停靠位置。通用Delete/Backspace清空选中origin的内容、每格留空Paragraph并保cell身份/attrs/形状；Toggle/Set/RemoveMark递归处理选中子树与inline atoms，一次全范围决定和一次历史。typing/plain paste/IME按unique origins替换，在gesture anchor接文本，其它选中cell留空P；空range proxy的IME仅接受0..0，普通inline范围不受影响。partial跨度clipboard与未定义结构命令仍拒绝。产品head-cell输入与整表Backspace删除需宿主显式策略。merge后的CellRange两端按Core身份映射到survivor，Undo恢复原内容、身份和逆向矩形。
+Cell 选区与 clipboard（P5.5及后续逻辑网格）：`DocumentSelection` 携带 `Option<CellRange>`，端点为同表 cell identity；`CellRange::cells` 保留无跨度矩阵契约。跨度另用 `logical_rect/unique_origins/is_closed_rect`，origin规则排除从矩形上方/左方跨入的cell，不重复覆盖slot。矩形非 collapsed，不暴露成single-node text selection；text端点为合法停靠位置。通用Delete/Backspace清空选中origin的内容、每格留空Paragraph并保cell身份/attrs/形状；Toggle/Set/RemoveMark递归处理选中子树与inline atoms，一次全范围决定和一次历史。typing/plain paste/IME按unique origins替换，在gesture anchor接文本，其它选中cell留空P；空range proxy的IME仅接受0..0，普通inline范围不受影响。默认partial跨度clipboard与未定义结构命令仍拒绝，宿主显式Clipped Copy独立使用所有相交origins。产品head-cell输入与整表Backspace删除需宿主显式策略。merge后的CellRange两端按Core身份映射到survivor，Undo恢复原内容、身份和逆向矩形。
 
 Clipboard 捕获完整合法子树（含 quote/list、atomic、嵌套 table、marks、inline atoms）及 table/row/cell/block attrs。`Table { rows, row_attrs }` 的空 row_attrs 表示兼容旧载荷；非空行属性写 wire v6，普通表仍 v5。匹配 range paste 替换 cell 内容与 attrs、保留目标 table/row attrs；1×1 粘入 cell 时在 caret 所属直接 child block 后追加；兄弟表插入完整重建所有层级 attrs。非表片段可填充矩形各 cell 内容；尺寸不符/未定义落点 fail closed。hidden validated stages 统一提交一次 history，任何失败不发布中间文档。Table Markdown 导出仍 fail closed。回归见 `p5_cell_range_clipboard.rs`、`p5_review_regressions.rs`、`p5_rich_table_clipboard.rs`。
 

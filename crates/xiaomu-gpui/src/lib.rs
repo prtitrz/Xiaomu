@@ -30,6 +30,7 @@ pub mod editor;
 pub mod editor_commands;
 #[cfg(test)]
 mod font_size;
+pub mod history_clock;
 pub mod image_block;
 pub mod inline_atom;
 pub mod inline_atom_display;

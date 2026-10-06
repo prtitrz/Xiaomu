@@ -12,7 +12,7 @@ use crate::{Error, Result};
 
 use super::ApplyContext;
 
-mod attrs_budget;
+pub(super) mod attrs_budget;
 
 #[cfg(test)]
 mod tests;

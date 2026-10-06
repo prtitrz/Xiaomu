@@ -11,7 +11,9 @@ use xiaomu_core::selection::{InlinePoint, TextPoint};
 use xiaomu_core::text::TextOffset;
 
 use super::intent::{self, CaretMove};
-use super::{DocumentSelection, DocumentSession, SessionError, SessionOutcome};
+use super::{
+    DocumentSelection, DocumentSession, SelectionOnlyGrouping, SessionError, SessionOutcome,
+};
 
 impl DocumentSession {
     pub(super) fn move_caret(
@@ -183,7 +185,9 @@ impl DocumentSession {
         }
         self.selection = next;
         self.clear_stored_marks();
-        self.history.break_group();
+        if self.history_options.selection_only_grouping() == SelectionOnlyGrouping::Close {
+            self.history.break_group();
+        }
         self.notify_selection_changed();
         Ok(SessionOutcome::SelectionChanged)
     }

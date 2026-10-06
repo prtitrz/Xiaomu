@@ -34,6 +34,7 @@ use crate::document_view::{
     cell_selection::{EscapeCellRange, SelectCell},
 };
 use crate::editor_commands::{EditorCommandRouter, PrimaryModifierEnter};
+use crate::history_clock::{MonotonicHistoryClock, SharedHistoryClock};
 use crate::image_block::SharedImageAssetService;
 use crate::inline_atom::InlineAtomRendererRegistry;
 use crate::list_marker::ListMarkerLabelProvider;
@@ -67,6 +68,7 @@ pub struct EditorHooks {
 /// the embedding seam used by the P3.6 multi-editor integration fixture.
 pub struct EditorInstance {
     session: SharedSession,
+    history_clock: SharedHistoryClock,
     persistence: Option<Rc<RefCell<dyn DocumentPersistence>>>,
     atom_renderers: Option<Rc<InlineAtomRendererRegistry>>,
     atom_capability: Option<SharedAtomCapability>,
@@ -89,7 +91,11 @@ impl EditorInstance {
         hooks: EditorHooks,
     ) -> Result<Self, xiaomu_runtime::session::SessionError> {
         let session = DocumentSession::new(document, selection)?;
-        Ok(Self::from_session(session, hooks))
+        Ok(Self::from_session(
+            session,
+            hooks,
+            Rc::new(MonotonicHistoryClock::new()),
+        ))
     }
 
     /// Creates an independent editor with construction-time host edit rules.
@@ -103,16 +109,42 @@ impl EditorInstance {
         hooks: EditorHooks,
         policy: Box<dyn SessionPolicy>,
     ) -> Result<Self, xiaomu_runtime::session::SessionError> {
-        let session = DocumentSession::new_with_policy(document, selection, policy)?;
-        Ok(Self::from_session(session, hooks))
+        Self::new_with_policy_and_history_clock(
+            document,
+            selection,
+            hooks,
+            policy,
+            Rc::new(MonotonicHistoryClock::new()),
+        )
     }
 
-    fn from_session(mut session: DocumentSession, hooks: EditorHooks) -> Self {
+    /// Creates an editor with a fixed, explicitly supplied history clock.
+    ///
+    /// Every view and future input child shares this clock. Supply a monotonic
+    /// clock whose origin stays fixed for the session's entire lifetime.
+    /// History timing remains opt-in through the construction-time policy.
+    pub fn new_with_policy_and_history_clock(
+        document: XiaomuDocument,
+        selection: DocumentSelection,
+        hooks: EditorHooks,
+        policy: Box<dyn SessionPolicy>,
+        history_clock: SharedHistoryClock,
+    ) -> Result<Self, xiaomu_runtime::session::SessionError> {
+        let session = DocumentSession::new_with_policy(document, selection, policy)?;
+        Ok(Self::from_session(session, hooks, history_clock))
+    }
+
+    fn from_session(
+        mut session: DocumentSession,
+        hooks: EditorHooks,
+        history_clock: SharedHistoryClock,
+    ) -> Self {
         if let Some(listener) = hooks.listener {
             session.add_listener(listener);
         }
         Self {
             session: Rc::new(RefCell::new(session)),
+            history_clock,
             persistence: hooks.persistence,
             atom_renderers: hooks.atom_renderers,
             atom_capability: hooks.atom_capability,
@@ -159,7 +191,8 @@ impl EditorInstance {
     /// distinct editor state requires distinct [`EditorInstance`] values.
     #[must_use]
     pub fn build_view(&self) -> DocumentView {
-        let mut view = DocumentView::new(self.session.clone());
+        let mut view =
+            DocumentView::new_with_history_clock(self.session.clone(), self.history_clock.clone());
         if let Some(persistence) = &self.persistence {
             view.set_persistence(persistence.clone());
         }

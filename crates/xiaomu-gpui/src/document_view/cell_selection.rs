@@ -70,6 +70,7 @@ impl DocumentView {
                     self.session.clone(),
                     self.epoch.clone(),
                     cell,
+                    self.history_clock.clone(),
                     cx,
                 )
             });

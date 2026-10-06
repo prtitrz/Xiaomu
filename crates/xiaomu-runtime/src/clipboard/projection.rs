@@ -223,7 +223,10 @@ fn slice_cell_range(
 
 /// Captures a complete canonical subtree, including containers and atomic
 /// blocks. Inline atoms become detached payloads with fresh identities on paste.
-fn whole_fragment(document: &XiaomuDocument, id: NodeId) -> Result<ClipboardNode, SessionError> {
+pub(super) fn whole_fragment(
+    document: &XiaomuDocument,
+    id: NodeId,
+) -> Result<ClipboardNode, SessionError> {
     let node = document.node(id).ok_or(SessionError::SelectionInvalid)?;
     let content = match node.content() {
         NodeContent::Inline(inline) => ClipboardNodeContent::Inline(slice_inline(

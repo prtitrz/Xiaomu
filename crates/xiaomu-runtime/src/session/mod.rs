@@ -21,6 +21,10 @@ mod cross_block;
 mod cross_block_atom;
 mod dispatch;
 mod history;
+mod history_options;
+#[cfg(test)]
+mod history_options_tests;
+mod history_timestamp;
 mod image;
 mod input_rule_undo;
 mod intent;
@@ -33,6 +37,9 @@ pub(crate) mod paste_hierarchy;
 mod paste_table;
 mod plan;
 mod policy;
+mod prepared_cut;
+#[cfg(test)]
+mod prepared_cut_tests;
 mod resolve;
 mod selection;
 mod split;
@@ -45,16 +52,23 @@ mod table_commands_tests;
 #[cfg(test)]
 mod table_geometry_tests;
 mod task_checked;
+mod text_input_marks;
 
 pub use history::HistoryStack;
+pub use history_options::{
+    EmptyHistoryBehavior, HistoryOptions, HistorySelectionMode, SelectionOnlyGrouping,
+};
+pub use history_timestamp::HistoryTimestamp;
 pub use input_rule_undo::InputRuleUndoSpec;
 pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
 pub use listener::DocumentChangeListener;
 pub use outcome::{SessionError, SessionOutcome};
 pub use policy::{IntentDisposition, PolicyError, SessionContext, SessionPolicy};
+pub use prepared_cut::PreparedCut;
 pub use selection::CellRange;
 pub use selection::DocumentPosition;
 pub use selection::DocumentSelection;
+pub use text_input_marks::DefaultTextInputMarks;
 
 use xiaomu_core::document::{InlineContent, MarkSet, NodeId, XiaomuDocument};
 use xiaomu_core::selection::{InlinePoint, TextPoint, TextSelection};
@@ -70,6 +84,8 @@ pub struct DocumentSession {
     document: XiaomuDocument,
     selection: DocumentSelection,
     history: HistoryStack,
+    history_options: HistoryOptions,
+    default_text_input_marks: DefaultTextInputMarks,
     stored_marks: Option<MarkSet>,
     listeners: Vec<Box<dyn DocumentChangeListener>>,
     policy: Option<Box<dyn SessionPolicy>>,
@@ -96,6 +112,8 @@ impl DocumentSession {
             document,
             selection,
             history: HistoryStack::new(),
+            history_options: HistoryOptions::new(),
+            default_text_input_marks: DefaultTextInputMarks::PreservePending,
             stored_marks: None,
             listeners: Vec::new(),
             policy: None,
@@ -114,6 +132,18 @@ impl DocumentSession {
     #[must_use]
     pub const fn selection(&self) -> DocumentSelection {
         self.selection
+    }
+
+    /// Returns history options captured once when this session was created.
+    #[must_use]
+    pub const fn history_options(&self) -> HistoryOptions {
+        self.history_options
+    }
+
+    /// Returns default text-input mark behavior captured at construction.
+    #[must_use]
+    pub const fn default_text_input_marks(&self) -> DefaultTextInputMarks {
+        self.default_text_input_marks
     }
 
     /// Returns the single-block Core selection when the whole selection
@@ -144,6 +174,14 @@ impl DocumentSession {
         (self.history.undo_depth(), self.history.redo_depth())
     }
 
+    /// Ends typing grouping before the next edit, without changing document,
+    /// selection, pending marks, input-rule token, either stack or listeners.
+    /// Repeated calls are idempotent. This is a before-only boundary; the next
+    /// eligible typing edit may open a fresh group.
+    pub fn close_history_group(&mut self) {
+        self.history.break_group();
+    }
+
     /// Registers a change listener.
     pub fn add_listener(&mut self, listener: Box<dyn DocumentChangeListener>) {
         self.listeners.push(listener);
@@ -167,20 +205,31 @@ impl DocumentSession {
     /// Undoes the newest history entry.
     ///
     /// Undo replays the recorded inverse transaction (ADR 0003), restoring
-    /// the exact previous store, and reinstates the recorded
-    /// `before_selection` directly. Undo on an empty history is a no-op.
+    /// the exact previous store, and reinstates the entry's `before_selection`.
+    /// An opted-in traversal captures the current selection for the next Redo
+    /// only after success. Empty-stack editing state follows `history_options`.
     pub fn undo(&mut self) -> Result<SessionOutcome, SessionError> {
         self.with_transient_rollback(Self::undo_inner)
     }
 
     fn undo_inner(&mut self) -> Result<SessionOutcome, SessionError> {
+        if self.history.undo_depth() == 0
+            && self.history_options.empty_behavior() == EmptyHistoryBehavior::PreserveEditingState
+        {
+            return Ok(SessionOutcome::NoChange);
+        }
+        let before_traversal = self.selection;
         self.clear_stored_marks();
-        let Some(entry) = self.history.take_undo() else {
+        let Some(mut entry) = self.history.take_undo() else {
             return Ok(SessionOutcome::NoChange);
         };
 
         match self.apply_history_transaction(&entry.undo, entry.before_selection) {
             Ok(()) => {
+                if self.history_options.selection_mode() == HistorySelectionMode::CaptureOnTraversal
+                {
+                    entry.after_selection = before_traversal;
+                }
                 self.history.park_undone(entry);
                 Ok(SessionOutcome::DocumentChanged)
             }
@@ -194,19 +243,31 @@ impl DocumentSession {
     /// Redoes the newest undone entry.
     ///
     /// Redo replays the original transaction and reinstates the recorded
-    /// `after_selection`. Redo on an empty redo stack is a no-op.
+    /// `after_selection`. Opted-in capture saves the current selection for the
+    /// next Undo only after success, not for the current target document.
+    /// Empty-stack editing state follows `history_options`.
     pub fn redo(&mut self) -> Result<SessionOutcome, SessionError> {
         self.with_transient_rollback(Self::redo_inner)
     }
 
     fn redo_inner(&mut self) -> Result<SessionOutcome, SessionError> {
+        if self.history.redo_depth() == 0
+            && self.history_options.empty_behavior() == EmptyHistoryBehavior::PreserveEditingState
+        {
+            return Ok(SessionOutcome::NoChange);
+        }
+        let before_traversal = self.selection;
         self.clear_stored_marks();
-        let Some(entry) = self.history.take_redo() else {
+        let Some(mut entry) = self.history.take_redo() else {
             return Ok(SessionOutcome::NoChange);
         };
 
         match self.apply_history_transaction(&entry.redo, entry.after_selection) {
             Ok(()) => {
+                if self.history_options.selection_mode() == HistorySelectionMode::CaptureOnTraversal
+                {
+                    entry.before_selection = before_traversal;
+                }
                 self.history.requeue_redone(entry);
                 Ok(SessionOutcome::DocumentChanged)
             }

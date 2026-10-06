@@ -1,39 +1,134 @@
 //! Clipboard actions preserve transport identity before optional host routing.
 
-use super::DocumentView;
+use super::{DocumentView, EditorRejectionReason, EditorRejectionStage};
 use crate::block_view::{ClipboardCopy, ClipboardCut, ClipboardPaste};
 use crate::editor_commands::{CodePasteSource, EditorCommand};
-use crate::input::platform_clipboard::{PlatformClipboard, PlatformClipboardContent};
+use crate::input::platform_clipboard::{
+    PlatformClipboard, PlatformClipboardContent, prepare_lossless_slice,
+};
 use gpui::{Context, Window};
 use xiaomu_core::document::NodeKind;
-use xiaomu_runtime::clipboard::{normalize_multiline_paste_text, normalize_paste_text};
-use xiaomu_runtime::session::EditIntent;
+use xiaomu_runtime::clipboard::{
+    ClipboardExportPurpose, normalize_multiline_paste_text, normalize_paste_text,
+};
+use xiaomu_runtime::session::{EditIntent, SessionError, SessionOutcome};
+
+enum CutRejection {
+    Session(SessionError),
+    Metadata,
+}
 
 impl DocumentView {
     pub(crate) fn copy(&mut self, _: &ClipboardCopy, _: &mut Window, cx: &mut Context<Self>) {
-        match self.session.borrow().clipboard_slice() {
-            Ok(Some(slice)) => PlatformClipboard::new(&*cx).write_slice(&slice),
+        let slice = self
+            .session
+            .borrow()
+            .clipboard_slice_for(ClipboardExportPurpose::Copy);
+        match slice {
+            Ok(Some(slice)) => {
+                if !PlatformClipboard::new(&*cx).write_slice(&slice) {
+                    self.emit_rejection(
+                        EditorRejectionStage::ClipboardCopy,
+                        EditorRejectionReason::ClipboardMetadata,
+                        cx,
+                    );
+                }
+            }
             Ok(None) => {}
-            Err(error) => eprintln!("xiaomu: clipboard projection failed: {error}"),
+            Err(error) => {
+                eprintln!("xiaomu: clipboard projection failed: {error}");
+                self.emit_session_rejection(EditorRejectionStage::ClipboardCopy, &error, cx);
+            }
         }
     }
 
     pub(crate) fn cut(&mut self, _: &ClipboardCut, window: &mut Window, cx: &mut Context<Self>) {
-        let slice = match self.session.borrow().clipboard_slice() {
+        // Admission precedes every clipboard write, including the legacy path.
+        // These presentation/composition guards are deliberately silent.
+        if self.selection_has_hidden_table_endpoint() || self.focused_child_composing(window, cx) {
+            return;
+        }
+        let prepared_outcome = {
+            let mut session = self.session.borrow_mut();
+            let result = match session.prepare_cut() {
+                Ok(Some(prepared)) => match prepare_lossless_slice(prepared.clipboard_slice()) {
+                    Some(item) => {
+                        // Stock GPUI's writer is synchronous, returns unit and
+                        // does not call into this session. Keep the same borrow
+                        // until the exact prevalidated candidate is published.
+                        PlatformClipboard::new(&*cx).write_prepared_item(item);
+                        Ok(Some(prepared.publish()))
+                    }
+                    None => Err(CutRejection::Metadata),
+                },
+                Ok(None) => Ok(None),
+                Err(error) => Err(CutRejection::Session(error)),
+            };
+            drop(session);
+            result
+        };
+        // Both the opaque guard and RefMut are gone before rejection emission,
+        // view synchronization or any other operation that reborrows session.
+        match prepared_outcome {
+            Ok(Some(outcome)) => {
+                self.finish_cut(outcome, window, cx);
+                return;
+            }
+            Ok(None) => {}
+            Err(CutRejection::Session(error)) => {
+                eprintln!("xiaomu: cut preparation failed: {error}");
+                self.emit_session_rejection(EditorRejectionStage::ClipboardCut, &error, cx);
+                return;
+            }
+            Err(CutRejection::Metadata) => {
+                self.emit_rejection(
+                    EditorRejectionStage::ClipboardCut,
+                    EditorRejectionReason::ClipboardMetadata,
+                    cx,
+                );
+                return;
+            }
+        }
+
+        // No dedicated policy opted in: preserve the historical projection /
+        // write / generic Delete route. Its Delete can still reject after a
+        // write; prepared-Cut semantic atomicity does not extend to this path.
+        let projected = self
+            .session
+            .borrow()
+            .clipboard_slice_for(ClipboardExportPurpose::Cut);
+        let slice = match projected {
             Ok(Some(slice)) => slice,
             Ok(None) => return,
             Err(error) => {
                 eprintln!("xiaomu: clipboard projection failed: {error}");
+                self.emit_session_rejection(EditorRejectionStage::ClipboardCut, &error, cx);
                 return;
             }
         };
         if !PlatformClipboard::new(&*cx).write_slice_for_cut(&slice) {
             eprintln!("xiaomu: cut requires lossless structured clipboard metadata");
+            self.emit_rejection(
+                EditorRejectionStage::ClipboardCut,
+                EditorRejectionReason::ClipboardMetadata,
+                cx,
+            );
             return;
         }
-        // Clipboard projection is read-only; Delete remains the one history
-        // mutation for the whole cut command.
         self.apply_intent(EditIntent::Delete, window, cx);
+    }
+
+    fn finish_cut(&mut self, outcome: SessionOutcome, window: &mut Window, cx: &mut Context<Self>) {
+        self.desired_x = None;
+        if outcome != SessionOutcome::NoChange {
+            self.epoch.set(self.epoch.get() + 1);
+        }
+        if outcome == SessionOutcome::DocumentChanged {
+            self.sync_children(cx);
+            self.route_focus(window, cx);
+            self.request_focus_scroll(cx);
+        }
+        cx.notify();
     }
 
     pub(crate) fn paste(
@@ -45,8 +140,17 @@ impl DocumentView {
         if self.focused_child_composing(window, cx) {
             return;
         }
-        let Some(content) = PlatformClipboard::new(&*cx).read_content() else {
-            return;
+        let content = match PlatformClipboard::new(&*cx).read_content_checked() {
+            Ok(Some(content)) => content,
+            Ok(None) => return,
+            Err(_) => {
+                self.emit_rejection(
+                    EditorRejectionStage::ClipboardPaste,
+                    EditorRejectionReason::ClipboardMetadata,
+                    cx,
+                );
+                return;
+            }
         };
         let code_block = matches!(self.focused_node_kind(), Some(NodeKind::CodeBlock));
         match content {
@@ -96,10 +200,11 @@ impl DocumentView {
                     if self.route_code_slice_command(&slice, window, cx) {
                         return;
                     }
-                    if !slice.is_closed() {
+                    if slice.allows_default_fitting() {
                         // Preserve the original plain-code default only for
-                        // open slices. Closed whole-root data must keep its
-                        // structured meaning unless the host opts into text.
+                        // ordinary open slices. Whole roots and CellRange
+                        // carriers retain their boundary unless the host
+                        // explicitly routes them to text above.
                         let text = normalize_multiline_paste_text(slice.plain_text());
                         if !text.is_empty() {
                             self.apply_intent(EditIntent::PasteText { text }, window, cx);
@@ -130,3 +235,15 @@ impl DocumentView {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "clipboard_export_tests.rs"]
+mod export_tests;
+
+#[cfg(test)]
+#[path = "clipboard_native_tests.rs"]
+mod native_tests;
+
+#[cfg(test)]
+#[path = "cell_carrier_paste_tests.rs"]
+mod cell_carrier_paste_tests;

@@ -2,10 +2,12 @@
 
 use std::fmt;
 
+use crate::clipboard::{ClipboardExportPurpose, ClipboardExportSpec};
 use xiaomu_core::document::{MarkSet, XiaomuDocument};
 
 use super::{
-    DocumentSelection, DocumentSession, EditIntent, EditPlan, SessionError, SessionOutcome,
+    DocumentSelection, DocumentSession, EditIntent, EditPlan, HistoryTimestamp, SessionError,
+    SessionOutcome,
 };
 
 /// A host-defined reason for refusing an intent or document snapshot.
@@ -138,6 +140,50 @@ pub enum IntentDisposition {
 /// rather than recursively dispatching another intent or repairing listeners.
 /// The session can roll back its own state, not a callback's external effects.
 pub trait SessionPolicy {
+    /// Chooses fixed mark consumption for default nonempty inline text input.
+    ///
+    /// Independent from history options. Host plans and other commands retain
+    /// their existing explicit marks-after semantics.
+    fn default_text_input_marks(&self) -> super::DefaultTextInputMarks {
+        super::DefaultTextInputMarks::PreservePending
+    }
+
+    /// Chooses immutable history behavior at session construction.
+    ///
+    /// Defaults retain recorded selections and historical empty-stack behavior.
+    /// The value is captured once, never queried during Undo/Redo or publication.
+    fn history_options(&self) -> super::HistoryOptions {
+        super::HistoryOptions::new()
+    }
+
+    /// Optionally supplies one dedicated, isolated CellRange Cut plan.
+    ///
+    /// `None` preserves the frontend's legacy route. A supplied plan is used
+    /// only by [`DocumentSession::prepare_cut`], together with this policy's
+    /// explicit Cut export spec. Projection-only Cut stays independently
+    /// refused. No platform write or live mutation happens in this callback.
+    /// Generic Delete is not a substitute for the host's exact Cut contract.
+    fn prepare_cut(&self, _context: SessionContext<'_>) -> Result<Option<EditPlan>, PolicyError> {
+        Ok(None)
+    }
+
+    /// Selects explicit clipboard export rules before projection or writes.
+    ///
+    /// This is pure and read-only like other policy callbacks. `None` retains
+    /// historical unit-cell geometry, plain text and metadata behavior. An
+    /// error rejects Copy/Cut before touching the platform clipboard. Hosts
+    /// must reject unsupported Cut purposes here, not in the later Delete.
+    /// Projection-only opted-in CellRange Cut is always rejected by Runtime.
+    /// A host supplying a dedicated [`Self::prepare_cut`] plan can use the
+    /// scoped session preparation API instead. The callback cannot supply
+    /// arbitrary text or authorize a later fallible generic Delete.
+    fn clipboard_export_spec(
+        &self,
+        _context: SessionContext<'_>,
+        _purpose: ClipboardExportPurpose,
+    ) -> Result<Option<ClipboardExportSpec>, PolicyError> {
+        Ok(None)
+    }
     /// Checks or replaces an intent before any session state changes.
     ///
     /// This also runs before structured-paste planning, stored-mark clearing,
@@ -161,6 +207,34 @@ pub trait SessionPolicy {
 }
 
 impl DocumentSession {
+    pub(super) fn prepare_cut_plan(&self) -> Result<Option<EditPlan>, PolicyError> {
+        self.policy.as_ref().map_or(Ok(None), |policy| {
+            policy.prepare_cut(SessionContext {
+                document: &self.document,
+                selection: self.selection,
+                stored_marks: self.stored_marks.as_ref(),
+                input_rule_undo_available: self.input_rule_undo_available_at(self.selection),
+            })
+        })
+    }
+
+    pub(crate) fn clipboard_export_spec(
+        &self,
+        purpose: ClipboardExportPurpose,
+    ) -> Result<Option<ClipboardExportSpec>, PolicyError> {
+        self.policy.as_ref().map_or(Ok(None), |policy| {
+            policy.clipboard_export_spec(
+                SessionContext {
+                    document: &self.document,
+                    selection: self.selection,
+                    stored_marks: self.stored_marks.as_ref(),
+                    input_rule_undo_available: self.input_rule_undo_available_at(self.selection),
+                },
+                purpose,
+            )
+        })
+    }
+
     /// Creates a session with host rules that cannot be replaced later.
     ///
     /// Both the initial selection and document must be valid. A rejected
@@ -172,6 +246,8 @@ impl DocumentSession {
     ) -> Result<Self, SessionError> {
         let mut session = Self::new(document, selection)?;
         policy.validate_document(&session.document)?;
+        session.history_options = policy.history_options();
+        session.default_text_input_marks = policy.default_text_input_marks();
         session.policy = Some(policy);
         Ok(session)
     }
@@ -186,6 +262,19 @@ impl DocumentSession {
         self.apply_intent_with_selection(self.selection, intent)
     }
 
+    /// Applies one intent with explicit time from this session's clock domain.
+    ///
+    /// Only successful eligible typing uses the timestamp, and only when the
+    /// session opts into a typing delay. Untimed defaults ignore it. Missing
+    /// time through the older methods isolates typing in an opted-in session.
+    pub fn apply_intent_at(
+        &mut self,
+        intent: &EditIntent,
+        timestamp: HistoryTimestamp,
+    ) -> Result<SessionOutcome, SessionError> {
+        self.apply_intent_with_selection_inner(self.selection, intent, Some(timestamp))
+    }
+
     /// Applies an intent at a validated target selection as one atomic action.
     ///
     /// Platform replacement ranges can use this instead of first publishing
@@ -198,6 +287,29 @@ impl DocumentSession {
         &mut self,
         selection: DocumentSelection,
         intent: &EditIntent,
+    ) -> Result<SessionOutcome, SessionError> {
+        self.apply_intent_with_selection_inner(selection, intent, None)
+    }
+
+    /// Applies an atomic target-selection intent with explicit session time.
+    ///
+    /// A changed target still closes the current group, even when pure
+    /// selection movement is configured to preserve grouping. Time does not
+    /// weaken native typing eligibility or any command's isolation policy.
+    pub fn apply_intent_with_selection_at(
+        &mut self,
+        selection: DocumentSelection,
+        intent: &EditIntent,
+        timestamp: HistoryTimestamp,
+    ) -> Result<SessionOutcome, SessionError> {
+        self.apply_intent_with_selection_inner(selection, intent, Some(timestamp))
+    }
+
+    fn apply_intent_with_selection_inner(
+        &mut self,
+        selection: DocumentSelection,
+        intent: &EditIntent,
+        timestamp: Option<HistoryTimestamp>,
     ) -> Result<SessionOutcome, SessionError> {
         selection.validate(&self.document)?;
         // Preflight deliberately precedes even transient state changes.
@@ -230,7 +342,7 @@ impl DocumentSession {
                 session.history.break_group();
             }
             let outcome = match disposition {
-                IntentDisposition::Continue => session.apply_default_intent(intent),
+                IntentDisposition::Continue => session.apply_default_intent(intent, timestamp),
                 IntentDisposition::NoChange => Ok(SessionOutcome::NoChange),
                 IntentDisposition::StoredMarks(marks) => {
                     if !session.selection.is_collapsed()
@@ -278,7 +390,7 @@ impl DocumentSession {
     ) -> Result<SessionOutcome, SessionError> {
         let selection = self.selection;
         let marks = self.stored_marks.clone();
-        let group_open = self.history.typing_group_open();
+        let grouping = self.history.grouping_state();
         let history_selection_before = self.history_selection_before;
         let input_rule_undo = self.input_rule_undo.clone();
         let result = operation(self);
@@ -286,7 +398,7 @@ impl DocumentSession {
         if result.is_err() {
             self.selection = selection;
             self.stored_marks = marks;
-            self.history.restore_typing_group(group_open);
+            self.history.restore_grouping_state(grouping);
             self.input_rule_undo = input_rule_undo;
         }
         result

@@ -1,5 +1,6 @@
 //! Runtime undo/redo stack with explicit history grouping.
 
+use super::HistoryTimestamp;
 use super::intent::EditPlan;
 use super::selection::DocumentSelection;
 use xiaomu_core::document::NodeId;
@@ -56,17 +57,62 @@ pub(crate) struct HistoryEntry {
     pub(crate) group: HistoryGroup,
 }
 
+/// Cheap transient state saved as a unit when an ordinary operation may fail.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct GroupingState {
+    open: bool,
+    last_edit: Option<HistoryTimestamp>,
+    high_water: Option<HistoryTimestamp>,
+}
+
+impl GroupingState {
+    /// Updates only at successful publication; returns whether time permits a
+    /// merge. Native eligibility and exact selections are checked separately.
+    fn record(&mut self, typing: bool, time: Option<HistoryTimestamp>, delay: Option<u64>) -> bool {
+        if !typing {
+            self.close();
+            return false;
+        }
+        let Some(delay) = delay else {
+            let merge = self.open;
+            self.open = true;
+            self.last_edit = None;
+            return merge;
+        };
+        let Some(time) = time.filter(|time| self.high_water.is_none_or(|high| *time >= high))
+        else {
+            self.close();
+            return false;
+        };
+        let merge = self.open
+            && self.last_edit.is_some_and(|last| {
+                time.as_millis()
+                    .checked_sub(last.as_millis())
+                    .is_some_and(|elapsed| elapsed <= delay)
+            });
+        self.open = true;
+        self.last_edit = Some(time);
+        self.high_water = Some(time);
+        merge
+    }
+
+    fn close(&mut self) {
+        self.open = false;
+        self.last_edit = None;
+        // A boundary never silently starts a new clock domain.
+    }
+}
+
 /// Undo/redo stacks for one session.
 ///
-/// P3.4 keeps grouping explicit: only adjacent `Typing` entries can coalesce,
-/// and only while the current typing group remains open. Selection movement,
-/// formatting commands, structural edits, paste/cut, undo/redo, and explicit
-/// session boundaries close that group. No clock or hidden timeout determines
-/// canonical history semantics.
+/// Only adjacent `Typing` entries can coalesce while their group remains open.
+/// Default grouping is timeless; an optional delay uses explicit caller input
+/// time only. Formatting, structure, paste/cut, undo/redo and explicit boundaries
+/// close the group. Pure selection movement follows its independent option.
 pub struct HistoryStack {
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
-    typing_group_open: bool,
+    grouping: GroupingState,
 }
 
 impl HistoryStack {
@@ -76,7 +122,11 @@ impl HistoryStack {
         Self {
             undo: Vec::new(),
             redo: Vec::new(),
-            typing_group_open: false,
+            grouping: GroupingState {
+                open: false,
+                last_edit: None,
+                high_water: None,
+            },
         }
     }
 
@@ -94,36 +144,48 @@ impl HistoryStack {
 
     /// Ends the currently open typing group without changing either stack.
     pub(crate) fn break_group(&mut self) {
-        self.typing_group_open = false;
+        self.grouping.close();
     }
 
+    pub(super) const fn grouping_state(&self) -> GroupingState {
+        self.grouping
+    }
+
+    pub(super) fn restore_grouping_state(&mut self, grouping: GroupingState) {
+        self.grouping = grouping;
+    }
+
+    #[cfg(test)]
     pub(crate) const fn typing_group_open(&self) -> bool {
-        self.typing_group_open
+        self.grouping.open
     }
 
+    // Legacy private fault fixtures deliberately seed only the open bit.
+    #[cfg(test)]
     pub(crate) fn restore_typing_group(&mut self, open: bool) {
-        self.typing_group_open = open;
+        self.grouping.open = open;
     }
 
     /// Records a committed edit and clears the redo stack.
-    pub(crate) fn record(&mut self, entry: HistoryEntry) {
+    pub(crate) fn record(
+        &mut self,
+        entry: HistoryEntry,
+        timestamp: Option<HistoryTimestamp>,
+        delay: Option<u64>,
+    ) {
         self.redo.clear();
-
-        if self.typing_group_open
-            && entry.group.is_typing()
-            && let Some(previous) = self.undo.pop()
-        {
+        let may_merge = self
+            .grouping
+            .record(entry.group.is_typing(), timestamp, delay);
+        if may_merge && let Some(previous) = self.undo.pop() {
             if let Some(merged_group) = previous.group.merge(entry.group)
                 && previous.after_selection == entry.before_selection
             {
                 self.undo.push(merge_entries(previous, entry, merged_group));
-                self.typing_group_open = true;
                 return;
             }
             self.undo.push(previous);
         }
-
-        self.typing_group_open = entry.group.is_typing();
         self.undo.push(entry);
     }
 
@@ -195,7 +257,7 @@ impl Default for HistoryStack {
 
 /// Derives the history group of one committed plan.
 ///
-/// Single-scalar insertions with the typing policy coalesce with the open
+/// Eligible insertions with the typing policy coalesce with the open
 /// typing group; everything else owns an isolated entry.
 pub(super) fn history_group_for_plan(plan: &EditPlan) -> HistoryGroup {
     use super::intent::HistoryPolicy;

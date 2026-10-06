@@ -1,6 +1,6 @@
 //! Optional host callbacks; no callback receives mutable session state.
 
-use super::DocumentView;
+use super::{DocumentView, EditorRejectionReason, EditorRejectionStage};
 use crate::code_presentation::CodeBlockPresentation;
 use crate::editor_commands::{
     CodePasteSource, CommandRoute, EditorCommand, EditorCommandContext, EditorCommandRouter,
@@ -215,7 +215,14 @@ impl DocumentView {
             Ok(CommandRoute::Default) => return false,
             Ok(CommandRoute::NoChange) => {}
             Ok(CommandRoute::Intent(intent)) => self.apply_intent(intent, window, cx),
-            Err(error) => eprintln!("xiaomu: host command rejected: {error}"),
+            Err(error) => {
+                eprintln!("xiaomu: host command rejected: {error}");
+                self.emit_rejection(
+                    EditorRejectionStage::CommandRouting,
+                    EditorRejectionReason::Policy,
+                    cx,
+                );
+            }
         }
         true
     }

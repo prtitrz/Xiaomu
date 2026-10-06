@@ -4,6 +4,10 @@ use super::intent::{HistoryPolicy, PlannedAction};
 use super::*;
 use xiaomu_core::selection::TextSelection;
 
+#[cfg(test)]
+#[path = "cell_paste_boundary_tests.rs"]
+mod cell_paste_boundary_tests;
+
 impl DocumentSession {
     /// Applies one typed editing intent.
     ///
@@ -16,6 +20,7 @@ impl DocumentSession {
     pub(super) fn apply_default_intent(
         &mut self,
         intent: &EditIntent,
+        timestamp: Option<HistoryTimestamp>,
     ) -> Result<SessionOutcome, SessionError> {
         if matches!(intent, EditIntent::InsertHorizontalRule) {
             return Err(SessionError::UnsupportedEdit);
@@ -50,14 +55,22 @@ impl DocumentSession {
             return Err(SessionError::UnsupportedEdit);
         }
         if let EditIntent::PasteSlice { slice } = intent
-            && slice.is_closed()
+            && !slice.allows_default_fitting()
         {
-            return Err(SessionError::ClipboardClosedUnsupported);
+            // Host policy has already had its chance to provide an exact plan.
+            // A CellRange's open 1/1 Table carrier must not enter the historical
+            // table-root fitter or collapse a target rectangle first.
+            return Err(if slice.is_closed() {
+                SessionError::ClipboardClosedUnsupported
+            } else {
+                SessionError::UnsupportedTableOperation
+            });
         }
         // Policy has already seen the logical command. Normalize only inside
         // default dispatch, so hosts never need to guess a clipboard's origin.
         if matches!(intent, EditIntent::InsertLineBreak) {
-            return self.apply_default_intent(&EditIntent::PasteText { text: "\n".into() });
+            return self
+                .apply_default_intent(&EditIntent::PasteText { text: "\n".into() }, timestamp);
         }
         // An explicitly addressed checkbox never edits or collapses the
         // current selection, including rectangular and structural selections.
@@ -361,7 +374,20 @@ impl DocumentSession {
 
         match action {
             PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
-            PlannedAction::Commit(plan) => self.commit(plan),
+            PlannedAction::Commit(mut plan) => {
+                // Consume only after input is fully planned, so the canonical
+                // inserted content still uses the pending marks. The existing
+                // atomic commit applies this before listeners are notified.
+                // Never turn default typing into a host Apply/isolation unit.
+                if self.default_text_input_marks == DefaultTextInputMarks::ConsumePending
+                    && matches!(intent,
+                        EditIntent::InsertText { text }
+                        | EditIntent::CommitComposition { text, .. } if !text.is_empty())
+                {
+                    plan = plan.with_stored_marks(None);
+                }
+                self.commit_at(plan, timestamp)
+            }
             PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
         }
     }

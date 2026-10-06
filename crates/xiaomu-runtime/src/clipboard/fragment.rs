@@ -10,6 +10,8 @@
 
 use std::collections::BTreeMap;
 
+mod exported;
+
 use xiaomu_core::Result;
 use xiaomu_core::document::{
     AtomKind, AttrValue, InlineAtomContent, InlineContent, NodeAttrs, NodeContent, NodeId,
@@ -17,6 +19,7 @@ use xiaomu_core::document::{
 };
 use xiaomu_core::text::TextOffset;
 
+use super::{ClipboardSourceBoundary, ClipboardTextProjection};
 use crate::session::SessionError;
 
 /// One detached inline atom captured by the clipboard.
@@ -345,6 +348,8 @@ pub struct ClipboardSlice {
     roots: Vec<ClipboardNode>,
     blocks: Vec<ClipboardBlock>,
     closed: bool,
+    source_boundary: Option<ClipboardSourceBoundary>,
+    text_projection: Option<ClipboardTextProjection>,
 }
 
 impl ClipboardSlice {
@@ -384,6 +389,8 @@ impl ClipboardSlice {
             roots,
             blocks,
             closed: false,
+            source_boundary: None,
+            text_projection: None,
         }
     }
 
@@ -444,6 +451,8 @@ impl ClipboardSlice {
             roots: vec![table],
             blocks,
             closed: false,
+            source_boundary: None,
+            text_projection: None,
         })
     }
 

@@ -1,5 +1,56 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-05后继：Core `IsolateTableRect { table, rect }` 以至多五片隔离跨界 cell，
+原top-left身份与rich子树保留，新片只建同kind空段落；不做span面积级unit展开。
+typed guarded inverse复用原TableEdit，row/table元数据、切列宽度、allocator高水位
+与精确Undo/Redo通过20新回归（含225矩形），全库1412/106 binaries+6docs和strict
+门禁通过。预算为保守owned-payload会计而非RSS保证；不代表原版PM等价或产品GUI
+已通过，宿主source/unsafe位置/defaults/repair仍是后继独立接线。
+
+2026-10-05后继：Core 只读 `can_allocate_node_ids(count)` 供宿主在临时表格骨架构造前
+预检真实剩余身份容量；不暴露 ID、不预留或放宽事务验证。两项新回归覆盖零/近 u64 边界、
+clone 无修改与 Undo 后高水位/Redo 身份，workspace 1392 tests + 6 docs、fmt/strict Clippy
+已过。该查询本身不代表宿主增长粘贴或真实 GUI 已验收，见[模型边界](architecture.md#document-value-layer)。
+
+2026-10-05后继：显式`HistoryTimestamp`与独立typing-delay/selection-only选项，
+成功publication才记时，全grouping状态失败回滚；GPUI每EditorInstance共享单调时钟
+给所有输入surface。全库1390/106 binaries、Runtime621、GPUI400与strict门禁通过。
+默认不变，缺失/倒退时间仅隔离不丢输入，IME/host等旧边界保持；产品原oracle回放/
+opt-in/真实GUI另验，不称完整PM history，见[时间契约](timed-history-options.md)。
+
+2026-10-05后继：独立构造期`DefaultTextInputMarks`仅让显式宿主在默认非空inline
+InsertText/CommitComposition成功计划后恢复marks继承，默认/空输入/host plans/删除/
+split/raw/staged不变；13个public-API回归、全库1320/104 binaries与严格门禁通过。
+消费发生在原子publication中，
+不拆typing组、不在listener后补修，见[范围](default-text-input-marks.md)。
+
+2026-10-05后继：构造期固定`HistoryOptions`提供默认兼容的successful-traversal选区
+capture及独立empty-history保持state选项。13项Runtime public/fault隔离回归、
+全库1307测试/strict门禁通过；consumer按真实factory显式接线、GUI另验。时间分组、selection-only分组和非历史
+正文bookmark mapping仍未实现，不能合称完整PM history，见[契约](history-traversal-options.md)。
+
+2026-10-05后继独立stage：宿主显式`SessionPolicy::prepare_cut`与同session独占
+`PreparedCut`复用现有commit完整预检，平台lossless item全部准备后再write→publish。
+全库1294测试、Runtime9状态/历史/allocator回归、6借用compile-fail和7实际虚拟GPUI
+协调器测试已过；产品原factory矩阵、严格门禁与原生GUI分开验收。投影-only opt-in
+Cut仍拒绝，默认legacy保持原边界，不宣称OS确认或跨系统crash原子，见[契约](prepared-table-cut.md)。
+
+2026-10-05后继：显式 `with_clipped_cell_ranges(NodeAttrs)` 已从恢复源码重建并
+重新通过Runtime541、全workspace/all-targets1278、strict Clippy/fmt/source-size/
+dependency-boundary门禁。30个新增用例涵盖四边裁切、rich保留/清空、行metadata、
+width零值、v14/Closed/默认兼容和借用预算。spec从Copy变Clone且共享默认attrs，
+Core/GPUI/default Paste/Cut权限未扩大；详见[表格导出契约](table-clipboard-export.md)。
+消费者真实factory20 Copy/42 Paste证据已独立重生成，接入与原生GUI另行验收。
+
+2026-10-05：在精确 v10 基底 `d918ad72` 上重新构建 per-view
+`EditorRejection` API。新环境 Rust1.97.1 下全 workspace/all-targets 1248 tests
+及strict Clippy/fmt/source/dependency/vendor门禁通过，包含9个公开路由事件回归、
+composition静默与排队metadata拒绝stamp回归；不是丢失本地提交
+`f60ba48` 或旧原生证据的恢复。宿主可按 Entity 绑定固定、无正文的拒绝反馈，
+既有 `EditorHooks` 不变；内容无关的发出时revision供宿主过滤后来编辑已超越的
+排队拒绝，精确覆盖与排除边界见 [architecture](architecture.md#multi-block-documentview)。
+该拒绝反馈检查点的新原生宿主验收独立进行；其之后的Clipped Copy增量见上文。
+
 2026-10-04：[显式全篇选择](adr/0010-explicit-root-selection.md) 修复host CtrlA与普通全文text range混淆的问题。每实例opt-in root gaps、closed clipboard v11、原生range输入/焦点与失败保护已具844全库测试/strictClippy证据；真实产品GUI待复验。旧默认router和普通open剪贴板拟合保持原边界。
 
 > Status: **EARLY / INDEPENDENT PROJECT**

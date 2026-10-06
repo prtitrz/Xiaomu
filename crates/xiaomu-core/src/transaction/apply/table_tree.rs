@@ -5,7 +5,7 @@ use crate::document::{
     allows_child,
 };
 use crate::mapping::StepMap;
-use crate::transaction::table_tree::TemplateContent;
+use crate::transaction::table_tree::{TemplateContent, TemplateNode};
 use crate::transaction::{TableTreeTemplate, TransactionStep};
 use crate::{Error, Result};
 
@@ -69,31 +69,7 @@ impl ApplyContext {
             ))
         };
         for (local, node) in tree.data.nodes.iter().enumerate() {
-            let content = match &node.content {
-                TemplateContent::Children(children) => NodeContent::children(
-                    children
-                        .iter()
-                        .map(|child| fresh(*child))
-                        .collect::<Result<Vec<_>>>()?,
-                ),
-                TemplateContent::Inline { text, atoms } => {
-                    let placements = atoms
-                        .iter()
-                        .map(|(local, offset)| {
-                            Ok(InlineAtomPlacement::new(fresh(*local)?, *offset))
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    NodeContent::Inline(text.with_replaced_atom_placements(placements)?)
-                }
-                TemplateContent::InlineAtom(content) => NodeContent::InlineAtom(content.clone()),
-                TemplateContent::Atomic => NodeContent::Atomic,
-            };
-            replacement.push(Node::new(
-                fresh(local)?,
-                node.kind.clone(),
-                node.attrs.clone(),
-                content,
-            )?);
+            replacement.push(materialize_node(node, fresh(local)?, fresh)?);
         }
         let root = fresh(0)?;
         children.insert(index, root);
@@ -116,4 +92,30 @@ impl ApplyContext {
             vec![TransactionStep::RemoveNode { node: root }],
         ))
     }
+}
+
+/// Shared payload copy; the caller chooses which local identities are retained.
+pub(super) fn materialize_node(
+    node: &TemplateNode,
+    id: NodeId,
+    fresh: impl Fn(usize) -> Result<NodeId>,
+) -> Result<Node> {
+    let content = match &node.content {
+        TemplateContent::Children(children) => NodeContent::children(
+            children
+                .iter()
+                .map(|child| fresh(*child))
+                .collect::<Result<Vec<_>>>()?,
+        ),
+        TemplateContent::Inline { text, atoms } => {
+            let placements = atoms
+                .iter()
+                .map(|(local, offset)| Ok(InlineAtomPlacement::new(fresh(*local)?, *offset)))
+                .collect::<Result<Vec<_>>>()?;
+            NodeContent::Inline(text.with_replaced_atom_placements(placements)?)
+        }
+        TemplateContent::InlineAtom(content) => NodeContent::InlineAtom(content.clone()),
+        TemplateContent::Atomic => NodeContent::Atomic,
+    };
+    Node::new(id, node.kind.clone(), node.attrs.clone(), content)
 }

@@ -168,6 +168,27 @@ pub enum TransactionStep {
         /// Bounded immutable template captured from a validated source table.
         tree: super::TableTreeTemplate,
     },
+    /// Replaces a closed logical rectangle with a captured table's cell forest.
+    ///
+    /// The source logical dimensions must equal the rectangle. The target
+    /// table, row identities, attributes and row list stay intact; cells outside
+    /// the rectangle and their descendants are unchanged. Source outer table
+    /// and row wrappers are omitted, while every cell and descendant receives
+    /// a fresh identity, including nested table wrappers and inline atoms.
+    /// Cell kinds, raw attributes, content and independent marks are preserved.
+    ///
+    /// Invalid/nonclosed bounds, mismatched dimensions, exhausted identities
+    /// and excessive final aggregate grids fail atomically. Maps delete every
+    /// removed descendant and record actual physical cell insertion positions.
+    /// Undo restores the exact old tree; Redo reuses the first fresh identities.
+    ReplaceTableRect {
+        /// Existing table whose logical rectangle is replaced.
+        table: NodeId,
+        /// Nonempty closed rectangle in the target's logical coordinates.
+        rect: TableRect,
+        /// Complete immutable table template supplying cells and descendants.
+        tree: super::TableTreeTemplate,
+    },
     /// Inserts one row into `table` at `index`, matching its established
     /// column count.
     ///
@@ -255,6 +276,33 @@ pub enum TransactionStep {
         start: usize,
         /// Exclusive last logical column to remove; at most the column count.
         end: usize,
+    },
+    /// Isolates a rectangle's boundaries without expanding spans to unit cells.
+    ///
+    /// The current table must contain the entire rectangle; callers perform
+    /// any logical-axis growth first. Crossing cells are partitioned at top,
+    /// bottom, left, then right, producing at most five rectangular fragments
+    /// per original cell. The fragment containing the original top-left keeps
+    /// its identity and complete rich content. Other fragments receive fresh
+    /// same-kind cells containing one empty paragraph with empty attributes.
+    ///
+    /// Non-geometric cell attributes and all table/row identities and raw
+    /// attributes survive. Only changed spans are written. Actual column cuts
+    /// slice explicit widths, with all-zero slices becoming null; row-only
+    /// cuts preserve the entire width attribute, including missing/null.
+    /// Host defaults, width reconciliation and replacement are caller policy.
+    ///
+    /// Existing content positions and cell identities survive; row gaps map
+    /// across newly inserted cells. An already closed rectangle emits no maps,
+    /// inverse steps or IDs (normal transaction revision semantics still apply).
+    /// Malformed geometry, bounds, identity exhaustion and checked resource
+    /// limits fail atomically. Admission accounts for generated nodes and
+    /// owned attributes/child vectors before cloning; it is not an RSS bound.
+    IsolateTableRect {
+        /// Existing table containing the entire rectangle.
+        table: NodeId,
+        /// Nonempty half-open rectangle in logical row/column coordinates.
+        rect: TableRect,
     },
     /// Merges a closed logical rectangle containing at least two cell origins.
     ///

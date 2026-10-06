@@ -12,7 +12,7 @@ use crate::document::{
 use crate::text::TextOffset;
 use crate::{Error, Result};
 
-/// Immutable template for inserting a complete table with fresh identities.
+/// Immutable template for copying a table or its cell forest with fresh identities.
 ///
 /// Capture accepts a table from a validated source document. The template
 /// contains only private local references, never source canonical identities.
@@ -159,7 +159,11 @@ impl TableTreeTemplate {
         })
     }
 
-    /// Returns the number of fresh canonical identities application allocates.
+    /// Returns the number of captured nodes, including outer table/row wrappers.
+    ///
+    /// Whole-table insertion allocates this many fresh identities. Rectangle
+    /// replacement omits the outer table and its direct rows, allocating only
+    /// the cells and their descendants; nested wrappers still receive IDs.
     #[must_use]
     pub fn node_count(&self) -> usize {
         self.data.nodes.len()

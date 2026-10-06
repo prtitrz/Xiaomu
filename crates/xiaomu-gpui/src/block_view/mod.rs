@@ -45,6 +45,7 @@ use xiaomu_runtime::session::{DocumentPosition, DocumentSession, EditIntent};
 
 use crate::code_presentation::CodeBlockPresentation;
 use crate::document_view::cache_key::LayoutCacheKey;
+use crate::history_clock::SharedHistoryClock;
 use crate::inline_atom::InlineAtomRendererRegistry;
 use crate::input::composition::CompositionState;
 use crate::table_capability::SharedTableCapability;
@@ -142,6 +143,7 @@ pub(crate) enum SelectionProjection {
 /// A block editor view rendering one inline node of the shared session.
 pub struct ParagraphView {
     pub(super) session: SharedSession,
+    history_clock: Option<SharedHistoryClock>,
     node: NodeId,
     /// A frontend-only empty input surface anchored to an explicit range
     /// selection. Its offsets never identify canonical document content.
@@ -170,6 +172,8 @@ impl ParagraphView {
     ///
     /// The session's selection does not have to live inside `node`; views
     /// project the document selection onto their own text for painting.
+    /// This legacy constructor supplies no timestamps; timed sessions isolate
+    /// its edits. Use `new_with_history_clock` to share a session clock.
     pub fn new(
         session: SharedSession,
         epoch: Rc<std::cell::Cell<u64>>,
@@ -177,9 +181,43 @@ impl ParagraphView {
         node: NodeId,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::new_with_optional_history_clock(session, epoch, bounds_registry, node, None, cx)
+    }
+
+    /// Creates a standalone input view sharing its session's history clock.
+    ///
+    /// All views over the same session must explicitly share the same clock
+    /// domain, including views created later. Do not reset its origin.
+    pub fn new_with_history_clock(
+        session: SharedSession,
+        epoch: Rc<std::cell::Cell<u64>>,
+        bounds_registry: BlockBoundsRegistry,
+        node: NodeId,
+        history_clock: SharedHistoryClock,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_with_optional_history_clock(
+            session,
+            epoch,
+            bounds_registry,
+            node,
+            Some(history_clock),
+            cx,
+        )
+    }
+
+    pub(crate) fn new_with_optional_history_clock(
+        session: SharedSession,
+        epoch: Rc<std::cell::Cell<u64>>,
+        bounds_registry: BlockBoundsRegistry,
+        node: NodeId,
+        history_clock: Option<SharedHistoryClock>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
         Self {
             session,
+            history_clock,
             node,
             range_input: false,
             focus_handle,
@@ -205,9 +243,17 @@ impl ParagraphView {
         session: SharedSession,
         epoch: Rc<std::cell::Cell<u64>>,
         cell: NodeId,
+        history_clock: Option<SharedHistoryClock>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut view = Self::new(session, epoch, Rc::new(RefCell::new(Vec::new())), cell, cx);
+        let mut view = Self::new_with_optional_history_clock(
+            session,
+            epoch,
+            Rc::new(RefCell::new(Vec::new())),
+            cell,
+            history_clock,
+            cx,
+        );
         view.range_input = true;
         view
     }
@@ -358,11 +404,18 @@ impl ParagraphView {
             self.cancel_if_composing(cx);
             return;
         }
+        // Sample once, after frontend guards and before a mutable session
+        // borrow. Runtime publishes time only with a successful typing edit.
+        let timestamp = self.history_clock.as_ref().map(|clock| clock.now());
         let outcome = {
             let mut session = self.session.borrow_mut();
-            match selection {
-                Some(selection) => session.apply_intent_with_selection(selection, &intent),
-                None => session.apply_intent(&intent),
+            match (selection, timestamp) {
+                (Some(selection), Some(timestamp)) => {
+                    session.apply_intent_with_selection_at(selection, &intent, timestamp)
+                }
+                (Some(selection), None) => session.apply_intent_with_selection(selection, &intent),
+                (None, Some(timestamp)) => session.apply_intent_at(&intent, timestamp),
+                (None, None) => session.apply_intent(&intent),
             }
         };
         let applied = match outcome {
