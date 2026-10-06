@@ -93,7 +93,13 @@ composition静默与排队metadata拒绝stamp回归；不是丢失本地提交
 
 本文是**唯一执行主线**：阶段顺序、交付范围、Gate 与未排期事项以此为入口。各阶段 `progress.md` 提供执行和验收证据；`architecture.md` 记录当前实现；已结束的审计进入 `archive/`，不作为另一套路线。文档导航见 [docs/README](README.md)。
 
-2026-10-03 本地宿主迁移增量：[混合字号原型](mixed-font-size-prototype.md) 已通过纯解析/内核检查，仍为 `cfg(test)`，尚未接入生产排版。真实字体否证与下一公共 API 原型边界见该文档，不改变上述正式阶段完成口径。
+2026-10-06 混合字号增量：GPUI 默认关闭的 `TextSizeCapability` 以固定 native text
+system 与纯 canonical style provider 共享最终 policy admission 和生产 block layout。
+uniform 保留 stock Unicode shaping；受限 mixed 路径使用真实字号、逐行几何与有界
+width-independent admission，拒绝复杂脚本、危险接缝与预算溢出。Core/Runtime、
+canonical 字符串及原生 composition 协议不变；宿主菜单/主题与真实字体、GUI、IME
+验收独立。详见[生产契约](mixed-font-size.md)；[2026-10-03 原型记录](mixed-font-size-prototype.md)
+保留为历史证据，不改变上述正式阶段完成口径。
 
 2026-10-04：[typed HardBreak](adr/0009-typed-hard-break.md) 已具 canonical marks/identity、v10 剪贴板、seam-aware Core/Runtime split/join、mixed range marks/输入继承及 GPUI LF 投影。编辑接入全库829 tests通过；虚拟键盘全选/Copy/Cut/Undo和预编辑/提交marks一致性已覆盖。下一步是宿主完整命令与存储集成、真实字体/X11 IME验收；底层测试不替代产品HardBreak验收。
 

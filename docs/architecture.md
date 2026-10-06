@@ -519,6 +519,28 @@ Runtime 不定义 bytes 格式、文件路径、数据库、同步协议或自�
 
 `xiaomu-gpui` 是第一个 Native Frontend。GPUI-specific input、focus、layout、paint、hit testing、clipboard integration 和后续 virtualization 都属于这一层。GPUI platform type 不能泄漏到 Core 或 Runtime public contract。
 
+### 可选混合字号（2026-10-06）
+
+`font_size` 提供保留 canonical 原串的 CSS-size 只读解析；`TextSizeCapability` 把
+固定 `Arc<WindowTextSystem>` 与纯 `TextSizeStyleProvider` 共享给 host 最终 policy
+和 `EditorInstance::with_text_size_capability` 的生产 views。provider 读取候选 document
+与 block，可解析 ancestors，并明确给出 base font、parent/root/medium size 和
+line-height factor 和 base color；不从可变 window 样式猜测几何。GPUI shaping-run
+合并依赖 color/decoration equality，所以颜色同样由固定 provider 供 policy/view 共用。
+TextStyle family/marks 与 atom display projection 共用既有解析器。可选 styles_for_document batch
+必须精确覆盖 inline nodes，policy 与 DocumentView 各准备一次并复用规范化样式，
+避免反复祖先扫描；capability 本身不安装 policy。
+
+uniform 仍走 stock GPUI paragraph shaping；mixed 使用真实尺寸片段与同一逐行几何
+驱动 paint、caret、selection、hit、vertical navigation 和 native range bounds。
+width-independent admission 保守拒绝复杂脚本、grapheme/cluster 内字号边界、跨界
+上下文和 1MiB/4096-call 每块工作预算超限；失败不以默认字号替换 canonical 请求。
+自定义 caret 高度是单独的 opt-in provider callback。字号开启后缓存使用 exact width
+和 resolved sizes，preedit 另做 admission；Core/Runtime 与原生 composition 协议不变。
+默认未启用路径保持原行为。完整 API、保真/继承责任、能力与原生验证边界见
+[混合字号契约](mixed-font-size.md)，原型历史测试不代表当前生产或真实字体验收。
+
+
 GPUI dependency 以精确版本 `gpui = "=0.2.2"` 固定；升级走独立 PR。
 
 当前主要结构：

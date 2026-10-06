@@ -7,6 +7,7 @@ fn input<'a>(text: &'a str, spans: &'a [SizeSpan], width: f32) -> Input<'a> {
         sizes: spans,
         runs: &[],
         base_font: font(".SystemUIFont"),
+        empty_size: None,
         base_size: px(12.0),
         base_color: gpui::black(),
         line_height: 1.5,

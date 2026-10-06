@@ -12,6 +12,8 @@ use xiaomu_core::selection::CursorAffinity;
 
 #[path = "aligned_decorations.rs"]
 mod aligned_decorations;
+#[path = "mixed_layout.rs"]
+mod mixed_layout;
 
 #[cfg(test)]
 #[path = "alignment_layout_tests.rs"]
@@ -27,7 +29,10 @@ mod alignment_tests;
 #[derive(Clone, Debug)]
 pub(crate) struct BlockTextLayout {
     lines: Vec<WrappedLine>,
+    mixed: Option<std::rc::Rc<crate::mixed_size::MixedLayout>>,
     line_height: Pixels,
+    sized_font_size: Option<Pixels>,
+    unavailable: bool,
     size: Size<Pixels>,
     rows: Vec<VisualRow>,
     alignment: BlockAlignment,
@@ -49,7 +54,10 @@ impl BlockTextLayout {
         measured.height = measured.height.max(line_height);
         let mut layout = Self {
             lines,
+            mixed: None,
             line_height,
+            sized_font_size: None,
+            unavailable: false,
             size: measured,
             rows: Vec::new(),
             alignment: BlockAlignment::Left,
@@ -129,6 +137,12 @@ impl BlockTextLayout {
     }
 
     pub(super) fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
+        if self.unavailable {
+            return None;
+        }
+        if self.mixed.is_some() {
+            return self.mixed_position(index, CursorAffinity::Before);
+        }
         let row_ix = row_for_caret(&self.rows, index, CursorAffinity::Before)?;
         let row = &self.rows[row_ix];
         let offset = row.x;
@@ -167,6 +181,9 @@ impl BlockTextLayout {
         index: usize,
         affinity: CursorAffinity,
     ) -> Option<Point<Pixels>> {
+        if self.mixed.is_some() {
+            return self.mixed_position(index, affinity);
+        }
         let rows = self.visual_rows();
         let row_ix = row_for_caret(rows, index, affinity)?;
         let row = &rows[row_ix];
@@ -245,7 +262,7 @@ impl BlockTextLayout {
         x: Pixels,
     ) -> (usize, CursorAffinity) {
         let row = &rows[row_ix];
-        let y = row.y + self.line_height * 0.5;
+        let y = row.y + row.height * 0.5;
         let index = self.closest_index_for_position(point(x, y));
         let affinity = if index == row.range.start {
             affinity_for_row_start(rows, row_ix)
@@ -256,6 +273,9 @@ impl BlockTextLayout {
     }
 
     pub(super) fn closest_index_for_position(&self, position: Point<Pixels>) -> usize {
+        if self.mixed.is_some() {
+            return self.mixed_hit(position).0;
+        }
         if self.lines.is_empty() {
             return 0;
         }
@@ -297,6 +317,9 @@ impl BlockTextLayout {
     }
 
     pub(crate) fn caret_for_position(&self, position: Point<Pixels>) -> (usize, CursorAffinity) {
+        if self.mixed.is_some() {
+            return self.mixed_hit(position);
+        }
         let rows = self.visual_rows();
         let row_ix = row_for_y(rows, position.y, self.line_height);
         let index = self.closest_index_for_position(position);
@@ -309,6 +332,12 @@ impl BlockTextLayout {
     }
 
     pub(super) fn selection_rects(&self, range: Range<usize>) -> Vec<Bounds<Pixels>> {
+        if self.unavailable {
+            return Vec::new();
+        }
+        if self.mixed.is_some() {
+            return self.mixed_selection_rects(range);
+        }
         if range.start >= range.end {
             return Vec::new();
         }
@@ -384,6 +413,7 @@ impl BlockTextLayout {
                 rows.push(VisualRow {
                     range: logical_start + row_start..logical_start + row_end,
                     y,
+                    height: self.line_height,
                     width: glyph.position.x - start_x,
                     x: Pixels::ZERO,
                     logical_line,
@@ -397,6 +427,7 @@ impl BlockTextLayout {
             rows.push(VisualRow {
                 range: logical_start + row_start..logical_start + line.len(),
                 y,
+                height: self.line_height,
                 width: line.unwrapped_layout.width - start_x,
                 x: Pixels::ZERO,
                 logical_line,
@@ -411,6 +442,7 @@ impl BlockTextLayout {
             rows.push(VisualRow {
                 range: 0..0,
                 y: Pixels::ZERO,
+                height: self.line_height,
                 width: Pixels::ZERO,
                 x: Pixels::ZERO,
                 logical_line: 0,
@@ -470,6 +502,9 @@ impl super::ParagraphView {
     ) -> Option<(usize, CursorAffinity)> {
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
+        if !layout.is_available() {
+            return None;
+        }
         Some(
             layout.caret_for_position(point(position.x - bounds.left(), position.y - bounds.top())),
         )
@@ -521,6 +556,7 @@ fn row_for_y(rows: &[VisualRow], y: Pixels, line_height: Pixels) -> usize {
 struct VisualRow {
     range: Range<usize>,
     y: Pixels,
+    height: Pixels,
     width: Pixels,
     x: Pixels,
     logical_line: usize,

@@ -20,6 +20,7 @@ pub(crate) struct LayoutCacheKey {
     style: u64,
     alignment: Option<crate::block_alignment::BlockAlignment>,
     aligned_width: Option<u32>,
+    sized_width: Option<u32>,
 }
 
 impl LayoutCacheKey {
@@ -38,8 +39,15 @@ impl LayoutCacheKey {
             style: 0,
             alignment: Default::default(),
             aligned_width: None,
+            sized_width: None,
         }
     }
+    /// Real-size reflow also uses exact fractional widths, with or without alignment.
+    pub(crate) fn with_text_sizes(mut self, enabled: bool, width: gpui::Pixels) -> Self {
+        self.sized_width = enabled.then(|| f32::from(width).to_bits());
+        self
+    }
+
     /// Includes effective shaping and paint inputs, not just document edits.
     pub(crate) const fn with_style(mut self, style: u64) -> Self {
         self.style = style;

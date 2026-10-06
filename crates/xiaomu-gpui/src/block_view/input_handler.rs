@@ -189,6 +189,9 @@ impl EntityInputHandler for ParagraphView {
             return None;
         }
         let layout = self.last_layout.as_ref()?;
+        if !layout.is_available() {
+            return None;
+        }
         let text = self.display_content().0;
         let start = utf16::utf8_offset(&text, range_utf16.start);
         let end = utf16::utf8_offset(&text, range_utf16.end);
@@ -198,6 +201,31 @@ impl EntityInputHandler for ParagraphView {
             .composing_caret_byte()
             .map(|byte| (byte, xiaomu_core::selection::CursorAffinity::Before))
             .or_else(|| self.display_focus_caret());
+        if self.text_size_capability.is_some() {
+            let affinity = caret.filter(|(byte, _)| *byte == start).map_or(
+                xiaomu_core::selection::CursorAffinity::Before,
+                |(_, affinity)| affinity,
+            );
+            let mut bounds = if start == end {
+                self.last_caret
+                    .filter(|(byte, cached_affinity, _)| {
+                        *byte == start && *cached_affinity == affinity
+                    })
+                    .map(|(_, _, mut rect)| {
+                        rect.size.width = gpui::px(1.0);
+                        rect
+                    })
+                    .or_else(|| layout.caret_rect(start, affinity, gpui::px(1.0)))?
+            } else {
+                let mut rects = layout
+                    .selection_rects(start.min(end)..start.max(end))
+                    .into_iter();
+                let first = rects.next()?;
+                rects.fold(first, |bounds, rect| bounds.union(&rect))
+            };
+            bounds.origin += element_bounds.origin;
+            return Some(bounds);
+        }
         let start_position = if layout.has_alignment()
             && start == end
             && caret.is_some_and(|(byte, _)| byte == start)
@@ -244,6 +272,9 @@ impl EntityInputHandler for ParagraphView {
         }
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
+        if !layout.is_available() {
+            return None;
+        }
         let text = self.display_content().0;
         let raw = if point_in_window.y < bounds.top() {
             0

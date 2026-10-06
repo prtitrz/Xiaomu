@@ -61,7 +61,7 @@ fn measure(
         if range.start >= range.end {
             continue;
         }
-        let line = input.shape(system, range.clone(), span.size);
+        let line = input.shape(system, range.clone(), span.size)?;
         let stops = clusters::stops(&line, range.start)?;
         for pair in stops.windows(2) {
             result.push(Cluster {
@@ -141,16 +141,28 @@ fn shape_row(
     range: Range<usize>,
 ) -> Result<Row, Unsupported> {
     let font = system.resolve_font(&input.base_font);
-    let strut_size = if range.is_empty() {
-        input.size_at(range.start)
-    } else {
-        input.base_size
-    };
+    let strut_size = input.base_size;
     let mut above = system.ascent(font, strut_size);
     let mut below = px(f32::from(system.descent(font, strut_size)).abs());
     let leading = (strut_size * input.line_height - above - below).max(px(0.0)) / 2.0;
     above += leading;
     below += leading;
+    // LF has no painted glyph but its exact mark size/font contributes to the
+    // line it terminates. Empty/trailing rows retain a minimum inherited strut.
+    if range.is_empty() || input.text.as_bytes().get(range.end) == Some(&b'\n') {
+        let index = range.end.min(input.text.len().saturating_sub(1));
+        let run = input
+            .run_indices(&(index..index + usize::from(!input.text.is_empty())))
+            .next()
+            .and_then(|index| input.runs.get(index));
+        let font = system.resolve_font(run.map_or(&input.base_font, |run| &run.font));
+        let size = input.size_at(range.end);
+        let ascent = system.ascent(font, size);
+        let descent = px(f32::from(system.descent(font, size)).abs());
+        let leading = (size * input.line_height - ascent - descent).max(px(0.0)) / 2.0;
+        above = above.max(ascent + leading);
+        below = below.max(descent + leading);
+    }
     let mut fragments = Vec::new();
     let mut stops = vec![CaretStop {
         index: range.start,
@@ -162,7 +174,7 @@ fn shape_row(
         if fragment_range.start >= fragment_range.end {
             continue;
         }
-        let line = input.shape(system, fragment_range.clone(), span.size);
+        let line = input.shape(system, fragment_range.clone(), span.size)?;
         let local_stops = clusters::stops(&line, fragment_range.start)?;
         stops.extend(local_stops.into_iter().skip(1).map(|stop| CaretStop {
             index: stop.index,

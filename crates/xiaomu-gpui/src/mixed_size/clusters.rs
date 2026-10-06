@@ -157,10 +157,10 @@ pub(super) fn validate_seams(
             continue;
         }
         checked_sizes.push(span.size);
-        let full = input.shape(system, paragraph.clone(), span.size);
+        let full = input.shape(system, paragraph.clone(), span.size)?;
         for boundary in &boundaries {
-            let left = input.shape(system, paragraph.start..*boundary, span.size);
-            let right = input.shape(system, *boundary..paragraph.end, span.size);
+            let left = input.shape(system, paragraph.start..*boundary, span.size)?;
+            let right = input.shape(system, *boundary..paragraph.end, span.size)?;
             validate_split(&full, &left, &right, paragraph.start)?;
         }
     }

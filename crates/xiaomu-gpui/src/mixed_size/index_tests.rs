@@ -9,6 +9,7 @@ fn input<'a>(text: &'a str, runs: &'a [TextRun]) -> Input<'a> {
         sizes: &[],
         runs,
         base_font: font(".SystemUIFont"),
+        empty_size: None,
         base_size: px(12.0),
         base_color: gpui::black(),
         line_height: 1.5,
@@ -52,7 +53,9 @@ fn linear_scalar_projection_equals_native_mapping_for_large_combining_cluster(
     cx.add_empty_window().update(|window, _| {
         let text = format!("a{}", "\u{301}".repeat(10_000));
         let prepared = shape::Prepared::new(input(&text, &[])).unwrap();
-        let line = prepared.shape(window.text_system(), 0..text.len(), px(12.0));
+        let line = prepared
+            .shape(window.text_system(), 0..text.len(), px(12.0))
+            .unwrap();
         let fragments = vec![Fragment {
             range: 0..text.len(),
             x: px(5.0),

@@ -29,8 +29,7 @@ pub mod code_presentation;
 pub mod document_view;
 pub mod editor;
 pub mod editor_commands;
-#[cfg(test)]
-mod font_size;
+pub mod font_size;
 pub mod history_clock;
 pub mod image_block;
 pub mod inline_atom;
@@ -42,10 +41,8 @@ pub(crate) mod table_capability;
 pub mod table_column_resize;
 pub mod table_layout;
 pub mod table_viewport;
+pub mod text_size;
 
-// Source-only prototype; production dispatch remains unchanged until admission
-// and all editor geometry consumers can switch together.
-#[cfg(test)]
 mod mixed_size;
 
 /// Returns the pinned GPUI crates.io version this crate is built against.

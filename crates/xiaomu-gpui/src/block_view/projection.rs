@@ -5,15 +5,15 @@ use xiaomu_core::document::{InlineContent, Mark, MarkKind, MarkSet, TextStyleAtt
 /// One styled span of displayed text; offsets never enter canonical storage.
 #[derive(Clone, Debug)]
 pub(crate) struct DisplaySegment {
-    pub(super) start: usize,
-    pub(super) text: String,
-    pub(super) bold: bool,
-    pub(super) italic: bool,
-    pub(super) underline: bool,
-    pub(super) strike: bool,
-    pub(super) code: bool,
-    pub(super) link: bool,
-    pub(super) text_style: Option<TextStyleAttributes>,
+    pub(crate) start: usize,
+    pub(crate) text: String,
+    pub(crate) bold: bool,
+    pub(crate) italic: bool,
+    pub(crate) underline: bool,
+    pub(crate) strike: bool,
+    pub(crate) code: bool,
+    pub(crate) link: bool,
+    pub(crate) text_style: Option<TextStyleAttributes>,
 }
 
 impl DisplaySegment {

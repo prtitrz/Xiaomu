@@ -1,11 +1,10 @@
 //! Rendering interpretation of exact TextStyle strings. Core data is untouched.
 //!
-//! Font size is deliberately not projected: mixed-size layout geometry is a
-//! separate capability. Hosts must reject writable documents with any explicit
-//! fontSize string instead of presenting this renderer as mixed-size support.
+//! Font size is resolved by the opt-in `text_size` capability. Without that
+//! capability, hosts must reject writable documents with explicit font sizes.
 
 mod font_family;
-pub(super) use font_family::FontCatalog;
+pub(crate) use font_family::FontCatalog;
 
 use cssparser::{Color, Parser, ParserInput};
 use gpui::{
@@ -73,7 +72,7 @@ pub(crate) fn css_color(value: &str) -> Option<Hsla> {
     }
 }
 
-pub(super) fn text_runs(
+pub(crate) fn text_runs(
     segments: &[DisplaySegment],
     font: Font,
     color: Hsla,

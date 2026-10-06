@@ -78,6 +78,7 @@ pub struct EditorInstance {
     code_block_presentation: Option<CodeBlockPresentation>,
     list_marker_provider: Option<Rc<dyn ListMarkerLabelProvider>>,
     block_alignment_provider: Option<Rc<dyn BlockAlignmentProvider>>,
+    text_size_capability: Option<Rc<crate::text_size::TextSizeCapability>>,
 }
 
 impl EditorInstance {
@@ -155,6 +156,7 @@ impl EditorInstance {
             code_block_presentation: None,
             list_marker_provider: None,
             block_alignment_provider: None,
+            text_size_capability: None,
         }
     }
 
@@ -195,6 +197,21 @@ impl EditorInstance {
         self
     }
 
+    /// Enables exact TextStyle font-size geometry for this instance's views.
+    ///
+    /// The same immutable capability must validate the initial document and
+    /// every candidate through the host's SessionPolicy. This presentation
+    /// opt-in alone does not install a session policy or admit unsupported text.
+    /// The provider owns font/size/line-height defaults for these views.
+    #[must_use]
+    pub fn with_text_size_capability(
+        mut self,
+        capability: Rc<crate::text_size::TextSizeCapability>,
+    ) -> Self {
+        self.text_size_capability = Some(capability);
+        self
+    }
+
     /// Returns this instance's independent shared session handle.
     #[must_use]
     pub fn session(&self) -> &SharedSession {
@@ -225,6 +242,7 @@ impl EditorInstance {
         view.set_code_block_presentation(self.code_block_presentation.clone());
         view.set_list_marker_provider(self.list_marker_provider.clone());
         view.set_block_alignment_provider(self.block_alignment_provider.clone());
+        view.attach_text_size_capability(self.text_size_capability.clone());
         view
     }
 }

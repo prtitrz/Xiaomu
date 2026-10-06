@@ -96,6 +96,7 @@ impl MixedLayout {
     /// A single bounding box for a platform/IME range. Both endpoints must
     /// be valid UTF-8 scalar positions. Stock GPUI can collapse ligature
     /// interiors to the same x; keep a caret-width box in that case.
+    #[cfg(test)]
     pub(crate) fn bounds_for_range(
         &self,
         anchor: usize,
@@ -131,26 +132,38 @@ impl MixedLayout {
     /// is involved. The offset cancels GPUI's per-line centering to share the
     /// row baseline; line metrics, decorations and native glyph rasterization
     /// remain GPUI's. Call only from the host element's normal paint phase.
+    #[cfg(test)]
     pub(crate) fn paint(
         &self,
         origin: Point<Pixels>,
         window: &mut Window,
         cx: &mut App,
     ) -> gpui::Result<()> {
-        // All backgrounds precede all glyphs: a following fragment's fill
-        // must not erase an earlier italic glyph's advance-box overhang.
-        for row in &self.rows {
-            for fragment in &row.fragments {
-                let (fragment_origin, height) = row.fragment_paint_geometry(fragment, origin);
-                fragment
-                    .line
-                    .paint_background(fragment_origin, height, window, cx)?;
-            }
-        }
-        for row in &self.rows {
-            for fragment in &row.fragments {
-                let (fragment_origin, height) = row.fragment_paint_geometry(fragment, origin);
-                fragment.line.paint(fragment_origin, height, window, cx)?;
+        self.paint_with_offsets(origin, |_| px(0.0), window, cx)
+    }
+
+    pub(crate) fn paint_with_offsets(
+        &self,
+        origin: Point<Pixels>,
+        offset: impl Fn(usize) -> Pixels,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> gpui::Result<()> {
+        // All backgrounds precede glyphs, preserving advance-box overhang.
+        for background in [true, false] {
+            for (index, row) in self.rows.iter().enumerate() {
+                for fragment in &row.fragments {
+                    let row_origin = point(origin.x + offset(index), origin.y);
+                    let (fragment_origin, height) =
+                        row.fragment_paint_geometry(fragment, row_origin);
+                    if background {
+                        fragment
+                            .line
+                            .paint_background(fragment_origin, height, window, cx)?;
+                    } else {
+                        fragment.line.paint(fragment_origin, height, window, cx)?;
+                    }
+                }
             }
         }
         Ok(())
@@ -158,7 +171,7 @@ impl MixedLayout {
 }
 
 impl Row {
-    pub(super) fn fragment_paint_geometry(
+    pub(crate) fn fragment_paint_geometry(
         &self,
         fragment: &super::Fragment,
         origin: Point<Pixels>,

@@ -1,4 +1,4 @@
-//! Experimental GPUI-local mixed-size layout, deliberately not wired into views.
+//! Conservative GPUI-local real-size layout shared by opt-in editor views.
 //!
 //! Uniform input delegates to stock GPUI, including its Unicode/bidi behavior.
 //! Mixed input admits only conservative LTR scripts and observable cluster/seam
@@ -14,6 +14,8 @@ mod budget_tests;
 mod cluster_tests;
 mod clusters;
 mod geometry;
+mod native_line;
+use native_line::NativeLine;
 #[cfg(test)]
 mod index_tests;
 mod rows;
@@ -21,7 +23,7 @@ mod shape;
 #[cfg(test)]
 mod tests;
 
-use gpui::{Font, Hsla, Pixels, ShapedLine, Size, TextRun, WindowTextSystem, WrappedLine};
+use gpui::{Font, Hsla, Pixels, Size, TextRun, WindowTextSystem, WrappedLine};
 use std::ops::Range;
 use xiaomu_core::selection::CursorAffinity;
 
@@ -42,13 +44,15 @@ pub(crate) struct Input<'a> {
     pub(crate) runs: &'a [TextRun],
     pub(crate) base_font: Font,
     pub(crate) base_size: Pixels,
+    /// Effective typing size for an empty block, without replacing its base strut.
+    pub(crate) empty_size: Option<Pixels>,
     pub(crate) base_color: Hsla,
     pub(crate) line_height: f32,
     pub(crate) wrap_width: Pixels,
     pub(crate) limits: WorkLimits,
 }
 
-/// Explicit experimental-renderer work limits. These constrain capability,
+/// Explicit mixed-renderer work limits. These constrain capability,
 /// never the canonical document or the native single-size path. The byte limit
 /// counts repeated shaping of the same bytes; calls include empty-row tokens.
 #[derive(Clone, Copy, Debug)]
@@ -115,7 +119,7 @@ pub(crate) struct Fragment {
     pub(crate) x: Pixels,
     /// Shaped at its actual size, contains exactly this row fragment's bytes.
     /// No whole-span painting or clipping of partial ligatures is necessary.
-    pub(crate) line: ShapedLine,
+    pub(crate) line: NativeLine,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -191,7 +195,7 @@ fn admit_prepared(
         for span in prepared.spans_for(&(start..end)) {
             let range = start.max(span.range.start)..end.min(span.range.end);
             if range.start < range.end {
-                let line = prepared.shape(system, range.clone(), span.size);
+                let line = prepared.shape(system, range.clone(), span.size)?;
                 clusters::stops(&line, range.start)?;
             }
         }
@@ -221,7 +225,7 @@ pub(crate) fn layout(system: &WindowTextSystem, input: Input<'_>) -> Result<Layo
         return Ok(Layout::Uniform(UniformLayout {
             lines: lines.into_iter().collect(),
             font_size,
-            line_height: font_size * prepared.line_height,
+            line_height: font_size.max(prepared.base_size) * prepared.line_height,
         }));
     }
     rows::build(system, &prepared).map(Layout::Mixed)

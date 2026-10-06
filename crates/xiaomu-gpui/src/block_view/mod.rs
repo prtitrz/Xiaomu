@@ -29,6 +29,9 @@ mod projection;
 mod scroll;
 #[cfg(test)]
 mod tests;
+mod text_size;
+#[cfg(test)]
+mod text_size_input_tests;
 mod text_style;
 #[cfg(test)]
 mod text_style_input_tests;
@@ -130,7 +133,10 @@ actions!(
     ]
 );
 
-use projection::{DisplaySegment, project_display_content};
+pub(crate) use display::project_atom_display_content;
+pub(crate) use projection::DisplaySegment;
+use projection::project_display_content;
+pub(crate) use text_style::{FontCatalog, text_runs};
 
 /// How much of this block's text the document selection covers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,6 +160,11 @@ pub struct ParagraphView {
     focus_handle: FocusHandle,
     pub(super) last_layout: Option<BlockTextLayout>,
     pub(super) last_bounds: Option<Bounds<Pixels>>,
+    pub(super) last_caret: Option<(
+        usize,
+        xiaomu_core::selection::CursorAffinity,
+        Bounds<Pixels>,
+    )>,
     pub(super) cache_key: Option<LayoutCacheKey>,
     ime_coordinates: ime_coordinates::ImeCoordinates,
     /// Render generation shared with the owning document view.
@@ -165,11 +176,17 @@ pub struct ParagraphView {
     table_capability: Option<SharedTableCapability>,
     code_block_presentation: Option<CodeBlockPresentation>,
     block_alignment: Option<crate::block_alignment::BlockAlignment>,
+    text_size_capability: Option<Rc<crate::text_size::TextSizeCapability>>,
+    text_size_style: Option<(
+        xiaomu_core::document::DocumentRevision,
+        Result<crate::text_size::TextSizeStyle, crate::text_size::TextSizeError>,
+    )>,
     composition: Option<CompositionState>,
     /// Consume the remainder of an unsupported native composition without
     /// falling through to ordinary typing and deleting selected atoms.
     rejected_composition: bool,
     focus_out_subscription: Option<Subscription>,
+    pub(crate) text_size_feedback: Option<Subscription>,
 }
 
 impl ParagraphView {
@@ -228,6 +245,7 @@ impl ParagraphView {
             focus_handle,
             last_layout: None,
             last_bounds: None,
+            last_caret: None,
             cache_key: None,
             ime_coordinates: Default::default(),
             epoch,
@@ -238,9 +256,12 @@ impl ParagraphView {
             table_capability: None,
             code_block_presentation: None,
             block_alignment: Default::default(),
+            text_size_capability: None,
+            text_size_style: None,
             composition: None,
             rejected_composition: false,
             focus_out_subscription: None,
+            text_size_feedback: None,
         }
     }
 
@@ -385,6 +406,14 @@ impl ParagraphView {
     /// Reject a late native callback aimed at content this table renderer hides.
     /// The handler can outlive child syncing or a host-restored selection.
     pub(super) fn input_is_hidden_by_table(&self) -> bool {
+        if self.text_size_capability.is_some()
+            && self
+                .last_layout
+                .as_ref()
+                .is_some_and(|layout| !layout.is_available())
+        {
+            return true;
+        }
         let session = self.session.borrow();
         if let Some(capability) = &self.table_capability {
             return crate::table_capability::handler_is_hidden_by_table(
@@ -441,6 +470,15 @@ impl ParagraphView {
             Ok(_) => true,
             Err(error) => {
                 eprintln!("xiaomu: intent rejected: {error}");
+                if self.text_size_capability.is_some() {
+                    use crate::document_view::{EditorRejection, EditorRejectionStage};
+                    let revision = self.session.borrow().document().revision();
+                    cx.emit(EditorRejection::from_session(
+                        EditorRejectionStage::TextSizeInput,
+                        &error,
+                        revision,
+                    ));
+                }
                 false
             }
         };

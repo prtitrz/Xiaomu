@@ -11,6 +11,13 @@ use gpui::{Context, Window};
 use std::rc::Rc;
 
 impl DocumentView {
+    pub(crate) fn attach_text_size_capability(
+        &mut self,
+        capability: Option<Rc<crate::text_size::TextSizeCapability>>,
+    ) {
+        self.text_size_capability = capability;
+    }
+
     /// Sets visual block alignment; `None` restores the original left alignment.
     ///
     /// Notify the mounted view's GPUI context after changing this provider or

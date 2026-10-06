@@ -32,6 +32,9 @@ pub(crate) mod navigation;
 mod node_selection;
 mod rejection;
 mod scroll_tree;
+#[cfg(test)]
+mod text_size_batch_tests;
+mod text_sizes;
 pub use rejection::{EditorRejection, EditorRejectionReason, EditorRejectionStage};
 mod table_block;
 pub(crate) mod table_guard;
@@ -125,6 +128,7 @@ pub struct DocumentView {
     code_block_presentation: Option<crate::code_presentation::CodeBlockPresentation>,
     list_marker_provider: Option<Rc<dyn crate::list_marker::ListMarkerLabelProvider>>,
     block_alignment_provider: Option<Rc<dyn crate::block_alignment::BlockAlignmentProvider>>,
+    text_size_capability: Option<Rc<crate::text_size::TextSizeCapability>>,
 }
 
 impl DocumentView {
@@ -157,6 +161,7 @@ impl DocumentView {
             code_block_presentation: None,
             list_marker_provider: None,
             block_alignment_provider: None,
+            text_size_capability: None,
         }
     }
 
@@ -602,6 +607,10 @@ impl DocumentView {
                             cx,
                         )
                     });
+                    let feedback = cx.subscribe(&view, |_, _, event: &EditorRejection, cx| {
+                        cx.emit(*event);
+                    });
+                    view.update(cx, |view, _| view.text_size_feedback = Some(feedback));
                     (node, view)
                 }
             })
@@ -609,6 +618,7 @@ impl DocumentView {
 
         let scroll_handle = self.scroll_handle.clone();
         let atom_renderers = self.atom_renderers.clone();
+        let text_sizes = self.prepare_text_size_styles();
         for (node, child) in &self.children {
             let alignment = self.block_alignment_provider.as_ref().and_then(|provider| {
                 let session = self.session.borrow();
@@ -625,6 +635,8 @@ impl DocumentView {
                 view.attach_table_capability(self.table_capability.clone());
                 view.set_code_block_presentation(self.code_block_presentation.clone());
                 view.set_block_alignment(alignment);
+                view.attach_text_size_capability(self.text_size_capability.clone());
+                Self::attach_text_size_style(view, *node, &text_sizes);
             });
         }
         // Stale entries dropped with `pool`.

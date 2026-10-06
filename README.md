@@ -92,6 +92,8 @@ Structured clipboard compatibility: valid v4/v5/v6 payloads remain supported; ex
 
 Engineering rules live in [docs/engineering-rules.md](docs/engineering-rules.md). Current architecture facts live in [docs/architecture.md](docs/architecture.md). Contribution workflow is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
+GPUI hosts can opt into [native mixed font sizes](docs/mixed-font-size.md) with a fixed style provider and the same final-candidate admission policy. Uniform text retains stock shaping; mixed text has explicit script, cluster and work-budget limits. Native font and IME acceptance remains separate from virtual tests.
+
 The main local gates are:
 
 ```bash

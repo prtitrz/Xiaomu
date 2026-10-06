@@ -15,6 +15,7 @@ fn input<'a>(text: &'a str, sizes: &'a [SizeSpan], width: f32) -> Input<'a> {
         sizes,
         runs: &[],
         base_font: font(".SystemUIFont"),
+        empty_size: None,
         base_size: px(12.0),
         base_color: gpui::black(),
         line_height: 1.5,
@@ -65,7 +66,9 @@ fn actual_size_requests_define_widths_height_and_shared_baseline(cx: &mut TestAp
             assert_eq!(fragment.range, span.range);
             assert_eq!(fragment.line.font_size, span.size);
             let prepared = shape::Prepared::new(input(&text, &spans, 2000.0)).unwrap();
-            let control = prepared.shape(system, span.range.clone(), span.size);
+            let control = prepared
+                .shape(system, span.range.clone(), span.size)
+                .unwrap();
             near(fragment.line.width, control.width);
             near(fragment.x, expected);
             expected += control.width;
