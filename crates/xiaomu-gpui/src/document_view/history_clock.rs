@@ -1,7 +1,7 @@
 //! Fixed construction-time history clock ownership.
 
 use super::DocumentView;
-use xiaomu_runtime::session::{EditIntent, SessionError, SessionOutcome};
+use xiaomu_runtime::session::{DocumentSelection, EditIntent, SessionError, SessionOutcome};
 
 use crate::{block_view::SharedSession, history_clock::SharedHistoryClock};
 
@@ -14,13 +14,18 @@ impl DocumentView {
     // before borrowing Runtime mutably; no timestamp is ambient or retained.
     pub(super) fn apply_runtime_intent(
         &self,
+        target: Option<DocumentSelection>,
         intent: &EditIntent,
     ) -> Result<SessionOutcome, SessionError> {
         let timestamp = self.history_clock.as_ref().map(|clock| clock.now());
         let mut session = self.session.borrow_mut();
-        match timestamp {
-            Some(timestamp) => session.apply_intent_at(intent, timestamp),
-            None => session.apply_intent(intent),
+        match (target, timestamp) {
+            (Some(target), Some(timestamp)) => {
+                session.apply_intent_with_selection_at(target, intent, timestamp)
+            }
+            (Some(target), None) => session.apply_intent_with_selection(target, intent),
+            (None, Some(timestamp)) => session.apply_intent_at(intent, timestamp),
+            (None, None) => session.apply_intent(intent),
         }
     }
 

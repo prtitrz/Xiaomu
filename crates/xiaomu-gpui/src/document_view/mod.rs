@@ -21,6 +21,7 @@ mod clipboard;
 mod column_resize;
 mod history_clock;
 mod host_extensions;
+mod host_selection_intent;
 mod host_transaction;
 pub(crate) mod markers;
 mod measured_table;
@@ -312,7 +313,28 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.selection_has_hidden_table_endpoint() {
+        self.apply_edit_intent_inner(None, intent, window, cx);
+    }
+
+    fn apply_edit_intent_inner(
+        &mut self,
+        target: Option<xiaomu_runtime::session::DocumentSelection>,
+        intent: EditIntent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selection_has_hidden_table_endpoint()
+            || target.is_some_and(|selection| {
+                let session = self.session.borrow();
+                // Invalid targets belong to Runtime's typed rejection path.
+                selection.validate(session.document()).is_ok()
+                    && crate::table_capability::selection_has_hidden_table_endpoint(
+                        session.document(),
+                        selection,
+                        &self.table_capability.borrow(),
+                    )
+            })
+        {
             return;
         }
         if self.focused_child_composing(window, cx) {
@@ -321,18 +343,18 @@ impl DocumentView {
             return;
         }
         self.desired_x = None;
-        let outcome = self.apply_runtime_intent(&intent);
+        let outcome = self.apply_runtime_intent(target, &intent);
         match outcome {
             Ok(outcome) => {
                 if outcome != xiaomu_runtime::session::SessionOutcome::NoChange {
                     self.epoch.set(self.epoch.get() + 1);
                 }
-                if outcome == xiaomu_runtime::session::SessionOutcome::DocumentChanged {
-                    // Structural edits such as SplitBlock may move the
-                    // selection onto a newly-created node. Materialize the
-                    // matching ParagraphView before trying to transfer native
-                    // focus; otherwise the old block remains focused while the
-                    // document selection already points at the new block.
+                if outcome == xiaomu_runtime::session::SessionOutcome::DocumentChanged
+                    || (target.is_some()
+                        && outcome == xiaomu_runtime::session::SessionOutcome::SelectionChanged)
+                {
+                    // Materialize newly-created blocks or a changed range
+                    // proxy before transferring native focus to the result.
                     self.sync_children(cx);
                     self.route_focus(window, cx);
                     self.request_focus_scroll(cx);

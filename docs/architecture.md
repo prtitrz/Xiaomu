@@ -273,7 +273,7 @@ JoinNodes          → 删除追加文本 + RestoreSubtree
 
 `EditIntent::insert_line_break()` 返回独立 `InsertLineBreak`，让 policy 明确区分键盘换行与同字节 `PasteText("\n")`。只有 policy 返回 Continue 后的私有默认 dispatch 才将它转换为既有 isolated LF 插入；不会二次调用 policy，但最终 candidate 验证仍照常执行。无 policy 的 canonical/marks/selection/Undo 行为保留。**外部自定义 policy 若以前只按 PasteText 匹配换行，必须显式识别新 variant**，不能假定公共 constructor 永远展开为 PasteText。这里仍是命令来源区分，并未把 canonical LF 改成精确保真 TipTap hardBreak 节点。
 
-宿主工具栏可调用 `DocumentView::apply_edit_intent` 复用内建编辑 action 的同一入口：composition guard、session policy、render epoch、child 同步、焦点和 caret scroll 均沿原路径执行，不直接绕过前端对共享 session 操作。该 seam 只公开已有行为，不新增输入协议。
+宿主工具栏可调用 `DocumentView::apply_edit_intent` 复用内建编辑 action 的同一入口：composition guard、session policy、render epoch、child 同步、焦点和 caret scroll 均沿原路径执行，不直接绕过前端对共享 session 操作。该 seam 只公开已有行为，不新增输入协议。`apply_edit_intent_with_selection` 复用同一路径并将显式目标与 intent 原子提交到 Runtime；不预先发布 selection move。`SessionContext::selection()` 是已校验目标，`original_selection()` 是本次操作前的 session selection，普通 intent / clipboard preparation 时二者相同。宿主 policy 可据原始形状生成精确 after-selection，Undo 仍记录原始选区；非法目标、policy 拒绝、最终 selection/document 校验失败及 policy `NoChange` 均不发布中间状态。目标和当前选区均受既有 hidden-table guard 保护，composition 期间不采样 clock；成功的 selection-only 目标变化先同步 range proxy，再恢复焦点。该 seam 不定义任何产品命令或新 Core 模型。
 
 `prepare_intent(SessionContext, &EditIntent)` 在任何 selection / StoredMarks / history mutation 前运行，包括 `PasteSlice` 和 cell-range convergence。只读 context 提供 document、selection、explicit stored marks，以及复用 Runtime 周围 run 继承语义的 `effective_typing_marks`。宿主返回 Continue、完全保留状态的 NoChange、collapsed inline caret 的显式 StoredMarks（区分 None / Some(empty)），或一个 `EditPlan`。宿主可用 `EditPlan::new` / `PrimaryEdit::new` 描述替代 transaction 与 selection policy，一次成功接管只产生一个 isolated Undo 单元，无需可变 session 或递归 `apply_intent`。
 
@@ -584,7 +584,7 @@ stock X11/Wayland 在 composing 时跳过显式 position update，而同步 pree
 policy 任意字符串；失败 session 借用释放、回滚完成后才发出。宿主对具体 Entity
 订阅并自持 subscription，负责忽略旧 view、展示与清除反馈。事件不推进 document /
 selection listener、history、epoch 或 dirty，也不改 `EditorHooks` 必填接口。
-覆盖范围限 `apply_edit_intent`、host command routing、Copy/Cut 投影和无损传输、
+覆盖范围限 `apply_edit_intent` / `apply_edit_intent_with_selection`、host command routing、Copy/Cut 投影和无损传输、
 已识别 native Paste metadata 拒绝；成功、NoChange、composition guard 保持静默。
 直接 ParagraphView typing/IME、直接 session 调用、selection/navigation、history、
 persistence、image import 和返回 Result 的 `apply_edit_transaction` 不在此事件流内。
