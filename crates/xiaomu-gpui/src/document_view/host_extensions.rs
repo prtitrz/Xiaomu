@@ -11,6 +11,18 @@ use gpui::{Context, Window};
 use std::rc::Rc;
 
 impl DocumentView {
+    /// Sets visual block alignment; `None` restores the original left alignment.
+    ///
+    /// Notify the mounted view's GPUI context after changing this provider or
+    /// its external configuration. The next child sync resolves fresh nodes
+    /// and invalidates only blocks whose effective alignment changed.
+    pub fn set_block_alignment_provider(
+        &mut self,
+        provider: Option<Rc<dyn crate::block_alignment::BlockAlignmentProvider>>,
+    ) {
+        self.block_alignment_provider = provider;
+    }
+
     /// Offers a native atomic-block pointer gesture without first changing
     /// canonical selection or marks. Rejection never falls through to Atomic.
     pub(super) fn route_atomic_selection(

@@ -10,6 +10,8 @@
 //! a virtual projection (canonical prefix + preedit + suffix); see
 //! [`crate::input::composition`].
 
+#[cfg(test)]
+mod alignment_input_tests;
 mod display;
 mod element;
 #[cfg(test)]
@@ -162,6 +164,7 @@ pub struct ParagraphView {
     pub(super) atom_renderers: Rc<InlineAtomRendererRegistry>,
     table_capability: Option<SharedTableCapability>,
     code_block_presentation: Option<CodeBlockPresentation>,
+    block_alignment: Option<crate::block_alignment::BlockAlignment>,
     composition: Option<CompositionState>,
     /// Consume the remainder of an unsupported native composition without
     /// falling through to ordinary typing and deleting selected atoms.
@@ -234,6 +237,7 @@ impl ParagraphView {
             atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
             table_capability: None,
             code_block_presentation: None,
+            block_alignment: Default::default(),
             composition: None,
             rejected_composition: false,
             focus_out_subscription: None,
@@ -304,6 +308,18 @@ impl ParagraphView {
                 .node(self.node)
                 .is_some_and(|node| node.kind() == &NodeKind::CodeBlock)
         })
+    }
+
+    pub(crate) fn set_block_alignment(
+        &mut self,
+        alignment: Option<crate::block_alignment::BlockAlignment>,
+    ) {
+        if self.block_alignment != alignment {
+            self.block_alignment = alignment;
+            self.last_layout = None;
+            self.last_bounds = None;
+            self.cache_key = None;
+        }
     }
 
     /// Returns the shared session rendered by this view.

@@ -192,17 +192,45 @@ impl EntityInputHandler for ParagraphView {
         let text = self.display_content().0;
         let start = utf16::utf8_offset(&text, range_utf16.start);
         let end = utf16::utf8_offset(&text, range_utf16.end);
-        let start_position = layout.position_for_index(self.input_byte_to_layout(start)?)?;
-        let end_position = layout.position_for_index(self.input_byte_to_layout(end)?)?;
+        let start = self.input_byte_to_layout(start)?;
+        let end = self.input_byte_to_layout(end)?;
+        let caret = self
+            .composing_caret_byte()
+            .map(|byte| (byte, xiaomu_core::selection::CursorAffinity::Before))
+            .or_else(|| self.display_focus_caret());
+        let start_position = if layout.has_alignment()
+            && start == end
+            && caret.is_some_and(|(byte, _)| byte == start)
+        {
+            layout.position_for_caret(start, caret?.1)?
+        } else {
+            layout.position_for_index(start)?
+        };
+        let end_position = if start == end {
+            start_position
+        } else {
+            layout.position_for_index(end)?
+        };
 
         let left = start_position.x.min(end_position.x);
         let right = start_position.x.max(end_position.x);
         let top = start_position.y.min(end_position.y);
         let bottom = start_position.y.max(end_position.y) + layout.line_height();
-        Some(Bounds::new(
-            point(element_bounds.left() + left, element_bounds.top() + top),
+        let mut bounds = Bounds::new(
+            point(left, top),
             size((right - left).max(Pixels::from(1.0)), bottom - top),
-        ))
+        );
+        if layout.has_alignment() && start != end {
+            // Endpoint x positions need not enclose wider intermediate rows.
+            // Only include selected rows: an endpoint at a wrap or just after
+            // LF can otherwise add an entirely unselected adjacent row.
+            let mut rects = layout.selection_rects(start..end).into_iter();
+            if let Some(first) = rects.next() {
+                bounds = rects.fold(first, |bounds, rect| bounds.union(&rect));
+            }
+        }
+        bounds.origin += element_bounds.origin;
+        Some(bounds)
     }
 
     fn character_index_for_point(

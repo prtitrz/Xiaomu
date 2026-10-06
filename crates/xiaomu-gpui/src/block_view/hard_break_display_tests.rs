@@ -249,3 +249,53 @@ fn preedit_and_commit_inherit_the_same_marks_at_each_hard_break_gap(cx: &mut Tes
         assert_eq!(session.borrow().selection(), selection);
     }
 }
+
+#[gpui::test]
+fn aligned_typed_hard_break_empty_rows_keep_atom_ordinals_and_native_geometry(
+    cx: &mut TestAppContext,
+) {
+    use crate::block_alignment::BlockAlignment;
+    for alignment in [
+        BlockAlignment::Left,
+        BlockAlignment::Center,
+        BlockAlignment::Right,
+    ] {
+        for ordinal in 0..=2 {
+            let (handle, session) = open(cx, ordinal);
+            let before = session.borrow().document().clone();
+            let selection = session.borrow().selection();
+            handle
+                .update(cx, |view, window, cx| {
+                    window.activate_window();
+                    view.set_block_alignment(Some(alignment));
+                    cx.notify();
+                })
+                .unwrap();
+            cx.background_executor.run_until_parked();
+            handle
+                .update(cx, |view, window, cx| {
+                    let layout = view.last_layout.as_ref().unwrap();
+                    let expected = layout
+                        .position_for_caret(1 + ordinal, CursorAffinity::Before)
+                        .unwrap();
+                    let bounds = view.last_bounds.unwrap();
+                    let native = view.bounds_for_range(1..1, bounds, window, cx).unwrap();
+                    assert_eq!(native.origin, bounds.origin + expected);
+                    assert_eq!(
+                        view.character_index_for_point(
+                            native.origin + gpui::point(gpui::px(0.), gpui::px(1.)),
+                            window,
+                            cx
+                        ),
+                        Some(1)
+                    );
+                    assert_eq!(view.layout_content().0, "A\n\n\n中");
+                    assert!(view.layout_atom_ranges().is_empty());
+                })
+                .unwrap();
+            assert_eq!(session.borrow().document().store(), before.store());
+            assert_eq!(session.borrow().selection(), selection);
+            assert_eq!(session.borrow().history_depths(), (0, 0));
+        }
+    }
+}

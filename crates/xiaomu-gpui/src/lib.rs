@@ -23,6 +23,7 @@
 
 pub mod accessibility;
 pub mod atom_capability;
+pub mod block_alignment;
 pub mod block_view;
 pub mod code_presentation;
 pub mod document_view;

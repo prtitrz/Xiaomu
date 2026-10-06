@@ -21,6 +21,7 @@ use xiaomu_runtime::session::{
 };
 
 use crate::atom_capability::SharedAtomCapability;
+use crate::block_alignment::BlockAlignmentProvider;
 use crate::block_view::{
     Backspace, ClipboardCopy, ClipboardCut, ClipboardPaste, Delete, Down, End, Enter, Home, Left,
     Redo, Right, SaveDocument, SelectAll, SelectDown, SelectEnd, SelectHome, SelectLeft,
@@ -76,6 +77,7 @@ pub struct EditorInstance {
     command_router: Option<Rc<dyn EditorCommandRouter>>,
     code_block_presentation: Option<CodeBlockPresentation>,
     list_marker_provider: Option<Rc<dyn ListMarkerLabelProvider>>,
+    block_alignment_provider: Option<Rc<dyn BlockAlignmentProvider>>,
 }
 
 impl EditorInstance {
@@ -152,6 +154,7 @@ impl EditorInstance {
             command_router: None,
             code_block_presentation: None,
             list_marker_provider: None,
+            block_alignment_provider: None,
         }
     }
 
@@ -176,6 +179,19 @@ impl EditorInstance {
     #[must_use]
     pub fn with_list_marker_provider(mut self, provider: Rc<dyn ListMarkerLabelProvider>) -> Self {
         self.list_marker_provider = Some(provider);
+        self
+    }
+
+    /// Installs a visual-only block alignment provider for this instance.
+    ///
+    /// The host resolves effective alignment from current canonical nodes;
+    /// absent this opt-in, all text retains its original left alignment.
+    #[must_use]
+    pub fn with_block_alignment_provider(
+        mut self,
+        provider: Rc<dyn BlockAlignmentProvider>,
+    ) -> Self {
+        self.block_alignment_provider = Some(provider);
         self
     }
 
@@ -208,6 +224,7 @@ impl EditorInstance {
         view.set_command_router(self.command_router.clone());
         view.set_code_block_presentation(self.code_block_presentation.clone());
         view.set_list_marker_provider(self.list_marker_provider.clone());
+        view.set_block_alignment_provider(self.block_alignment_provider.clone());
         view
     }
 }

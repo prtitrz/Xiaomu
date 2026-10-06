@@ -43,6 +43,8 @@ mod vertical_geometry;
 mod visual_navigation;
 
 #[cfg(test)]
+mod alignment_provider_tests;
+#[cfg(test)]
 mod command_composition_tests;
 #[cfg(test)]
 mod explicit_all_selection_tests;
@@ -122,6 +124,7 @@ pub struct DocumentView {
     command_router: Option<Rc<dyn crate::editor_commands::EditorCommandRouter>>,
     code_block_presentation: Option<crate::code_presentation::CodeBlockPresentation>,
     list_marker_provider: Option<Rc<dyn crate::list_marker::ListMarkerLabelProvider>>,
+    block_alignment_provider: Option<Rc<dyn crate::block_alignment::BlockAlignmentProvider>>,
 }
 
 impl DocumentView {
@@ -153,6 +156,7 @@ impl DocumentView {
             command_router: None,
             code_block_presentation: None,
             list_marker_provider: None,
+            block_alignment_provider: None,
         }
     }
 
@@ -605,7 +609,14 @@ impl DocumentView {
 
         let scroll_handle = self.scroll_handle.clone();
         let atom_renderers = self.atom_renderers.clone();
-        for (_, child) in &self.children {
+        for (node, child) in &self.children {
+            let alignment = self.block_alignment_provider.as_ref().and_then(|provider| {
+                let session = self.session.borrow();
+                session
+                    .document()
+                    .node(*node)
+                    .map(|node| provider.alignment(node))
+            });
             let scroll_handle = scroll_handle.clone();
             let atom_renderers = atom_renderers.clone();
             child.update(cx, |view, _| {
@@ -613,6 +624,7 @@ impl DocumentView {
                 view.attach_atom_renderers(atom_renderers);
                 view.attach_table_capability(self.table_capability.clone());
                 view.set_code_block_presentation(self.code_block_presentation.clone());
+                view.set_block_alignment(alignment);
             });
         }
         // Stale entries dropped with `pool`.

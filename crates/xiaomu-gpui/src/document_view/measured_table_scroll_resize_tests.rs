@@ -4,6 +4,9 @@ use crate::table_column_resize::{
 };
 use gpui::{MouseButton, Pixels, Point};
 
+#[path = "alignment_table_tests.rs"]
+mod alignment;
+
 fn install_resize(
     handle: WindowHandle<DocumentView>,
     cx: &mut TestAppContext,

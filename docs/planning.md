@@ -1,5 +1,12 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-06增量：GPUI 默认关闭的 `BlockAlignmentProvider` 由宿主解析当前 inline
+block 的 Left/Center/Right；显式启用后共用 visual-row shaping 几何、精确宽度缓存、
+selection/caret/hit/vertical/native bounds，并局部修复 stock wrapped decoration 偏移。
+未启用路径保持原样，不读产品 attrs、不改 Core/Runtime 或 composition 协议。
+Justify 仍是必需后继功能，不降级为其它对齐；真实字体/平台 IME 与隐藏候选框 clip
+契约不从 virtual tests 推断完成。详见[对齐展示契约](block-alignment.md)。
+
 2026-10-06嵌套溢出修复：measured table 各自拥有隐藏滚动条的横向 viewport，保留原列宽、
 真实 child layout 高度及默认关闭 resize 的展示一致性。wheel 最近 owner、边缘传递、可见 hit
 clip 与 scrolled resize 的确定性 offset clamp 由专门 virtual 回归覆盖；不改 Core/schema、
