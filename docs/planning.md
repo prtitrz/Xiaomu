@@ -1,5 +1,11 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-06嵌套溢出修复：measured table 各自拥有隐藏滚动条的横向 viewport，保留原列宽、
+真实 child layout 高度及默认关闭 resize 的展示一致性。wheel 最近 owner、边缘传递、可见 hit
+clip 与 scrolled resize 的确定性 offset clamp 由专门 virtual 回归覆盖；不改 Core/schema、
+原始 oracle 或 stock GPUI，也不称 browser intrinsic sizing / 实际 GUI / IME 候选位置已通过。
+详见[measured overflow 契约](measured-column-resize.md#measured-table-overflow-ownership)。
+
 2026-10-06原生回归修复：column resize 保留整数 measured 起点约束，明确将从原 down
 计算的 fractional native pointer 目标 clamp minimum 后投影为最近整数（精确 .5 向上）。
 stock X11 16.16 decode 的普通40px拖动不再因约40.0006px delta被拒绝；原版 PM 保留小数，

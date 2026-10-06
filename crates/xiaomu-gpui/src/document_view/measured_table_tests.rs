@@ -31,6 +31,9 @@ mod presentation_guard_tests;
 #[path = "measured_table_row_metadata_tests.rs"]
 mod row_metadata_tests;
 
+#[path = "measured_table_scroll_tests.rs"]
+mod scroll_tests;
+
 struct Fixture {
     document: XiaomuDocument,
     table: NodeId,

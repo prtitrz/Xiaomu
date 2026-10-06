@@ -37,6 +37,8 @@ struct ResizeDrag {
     key: Rc<TableCapabilityKey>,
     available: f32,
     origin: Point<Pixels>,
+    viewport: Option<super::table_scroll::TableScrollMeasurement>,
+    observed_viewport: Option<super::table_scroll::TableScrollMeasurement>,
     released: bool,
     commit_queued: bool,
     token: Rc<()>,
@@ -50,7 +52,26 @@ impl ColumnResizeState {
     }
 
     pub(super) fn cancel(&self) -> bool {
-        self.drag.borrow_mut().take().is_some()
+        Self::discard(&mut self.drag.borrow_mut())
+    }
+
+    fn discard(state: &mut Option<ResizeDrag>) -> bool {
+        let drag = state.take();
+        if let Some(viewport) = drag.as_ref().and_then(|drag| drag.viewport.as_ref()) {
+            viewport.handle.set_offset(viewport.offset);
+        }
+        drag.is_some()
+    }
+
+    pub(super) fn scroll_preview(
+        &self,
+        table: xiaomu_core::document::NodeId,
+    ) -> Option<super::table_scroll::TableScrollPreview> {
+        let drag = self.drag.borrow();
+        let drag = drag.as_ref().filter(|drag| drag.intent.table == table)?;
+        let original = drag.viewport.clone()?;
+        let observed = drag.observed_viewport.clone()?;
+        Some(super::table_scroll::TableScrollPreview { original, observed })
     }
 
     pub(super) fn clear_measurements(&self) {
@@ -67,7 +88,7 @@ impl ColumnResizeState {
             && active.intent.table == plan.table()
         {
             if active.available != available {
-                *drag = None;
+                Self::discard(&mut drag);
             } else {
                 plan.override_column_width(active.intent.column, active.intent.width)?;
             }
@@ -126,7 +147,7 @@ impl DocumentView {
                             measured.table == drag.intent.table
                                 && measured.key == drag.key
                                 && measured.available == drag.available
-                                && measured.origin == drag.origin
+                                && measured.matches_origin(drag)
                         })
             });
         if !valid {
@@ -146,6 +167,15 @@ impl DocumentView {
         }
         let mut state = self.column_resize.drag.borrow_mut();
         let Some(drag) = state.as_mut() else { return };
+        // The next render clears the shared frame registry before constructing
+        // its tree. Retain only this validated observation for preview clamping.
+        drag.observed_viewport = self
+            .column_resize
+            .measurements
+            .borrow()
+            .iter()
+            .find(|table| table.table == drag.intent.table)
+            .and_then(|table| table.viewport.clone());
         if !drag.released || drag.commit_queued {
             return;
         }
@@ -162,7 +192,7 @@ impl DocumentView {
                     == drag.intent.width as f32
             });
         if !exact {
-            *state = None;
+            ColumnResizeState::discard(&mut state);
             cx.notify();
             return;
         }

@@ -150,6 +150,9 @@ impl DocumentView {
             {
                 continue;
             }
+            let Some(bounds) = self.visible_table_bounds(session.document(), *node, *bounds) else {
+                continue;
+            };
             let vertical = if position.y < bounds.top() {
                 bounds.top() - position.y
             } else if position.y > bounds.bottom() {

@@ -36,6 +36,7 @@ mod table_block;
 pub(crate) mod table_guard;
 #[cfg(test)]
 mod table_guard_tests;
+mod table_scroll;
 mod task_checkbox;
 mod vertical_geometry;
 mod visual_navigation;
@@ -86,6 +87,8 @@ pub struct DocumentView {
     registry: BlockBoundsRegistry,
     /// Full cell bounds, including padding and space below shorter content.
     cell_registry: BlockBoundsRegistry,
+    /// Current measured viewport clips, separate from full navigation geometry.
+    table_clips: table_scroll::TableClipRegistry,
     /// Per-view measured-table admission, also held by retained input handlers.
     table_capability: crate::table_capability::SharedTableCapability,
     cell_drag_anchor: Option<NodeId>,
@@ -131,6 +134,7 @@ impl DocumentView {
             epoch: Rc::new(Cell::new(0)),
             registry: Rc::new(RefCell::new(Vec::new())),
             cell_registry: Rc::new(RefCell::new(Vec::new())),
+            table_clips: Default::default(),
             table_capability: Rc::new(RefCell::new(Default::default())),
             cell_drag_anchor: None,
             column_resize: Default::default(),
@@ -163,6 +167,9 @@ impl DocumentView {
     /// measured layout in this view. Unknown presentation values and layout
     /// failures retain a visible, protected placeholder. Automatic columns use
     /// the explicit native sizing policy, not browser intrinsic-width parity.
+    /// Each measured table owns a hidden-scrollbar horizontal viewport; native
+    /// horizontal wheels reveal overflow without changing column widths. This
+    /// presentation does not depend on enabling column-resize callbacks.
     /// Hosts changing a mounted view should notify its context afterward.
     pub fn set_measured_table_layout(&mut self, enabled: bool) {
         self.column_resize.cancel();
@@ -625,6 +632,7 @@ impl Render for DocumentView {
         // Each paint pass repopulates the registry; stale entries must go.
         self.registry.borrow_mut().clear();
         self.cell_registry.borrow_mut().clear();
+        self.table_clips.borrow_mut().clear();
 
         let tree = self.render_block_tree(root, false, 0, 0, cx);
 
