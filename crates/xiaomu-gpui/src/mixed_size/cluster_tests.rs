@@ -4,7 +4,7 @@
 //! the NoopTextSystem cannot produce itself.
 
 use super::*;
-use gpui::{LineLayout, ShapedRun, TestAppContext, font, point, px};
+use gpui::{LineLayout, ShapedLine, ShapedRun, TestAppContext, font, point, px};
 use std::sync::Arc;
 
 fn shaped(system: &WindowTextSystem, text: &str) -> ShapedLine {
@@ -112,7 +112,7 @@ fn layout_for_line(line: ShapedLine) -> MixedLayout {
     let fragments = vec![Fragment {
         range: 0..len,
         x: px(0.0),
-        line,
+        line: NativeLine::synthetic(line),
     }];
     let carets = rows::caret_positions(&fragments, 0);
     MixedLayout {
@@ -234,7 +234,7 @@ fn linear_cursor_matches_stock_for_duplicate_and_reordered_indices_inside_an_egc
         let fragments = vec![Fragment {
             range: 0..text.len(),
             x: px(4.0),
-            line,
+            line: NativeLine::synthetic(line),
         }];
         let carets = rows::caret_positions(&fragments, 0);
         for stop in carets {
@@ -273,12 +273,12 @@ fn nonzero_first_glyph_offset_keeps_advance_origin_hit_caret_and_seams_consisten
             Fragment {
                 range: 0..2,
                 x: px(0.0),
-                line: first,
+                line: NativeLine::synthetic(first),
             },
             Fragment {
                 range: 2..4,
                 x: width,
-                line: second,
+                line: NativeLine::synthetic(second),
             },
         ];
         let carets = rows::caret_positions(&fragments, 0);

@@ -22,6 +22,12 @@ pub enum EditorRejectionStage {
     ClipboardCut,
     /// Recognized native clipboard metadata was rejected before paste.
     ClipboardPaste,
+    /// An opted-in native font-size view refused a transient composition.
+    TextSizePreedit,
+    /// An opted-in native font-size view's text/IME session intent failed.
+    TextSizeInput,
+    /// An opted-in size view could not produce safe current-frame geometry.
+    TextSizeLayout,
 }
 
 /// A bounded, content-free classification for host rejection feedback.
@@ -55,6 +61,8 @@ pub enum EditorRejectionReason {
     ClipboardMetadata,
     /// A future session error without a more specific frontend classification.
     Other,
+    /// The native renderer cannot safely shape this font-size composition.
+    UnsupportedTextSize,
 }
 
 impl EditorRejectionReason {
@@ -74,6 +82,9 @@ impl EditorRejectionReason {
             Self::ClipboardTable => "The clipboard table does not fit this target or paste mode.",
             Self::ClipboardMetadata => "The clipboard's structured data could not be preserved.",
             Self::Other => "The editor could not complete this action.",
+            Self::UnsupportedTextSize => {
+                "This text cannot be safely rendered with the selected font sizes."
+            }
         }
     }
 }
@@ -99,7 +110,10 @@ impl EditorRejectionReason {
 /// `apply_edit_intent_with_selection` calls, host edit command routing, Copy/Cut projection or lossless transport, and rejected
 /// native Paste metadata. Successful edits, `NoChange`, empty/unsupported foreign
 /// clipboards, legacy Copy text fallback, and composition/presentation guards do
-/// not emit. Direct `ParagraphView` typing and IME input, direct session calls,
+/// not emit, except opted-in font-size composition admission and native-input
+/// failures (`TextSizePreedit` / `TextSizeInput` / `TextSizeLayout`). These are forwarded from the
+/// originating child to its owning DocumentView. Legacy `ParagraphView` typing
+/// and IME input, direct session calls,
 /// selection/navigation/checkbox actions, image import, history, persistence and
 /// the explicitly returned errors from `apply_edit_transaction` are not covered.
 /// This is not a universal engine error stream or a save-status event.
@@ -141,7 +155,7 @@ impl EditorRejection {
         self.document_revision
     }
 
-    const fn new(
+    pub(crate) const fn new(
         stage: EditorRejectionStage,
         reason: EditorRejectionReason,
         document_revision: DocumentRevision,
@@ -152,7 +166,7 @@ impl EditorRejection {
             document_revision,
         }
     }
-    fn from_session(
+    pub(crate) fn from_session(
         stage: EditorRejectionStage,
         error: &SessionError,
         document_revision: DocumentRevision,
@@ -179,6 +193,7 @@ impl EditorRejection {
 }
 
 impl EventEmitter<EditorRejection> for DocumentView {}
+impl EventEmitter<EditorRejection> for crate::block_view::ParagraphView {}
 
 impl DocumentView {
     pub(super) fn emit_rejection(

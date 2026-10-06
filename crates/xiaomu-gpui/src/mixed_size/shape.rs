@@ -1,5 +1,5 @@
-use super::{Input, Reason, SizeSpan, Unsupported, WorkLimits};
-use gpui::{Font, Pixels, ShapedLine, TextRun, WindowTextSystem, px};
+use super::{Input, NativeLine, Reason, SizeSpan, Unsupported, WorkLimits};
+use gpui::{Font, Pixels, TextRun, WindowTextSystem, px};
 use std::ops::Range;
 
 pub(super) struct Prepared<'a> {
@@ -17,7 +17,10 @@ pub(super) struct Prepared<'a> {
 impl<'a> Prepared<'a> {
     pub(super) fn new(input: Input<'a>) -> Result<Self, Unsupported> {
         let invalid = || Unsupported::at(0..input.text.len(), Reason::InvalidInput);
-        if !positive(input.base_size)
+        if input
+            .empty_size
+            .is_some_and(|size| !positive(size) || !positive(size * input.line_height))
+            || !positive(input.base_size)
             || !positive(input.wrap_width)
             || !input.line_height.is_finite()
             || input.line_height <= 0.0
@@ -52,7 +55,11 @@ impl<'a> Prepared<'a> {
         if sizes.is_empty() {
             sizes.push(SizeSpan {
                 range: 0..input.text.len(),
-                size: input.base_size,
+                size: if input.text.is_empty() {
+                    input.empty_size.unwrap_or(input.base_size)
+                } else {
+                    input.base_size
+                },
             });
         }
         let runs = if input.runs.is_empty() {
@@ -116,12 +123,13 @@ impl<'a> Prepared<'a> {
         system: &WindowTextSystem,
         range: Range<usize>,
         size: Pixels,
-    ) -> ShapedLine {
-        system.shape_line(
+    ) -> Result<NativeLine, Unsupported> {
+        NativeLine::shape(
+            system,
             self.text[range.clone()].to_owned().into(),
             size,
-            &self.clip_runs(range),
-            None,
+            &self.clip_runs(range.clone()),
+            range,
         )
     }
 

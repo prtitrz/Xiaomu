@@ -143,6 +143,23 @@ impl ParagraphView {
             }
         }
 
+        if !self.admit_preedit_size() {
+            self.composition = None;
+            self.rejected_composition = true;
+            eprintln!("xiaomu: unsupported mixed-size preedit rejected");
+            use crate::document_view::{
+                EditorRejection, EditorRejectionReason, EditorRejectionStage,
+            };
+            let revision = self.session.borrow().document().revision();
+            cx.emit(EditorRejection::new(
+                EditorRejectionStage::TextSizePreedit,
+                EditorRejectionReason::UnsupportedTextSize,
+                revision,
+            ));
+            cx.notify();
+            return;
+        }
+
         // The preedit is a view transient: without an explicit repaint the
         // marked text would stay invisible while the IME session continues.
         // It is also an explicit caret movement event for viewport purposes;

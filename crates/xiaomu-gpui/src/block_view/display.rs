@@ -14,7 +14,7 @@ use crate::inline_atom_display::InlineAtomDisplayProjection;
 use super::projection::normalize_segments;
 use super::{DisplaySegment, ParagraphView, SelectionProjection};
 
-fn project_atom_display_content(
+pub(crate) fn project_atom_display_content(
     inline: &InlineContent,
     projection: &InlineAtomDisplayProjection,
 ) -> (String, Vec<DisplaySegment>) {

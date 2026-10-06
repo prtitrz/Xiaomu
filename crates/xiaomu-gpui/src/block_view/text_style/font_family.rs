@@ -100,13 +100,13 @@ fn parse_families(value: &str) -> Option<Vec<Family>> {
 }
 
 /// One render-pass catalog, so newly added fonts are not hidden by stale state.
-pub(in crate::block_view) struct FontCatalog<'a> {
+pub(crate) struct FontCatalog<'a> {
     names: Vec<String>,
     system: Option<&'a TextSystem>,
 }
 
 impl<'a> FontCatalog<'a> {
-    pub(in crate::block_view) fn from_system(system: &'a TextSystem) -> Self {
+    pub(crate) fn from_system(system: &'a TextSystem) -> Self {
         Self {
             names: system.all_font_names(),
             system: Some(system),
@@ -114,7 +114,7 @@ impl<'a> FontCatalog<'a> {
     }
 
     #[cfg(test)]
-    pub(in crate::block_view) fn from_names(names: &[&str]) -> Self {
+    pub(crate) fn from_names(names: &[&str]) -> Self {
         Self {
             names: names.iter().map(|name| (*name).to_owned()).collect(),
             system: None,
@@ -141,7 +141,7 @@ impl<'a> FontCatalog<'a> {
         Some(name.clone())
     }
 
-    pub(in crate::block_view) fn apply(&self, value: &str, base: &Font) -> Font {
+    pub(crate) fn apply(&self, value: &str, base: &Font) -> Font {
         let Some(families) = parse_families(value) else {
             return base.clone();
         };
