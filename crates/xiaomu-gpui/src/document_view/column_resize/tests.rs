@@ -133,6 +133,7 @@ fn measured(f: &Fixture, width: f32) -> ResizeMeasurement {
         document: f.document.clone(),
         key: capability.key(&f.document, f.table).unwrap(),
         origin: point(px(0.0), px(0.0)),
+        viewport: None,
         available: width,
         clip: Bounds::new(point(px(-100.0), px(-100.0)), size(px(2000.0), px(2000.0))),
         geometry: plan.layout(width, &vec![50.0; plan.cells().len()]).unwrap(),

@@ -65,10 +65,15 @@ impl DocumentView {
         ) else {
             return false;
         };
-        let (key, available, origin) = {
+        let (key, available, origin, viewport) = {
             let measurements = self.column_resize.measurements.borrow();
             let measured = &measurements[index];
-            (measured.key.clone(), measured.available, measured.origin)
+            (
+                measured.key.clone(),
+                measured.available,
+                measured.origin,
+                measured.viewport.clone(),
+            )
         };
         self.focus_selection(window, cx);
         self.is_dragging = false;
@@ -82,6 +87,8 @@ impl DocumentView {
             key,
             available,
             origin,
+            observed_viewport: viewport.clone(),
+            viewport,
             released: false,
             commit_queued: false,
             token: std::rc::Rc::new(()),
@@ -113,14 +120,14 @@ impl DocumentView {
             f32::from(position.x),
             capability.config.min_column_width,
         ) else {
-            *state = None;
+            super::ColumnResizeState::discard(&mut state);
             cx.notify();
             return false;
         };
         let mut intent = drag.intent;
         intent.width = width;
         if !(capability.guard)(&self.session.borrow(), &intent) {
-            *state = None;
+            super::ColumnResizeState::discard(&mut state);
             cx.notify();
             return false;
         }
@@ -131,7 +138,7 @@ impl DocumentView {
             .and_then(|()| plan.layout(drag.available, &vec![0.0; plan.cells().len()]))
             .is_ok();
         if !valid_layout {
-            *state = None;
+            super::ColumnResizeState::discard(&mut state);
             cx.notify();
             return false;
         }

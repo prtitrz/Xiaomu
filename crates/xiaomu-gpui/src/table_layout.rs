@@ -51,6 +51,11 @@
 //! or painted with a different offset. A host must separately register the
 //! full-cell rectangle to handle blank-space selection.
 //!
+//! `DocumentView` additionally wraps each measured table in a same-frame-width
+//! horizontal viewport. Its per-table offset and clip are frontend state; real
+//! child prepaint supplies shifted full geometry, while pointer candidacy uses
+//! a separate visible clip. The standalone element does not create a scroller.
+//!
 //! Chuanyun's `editor-blocks.css` uses `table-layout: auto; width: 100%`, 9px/12px
 //! cell padding, 13px text at 1.55 line height and top alignment. The schema and
 //! command oracles do not establish intrinsic/min-content track sizing. That

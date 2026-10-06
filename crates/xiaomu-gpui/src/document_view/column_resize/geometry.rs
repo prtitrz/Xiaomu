@@ -15,6 +15,7 @@ pub(in crate::document_view) struct ResizeMeasurement {
     pub document: XiaomuDocument,
     pub key: Rc<TableCapabilityKey>,
     pub origin: Point<Pixels>,
+    pub viewport: Option<super::super::table_scroll::TableScrollMeasurement>,
     pub available: f32,
     pub clip: Bounds<Pixels>,
     pub geometry: TableGeometry,
@@ -22,6 +23,21 @@ pub(in crate::document_view) struct ResizeMeasurement {
 }
 
 impl ResizeMeasurement {
+    pub(super) fn matches_origin(&self, drag: &super::ResizeDrag) -> bool {
+        match (&self.viewport, &drag.viewport) {
+            (Some(current), Some(original)) => {
+                let viewport_width = px(self.available.min(self.geometry.width));
+                current.origin == original.origin
+                    && current.constraint == viewport_width
+                    && current.scale == original.scale
+                    && current.offset == original.projected_offset(current.maximum)
+                    && self.origin == current.origin + current.offset
+            }
+            (None, None) => self.origin == drag.origin,
+            _ => false,
+        }
+    }
+
     pub(super) fn contains(&self, position: Point<Pixels>, handle: f32) -> bool {
         self.clip.contains(&position)
             && position.y >= self.origin.y

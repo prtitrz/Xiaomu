@@ -90,7 +90,8 @@ impl DocumentView {
             .iter()
             .rev()
             .find(|(cell, bounds)| {
-                bounds.contains(&position)
+                self.visible_table_bounds(session.document(), *cell, *bounds)
+                    .is_some_and(|bounds| bounds.contains(&position))
                     && self
                         .hidden_table_ancestor(session.document(), *cell)
                         .is_none()

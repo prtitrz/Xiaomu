@@ -41,6 +41,39 @@ the innermost containing table owns a hit. The existing seven-pixel cell-range
 handle retains priority. Scroll clipping and outside-left boundaries are checked.
 A successful drag focuses this editor's existing selection without changing it.
 
+### Measured-table overflow ownership
+
+Every measured table, including a nested table and a view with resize callbacks
+disabled, owns its own horizontal viewport. The viewport is constrained by the
+same-frame available width; the table keeps its full exact track widths and its
+height still comes from real child layout. A 280-pixel inner table in a 250-pixel
+parent cell has 226 pixels available after the existing horizontal padding.
+Overflow is reachable by native horizontal wheel/trackpad input without a visible
+scrollbar, canonical width shrink, document edit, selection change or history unit.
+
+The nearest hovered viewport consumes a horizontal-dominant event only when its
+clamped offset changes. Pure vertical events and vertically dominant diagonals
+continue to the document; there is no implicit vertical-to-horizontal conversion.
+An event that reaches an edge has one owner; a later event with no possible
+movement can pass to an outer table/document. Residual deltas are not redistributed.
+Offsets are keyed by the mounted table element and owning view, and removed
+elements do not retain viewport state. No stock GPUI patch or runtime selector is used.
+
+Actual prepaint offsets drive full cell/text/caret/native-input bounds and resize
+measurements. Separate visible clips keep hidden overflow out of pointer hit
+candidates without truncating full navigation geometry. A scrolled resize may
+change the scroll range: only the deterministic clamp of the original down offset
+to the actual device-rounded content/viewport extent is admitted. Grow→shrink→grow
+reuses that original offset; unrelated scrolling, viewport-origin changes and the
+existing document/owner/composition guards still cancel. Passive horizontal
+scrolling does not force IME unmark or commit. These bounds checks are virtual
+platform evidence, not a native candidate-placement result or a new horizontal
+scroll-to-caret command.
+
+The original editor's per-table `.tableWrapper` uses horizontal overflow, but its
+CSS intrinsic table sizing and browser wheel chaining are distinct. This native
+viewport contract does not claim pixel-identical browser geometry or scrolling.
+
 Measured starting widths must be positive integers at most 1,000,000; fractional
 starts remain unsupported. Native pointer coordinates may be fractional. Widen
 the received `f32` coordinates separately to `f64`, subtract the original down

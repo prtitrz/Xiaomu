@@ -49,6 +49,7 @@ impl DocumentView {
             view.update(cx, |this, cx| {
                 this.registry.borrow_mut().clear();
                 this.cell_registry.borrow_mut().clear();
+                this.table_clips.borrow_mut().clear();
                 this.column_resize.clear_measurements();
                 let width = BlockLayoutWidth {
                     available: (viewport.width - window.rem_size() * 2.0).max(px(0.0)),
@@ -222,9 +223,10 @@ impl DocumentView {
             self.table_capability.borrow_mut().revoke(table);
             return measured_placeholder(table);
         };
-        div()
+        let scroll: super::table_scroll::SharedTableScroll = Default::default();
+        let content_layout: super::table_scroll::SharedTableLayout = Default::default();
+        let content = div()
             .debug_selector(move || format!("measured-table-{table:?}"))
-            .my_3()
             .w(px(geometry.width))
             .min_w(px(geometry.width))
             .flex_shrink_0()
@@ -233,6 +235,9 @@ impl DocumentView {
                 key,
                 capability: self.table_capability.clone(),
                 registry: self.cell_registry.clone(),
+                table_clips: self.table_clips.clone(),
+                scroll: scroll.clone(),
+                content_layout: content_layout.clone(),
                 resize_measurements: self
                     .column_resize
                     .enabled()
@@ -242,7 +247,17 @@ impl DocumentView {
                 available: f32::from(width.available),
                 element,
             })
-            .into_any_element()
+            .into_any_element();
+        super::table_scroll::TableScrollViewport {
+            table,
+            width: width.available.min(px(geometry.width)),
+            content_layout,
+            preview: self.column_resize.scroll_preview(table),
+            scroll,
+            view: cx.weak_entity(),
+            content: Some(content),
+        }
+        .into_any_element()
     }
 }
 
@@ -261,6 +276,9 @@ struct AdmittedTable {
     key: Rc<TableCapabilityKey>,
     capability: SharedTableCapability,
     registry: BlockBoundsRegistry,
+    table_clips: super::table_scroll::TableClipRegistry,
+    scroll: super::table_scroll::SharedTableScroll,
+    content_layout: super::table_scroll::SharedTableLayout,
     resize_measurements: Option<Rc<std::cell::RefCell<Vec<ResizeMeasurement>>>>,
     document: xiaomu_core::document::XiaomuDocument,
     placements: Vec<xiaomu_core::document::CellPlacement>,
@@ -292,6 +310,7 @@ impl Element for AdmittedTable {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let result = self.element.request_layout(id, inspector, window, cx);
+        self.content_layout.set(Some(result.0));
         self.capability.borrow_mut().record(
             self.table,
             self.key.clone(),
@@ -311,6 +330,9 @@ impl Element for AdmittedTable {
         // Parent cells precede nested cells, so reverse hit testing selects
         // the innermost containing cell, including its blank lower region.
         if let Ok(geometry) = &request.geometry {
+            self.table_clips
+                .borrow_mut()
+                .insert(self.table, window.content_mask().bounds.intersect(&bounds));
             if let Some(measurements) = &self.resize_measurements {
                 measurements.borrow_mut().push(ResizeMeasurement {
                     table: self.table,
@@ -318,6 +340,13 @@ impl Element for AdmittedTable {
                     document: self.document.clone(),
                     key: self.key.clone(),
                     origin: bounds.origin,
+                    viewport: self.scroll.borrow().as_ref().map(|scroll| {
+                        super::table_scroll::TableScrollMeasurement::capture(
+                            scroll,
+                            px(self.available.min(geometry.width)),
+                            window.scale_factor(),
+                        )
+                    }),
                     available: self.available,
                     clip: window.content_mask().bounds,
                     geometry: geometry.clone(),
