@@ -176,7 +176,7 @@ fn projection_budget_rejection_is_before_writer_and_preserves_complete_state() {
 }
 
 #[test]
-fn a_host_plan_without_a_cell_range_does_not_admit_prepared_cut() {
+fn a_host_plan_for_plain_inline_selection_does_not_admit_prepared_cut() {
     let f = fixture(false);
     let mut s = session(&f, Some(Box::new(CutPolicy(Fault::NonCellPlan))));
     let events = listen(&mut s);

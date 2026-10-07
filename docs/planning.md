@@ -1,5 +1,11 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-07 bounded extension: the existing opt-in prepared Cut also admits explicit
+whole-node and collapsed Atomic sources. Final collapsed inline selection, isolated
+history and all prepublication checks remain unchanged; ordinary text/gap sources,
+legacy default behavior, image resources and native acceptance are not expanded.
+See [the prepared Cut contract](prepared-table-cut.md).
+
 2026-10-06增量：GPUI 默认关闭的 `BlockAlignmentProvider` 由宿主解析当前 inline
 block 的 Left/Center/Right；显式启用后共用 visual-row shaping 几何、精确宽度缓存、
 selection/caret/hit/vertical/native bounds，并局部修复 stock wrapped decoration 偏移。

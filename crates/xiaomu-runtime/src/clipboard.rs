@@ -50,13 +50,16 @@ pub(crate) fn export_selection(
 
 /// Only the session's dedicated prepared-Cut coordinator may use this after
 /// explicit Cut policy admission. Projection-only callers cannot bypass the
-/// public Cut guard or substitute the Copy purpose.
-pub(crate) fn export_prepared_cell_cut(
+/// public CellRange Cut guard or substitute the Copy purpose.
+pub(crate) fn export_prepared_cut(
     document: &xiaomu_core::document::XiaomuDocument,
     selection: crate::session::DocumentSelection,
     spec: ClipboardExportSpec,
 ) -> Result<Option<ClipboardSlice>, crate::session::SessionError> {
-    if selection.active_cell_range().is_none() {
+    if selection.active_cell_range().is_none()
+        && selection.as_node_selection().is_none()
+        && selection.as_atomic_node().is_none()
+    {
         return Err(crate::session::SessionError::UnsupportedTableOperation);
     }
     export_with_spec(document, selection, spec)

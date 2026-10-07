@@ -1,16 +1,26 @@
-# Scoped prepared CellRange Cut
+# Scoped prepared structural Cut
 
-2026-10-05. This explicit host opt-in does not change generic Delete, legacy
+2026-10-07. This explicit host opt-in does not change generic Delete, legacy
 unit-cell projection, default Paste fitting or schema admission.
 
 ## API and publication
 
 `SessionPolicy::prepare_cut(context)` defaults to `Ok(None)`. A host may supply
-one dedicated CellRange `EditPlan` and an explicit Cut export spec. The session
+one dedicated `EditPlan` for an active CellRange, explicit whole-block identity
+(`DocumentSelection::node`) or collapsed Atomic selection, plus an explicit Cut
+export spec. Ordinary gaps, All and text ranges do not opt in. The session
 then evaluates bounded source projection, actual Core candidate, final collapsed
 inline selection, candidate policy and exact inverse/identity-preserving redo.
-Empty transactions and non-CellRange dedicated plans reject. Projection-only
-opted-in Cut remains rejected; projection alone never approves deletion.
+Empty transactions and unsupported source selections reject. The inline-after
+restriction is unchanged: valid gap, node, Atomic and noncollapsed inline results
+still reject before publication. Projection-only opted-in CellRange Cut remains
+rejected; projection alone never approves deletion.
+
+Whole-node preparation reuses the existing bounded exporter without changing
+Copy semantics. Explicit node selections retain WholeRoots/closed provenance;
+legacy Atomic selections retain their historical open provenance. Subtree attrs,
+marks and structure are preserved; unknown text-projection semantics and budget
+violations reject. No image-specific resource or upload API is introduced.
 
 Opaque `PreparedCut<'a>` exclusively borrows the same live session and exposes
 only `clipboard_slice()` and single-use `publish(self)`. Dropping it preserves
@@ -21,7 +31,9 @@ There is no detached token checking only document revision.
 
 Ordinary commit and prepared Cut share the same private preparation function.
 Cut forces isolated history, marks=None and no input-rule undo token, but only
-on publication. The publisher installs the exact candidate/history once,
+on publication. This stays isolated regardless of adjacent input timing; it does
+not promise another editor's rapid Paste/Cut history coalescing. The publisher
+installs the exact candidate/history once,
 without another Core apply, policy callback or selection resolution. No IDs are
 predicted or reallocated after the external write.
 
@@ -52,7 +64,7 @@ bounded guarantee. Read-back equality is not an acknowledgment/rollback contract
 
 ## Evidence
 
-The current library has1294 passing all-target tests, plus six passing borrow
+The original CellRange delivery had1294 passing all-target tests, plus six passing borrow
 compile-fail doctests. Nine new Runtime tests compare full history transactions,
 group/token/listener state and future allocated IDs for success, rejection and
 drop. Seven actual virtual-GPUI tests cover candidate validation before writer0,
@@ -70,3 +82,9 @@ Host product code separately owns selected-origin deletion, factory defaults,
 complete work budget and original history parity. Native OS/GUI acceptance is
 also separate. No growth/repetition/arbitrary target clipping, external HTML,
 new attrs, platform backend or legacy GPUI fork is enabled by this API.
+
+The whole-node extension adds Runtime and mounted virtual-GPUI regressions for
+explicit NodeSelection and Atomic sources, rejection before the real writer,
+guard cancellation, listener ordering, isolated Undo/Redo, existing provenance
+and unchanged source/after-selection boundaries. Product and native acceptance
+remain separate from these library tests.

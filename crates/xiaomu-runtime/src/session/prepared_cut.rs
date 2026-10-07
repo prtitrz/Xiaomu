@@ -1,9 +1,9 @@
-//! Scoped, single-use preparation for a host's explicit CellRange Cut command.
+//! Scoped, single-use preparation for an explicitly opted-in structural Cut.
 
 use super::commit::PreparedCommit;
 use super::plan::HistoryPolicy;
 use super::{DocumentSession, SessionError, SessionOutcome};
-use crate::clipboard::{ClipboardExportPurpose, ClipboardSlice, export_prepared_cell_cut};
+use crate::clipboard::{ClipboardExportPurpose, ClipboardSlice, export_prepared_cut};
 
 /// A fully preflighted Cut bound to its exclusively borrowed source session.
 ///
@@ -107,13 +107,16 @@ impl PreparedCut<'_> {
 }
 
 impl DocumentSession {
-    /// Prepares an explicitly opted-in CellRange Cut without live side effects.
+    /// Prepares an opted-in CellRange or whole-node Cut without live side effects.
     ///
     /// `Ok(None)` means no dedicated policy plan; existing callers may retain
     /// their legacy Cut route. `Some` keeps this session mutably borrowed until
     /// publication or cancellation. Policy, projection budget, Core, final
     /// selection, candidate admission and exact inverse/redo are all evaluated
-    /// before returning the guard. Projection-only opted-in CellRange Cut remains
+    /// before returning the guard. Whole-node sources require explicit node identity
+    /// or a collapsed Atomic selection; ordinary gaps/text ranges do not qualify.
+    /// The plan must end at a collapsed inline caret so Cut can clear stored marks.
+    /// Projection-only opted-in CellRange Cut remains
     /// closed; the historical no-export-spec unit-cell path stays unchanged.
     pub fn prepare_cut(&mut self) -> Result<Option<PreparedCut<'_>>, SessionError> {
         self.selection.validate(&self.document)?;
@@ -121,13 +124,17 @@ impl DocumentSession {
         let Some(mut plan) = plan else {
             return Ok(None);
         };
-        if self.selection.active_cell_range().is_none() || plan.transaction().steps().is_empty() {
+        if (self.selection.active_cell_range().is_none()
+            && self.selection.as_node_selection().is_none()
+            && self.selection.as_atomic_node().is_none())
+            || plan.transaction().steps().is_empty()
+        {
             return Err(SessionError::UnsupportedTableOperation);
         }
         let spec = self
             .clipboard_export_spec(ClipboardExportPurpose::Cut)?
             .ok_or(SessionError::UnsupportedTableOperation)?;
-        let slice = export_prepared_cell_cut(&self.document, self.selection, spec)?
+        let slice = export_prepared_cut(&self.document, self.selection, spec)?
             .ok_or(SessionError::SelectionInvalid)?;
         // A Cut is isolated, clears pending marks and cannot install an input
         // rule rollback token. All these changes occur only on publication.

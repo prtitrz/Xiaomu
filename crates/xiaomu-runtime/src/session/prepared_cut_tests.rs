@@ -590,3 +590,5 @@ fn assert_future_allocation_matches(session: &mut DocumentSession, control: &mut
 mod atomicity;
 mod publish;
 mod timed;
+
+mod node;
