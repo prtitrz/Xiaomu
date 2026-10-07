@@ -452,6 +452,13 @@ staged plan 的多个 Core transaction 对用户表现为一笔 history。undo �
 
 ### Clipboard
 
+The opt-in [prepared structural Cut](prepared-table-cut.md) coordinator accepts
+CellRange, explicit whole-node identity and collapsed Atomic sources. It resolves
+bounded export, deletion candidate, collapsed inline after-selection, admission
+and exact inverse/redo before GPUI writes once and consumes the exclusive guard.
+Default legacy Cut, projection provenance and ordinary marks semantics are unchanged.
+
+
 Runtime clipboard 已从 P2 的纯文本 seam 升级为 frontend-neutral structured clipboard：
 
 2026-10-04 的 opt-in 导出增量见 [表格导出契约](table-clipboard-export.md)：

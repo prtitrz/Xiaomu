@@ -381,3 +381,6 @@ fn native_composition_blocks_dedicated_and_legacy_cut_before_any_write(cx: &mut 
         assert!(rejections.borrow().is_empty());
     }
 }
+
+#[path = "clipboard_cut_node_tests.rs"]
+mod node_tests;

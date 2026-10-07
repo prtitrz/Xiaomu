@@ -169,11 +169,14 @@ pub trait SessionPolicy {
         super::HistoryOptions::new()
     }
 
-    /// Optionally supplies one dedicated, isolated CellRange Cut plan.
+    /// Optionally supplies an isolated CellRange or whole-node Cut plan.
     ///
     /// `None` preserves the frontend's legacy route. A supplied plan is used
     /// only by [`DocumentSession::prepare_cut`], together with this policy's
-    /// explicit Cut export spec. Projection-only Cut stays independently
+    /// explicit Cut export spec. Whole-node sources require explicit node identity
+    /// or a collapsed Atomic selection. The final selection must be a collapsed
+    /// inline caret; other selections reject before any clipboard write.
+    /// Projection-only CellRange Cut stays independently
     /// refused. No platform write or live mutation happens in this callback.
     /// Generic Delete is not a substitute for the host's exact Cut contract.
     fn prepare_cut(&self, _context: SessionContext<'_>) -> Result<Option<EditPlan>, PolicyError> {
