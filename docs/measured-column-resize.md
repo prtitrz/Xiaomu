@@ -31,6 +31,13 @@ preflight. Equal `SetNodeAttrs` steps should be omitted explicitly when the host
 wants a no-op; a measured unchanged width may still need to materialize a
 missing/null/zero width hint. A callback is never retried.
 
+`DocumentView::has_pending_table_column_resize()` is a read-only lifecycle
+query for this view, including drags on nested tables, released previews still
+awaiting measurement, and queued commits. Hovering alone returns false. The
+query does not run the guard, cancel or commit the preview, change selection or
+history, or take focus. It becomes false on cancellation or before entering the
+host commit callback; it does not report whether that callback's host edit succeeds.
+
 ## Geometry and lifecycle
 
 Only successful current measurements supply handles. Full cell geometry and

@@ -16,6 +16,8 @@ use xiaomu_runtime::session::{DocumentSelection, DocumentSession};
 mod lifecycle;
 #[path = "mounted_tests.rs"]
 mod mounted;
+#[path = "pending_query_tests.rs"]
+mod pending_query;
 #[path = "pointer_quantization_tests.rs"]
 mod pointer_quantization;
 #[path = "timing_tests.rs"]
