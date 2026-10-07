@@ -31,6 +31,19 @@ impl NodeStore {
         }
     }
 
+    /// Builds an unpublished store from already-validated owned payloads.
+    /// Complete tree validation remains the transaction boundary's job.
+    pub(crate) fn from_payloads(nodes: impl IntoIterator<Item = Result<Node>>) -> Result<Self> {
+        let mut owned = BTreeMap::new();
+        for node in nodes {
+            let node = node?;
+            if owned.insert(node.id(), Arc::new(node)).is_some() {
+                return Err(Error::DuplicateChildReference);
+            }
+        }
+        Ok(Self::from_nodes(owned))
+    }
+
     /// Returns a node by stable identity.
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<&Node> {

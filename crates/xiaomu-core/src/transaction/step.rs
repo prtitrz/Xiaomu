@@ -16,6 +16,28 @@ use crate::text::{TextOffset, TextRange};
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TransactionStep {
+    /// Replaces a document's entire body with an identity-free source template.
+    ///
+    /// The receiving root keeps its identity and takes the exact source root
+    /// attributes. Every descendant receives a fresh receiving-lineage ID.
+    /// All kinds, attributes, rich runs, atoms and table spans are preserved.
+    /// Allocation, retained before/after payload and mapping budgets are
+    /// checked before materialization. Failure is atomic. Old descendants map
+    /// to Deleted; root gaps map through the actual removals and insertions.
+    /// The ordinary inverse preserves exact old IDs; Redo reuses imported IDs.
+    ReplaceDocument {
+        /// Bounded complete source document, containing no canonical IDs.
+        template: super::DocumentTemplate,
+    },
+    /// Applies an engine-produced exact whole-document inverse.
+    ///
+    /// Requires the same document lineage/root and exact expected live store;
+    /// a separately constructed identical-looking document is rejected.
+    /// Revisions advance normally and allocator high-water never decreases.
+    RestoreDocument {
+        /// Opaque same-lineage inverse generated only by Core application.
+        restore: super::DocumentRestore,
+    },
     /// Replaces `[range.start, range.end)` of one inline node's text with
     /// `replacement`. An empty replacement deletes the span.
     ///

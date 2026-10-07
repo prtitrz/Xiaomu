@@ -36,3 +36,5 @@ CI 与原生交互验收是两类证据，不可互相替代。P4 后补的 Wind
 已结束的审计移入 [历史归档](archive/README.md)，不与当前路线并列。阶段契约、验收记录和 ADR 保留；只有追溯旧问题时才需要读归档。
 
 后续发现缺口时，先核实现有代码和验收证据，再把接受的工作及优先级写入 planning / phase contract。已完成、延期、待决策要明确区分，不能只在审计结尾留下一条无人跟进的建议。
+
+独立编辑器的普通历史快照同步：[committed snapshot import](snapshot-import.md)。

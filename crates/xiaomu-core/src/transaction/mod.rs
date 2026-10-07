@@ -9,6 +9,8 @@
 //! transaction used for undo round-trips (P0.6).
 
 mod apply;
+mod document_template;
+mod forest;
 mod inline;
 mod inline_atom;
 mod inverse;
@@ -22,6 +24,7 @@ use crate::document::XiaomuDocument;
 use crate::mapping::ChangeMap;
 use crate::{Error, Result};
 
+pub use document_template::{DocumentRestore, DocumentTemplate};
 pub use step::TransactionStep;
 pub use table_restore::TableCellRestore;
 pub use table_tree::TableTreeTemplate;

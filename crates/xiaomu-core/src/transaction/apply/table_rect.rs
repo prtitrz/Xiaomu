@@ -4,12 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::document::{Node, NodeContent, NodeId, NodeKind, TableGrid, TableGridBudget, TableRect};
 use crate::mapping::StepMap;
-use crate::transaction::table_tree::TemplateContent;
+use crate::transaction::forest::{TemplateContent, materialize_node};
 use crate::transaction::{TableCellRestore, TableTreeTemplate, TransactionStep};
 use crate::{Error, Result};
 
 use super::ApplyContext;
-use super::table_tree::materialize_node;
 
 #[cfg(test)]
 mod tests;

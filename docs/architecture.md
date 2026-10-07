@@ -295,6 +295,19 @@ JoinNodes          → 删除追加文本 + RestoreSubtree
 
 Runtime 不拥有 App Shell、window、filesystem policy、networking、product configuration 或 codec，并保持 `#![forbid(unsafe_code)]` 与 `#![warn(missing_docs)]`。
 
+### Committed snapshot replacement
+
+`DocumentTemplate::capture` 提供 bounded、identity-free 的完整文档复制；
+`TransactionStep::ReplaceDocument` 保留接收方 root、原样替换 root attrs 并分配全新后代 ID。
+普通受保护 `DocumentRestore` inverse 只接受同一 lineage 的精确 expected store，
+Undo/Redo 保留旧/新身份且 allocator high-water 单调。Runtime 的公开 `apply_plan`
+沿同一 atomic commit/final-policy/history 路径发布，不重建 session；
+`CaretAtDocumentEnd` / `AllDocument` 等显式 after-selection 由宿主选择。
+`DocumentChangeOrigin::External` 只分类当前通知，后续 Undo/Redo 是 Local。
+GPUI `apply_passive_edit_plan` 完整 composition guard 后被动刷新，只有原本聚焦的
+接收 pane 恢复 input，不请求 caret scroll。宿主持久化/CAS/dirty acknowledgement
+不进入库契约，详见 [snapshot import](snapshot-import.md)。
+
 ### DocumentSession
 
 `runtime/session/` 当前包含：

@@ -35,6 +35,7 @@ pub use link::{LinkAttributes, LinkMark};
 pub use marks::{Mark, MarkKind, MarkSet};
 pub use node::Node;
 pub use node_id::NodeId;
+pub(crate) use snapshot::DocumentLineage;
 pub use snapshot::XiaomuDocument;
 pub use store::{NodeStore, NodeStoreBuilder};
 pub use string_attribute::StringAttribute;

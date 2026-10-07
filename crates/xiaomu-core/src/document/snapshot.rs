@@ -1,6 +1,7 @@
 //! Immutable canonical document snapshot and full-tree validation.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::Arc;
 
 use crate::{Error, Result};
 
@@ -8,6 +9,18 @@ use super::{
     DocumentRevision, DocumentVersion, Node, NodeId, NodeKind, NodeStore, TableGrid,
     TableGridBudget, allows_child,
 };
+
+/// Private process-local lineage identity, independent of payload sharing.
+#[derive(Clone, Debug)]
+pub(crate) struct DocumentLineage(Arc<()>);
+
+impl PartialEq for DocumentLineage {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for DocumentLineage {}
 
 /// Immutable canonical Xiaomu document snapshot.
 ///
@@ -21,6 +34,7 @@ pub struct XiaomuDocument {
     root: NodeId,
     store: NodeStore,
     next_node_id: u64,
+    lineage: DocumentLineage,
 }
 
 impl XiaomuDocument {
@@ -30,6 +44,7 @@ impl XiaomuDocument {
     pub fn new(root: NodeId, store: NodeStore) -> Result<Self> {
         validate_tree(root, &store)?;
         Ok(Self {
+            lineage: DocumentLineage(Arc::new(())),
             version: DocumentVersion::CURRENT,
             revision: DocumentRevision::INITIAL,
             root,
@@ -45,6 +60,7 @@ impl XiaomuDocument {
         root: NodeId,
         store: NodeStore,
         next_node_id: u64,
+        lineage: DocumentLineage,
     ) -> Result<Self> {
         validate_tree(root, &store)?;
         Ok(Self {
@@ -53,7 +69,12 @@ impl XiaomuDocument {
             root,
             store,
             next_node_id,
+            lineage,
         })
+    }
+
+    pub(crate) fn lineage(&self) -> &DocumentLineage {
+        &self.lineage
     }
 
     /// Returns the node identity that the next inserted node will receive.
@@ -433,6 +454,7 @@ mod tests {
             .unwrap();
         let next_store = original.store.replace_node(replacement).unwrap();
         let next = XiaomuDocument {
+            lineage: original.lineage.clone(),
             version: original.version,
             revision: original.revision.next().unwrap(),
             root: original.root,

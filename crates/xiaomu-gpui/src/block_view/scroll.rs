@@ -44,7 +44,11 @@ impl ParagraphView {
             .as_ref()
             .expect("validated scroll handle")
             .clone();
-        window.on_next_frame(move |_, _| scroll_handle.set_offset(offset));
+        let passive_epoch = self.passive_scroll_epoch.clone();
+        let planned_epoch = passive_epoch.get();
+        window.on_next_frame(move |_, _| {
+            apply_caret_scroll(&scroll_handle, offset, passive_epoch.get(), planned_epoch);
+        });
     }
 
     fn take_keep_visible_offset(&self, caret: &Bounds<Pixels>) -> Option<Point<Pixels>> {
@@ -78,5 +82,33 @@ impl ParagraphView {
         }
 
         (offset.y != original_y).then_some(offset)
+    }
+}
+
+fn apply_caret_scroll(
+    scroll: &gpui::ScrollHandle,
+    offset: Point<Pixels>,
+    current_epoch: u64,
+    planned_epoch: u64,
+) {
+    if current_epoch == planned_epoch {
+        scroll.set_offset(offset);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn passive_scroll_epoch_invalidates_an_already_queued_callback() {
+        let scroll = gpui::ScrollHandle::new();
+        let original = gpui::point(gpui::px(0.0), gpui::px(-140.0));
+        let requested = gpui::point(gpui::px(0.0), gpui::px(-900.0));
+        scroll.set_offset(original);
+        apply_caret_scroll(&scroll, requested, 1, 0);
+        assert_eq!(scroll.offset(), original);
+        apply_caret_scroll(&scroll, requested, 1, 1);
+        assert_eq!(scroll.offset(), requested);
     }
 }
