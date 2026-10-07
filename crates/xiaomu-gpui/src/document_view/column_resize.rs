@@ -98,6 +98,20 @@ impl ColumnResizeState {
 }
 
 impl DocumentView {
+    /// Reports whether this view owns an unfinished table-column resize.
+    ///
+    /// Includes a drag on any measured table (including nested tables), a
+    /// released preview awaiting measurement, and a queued commit. Returns
+    /// false when idle or after cancellation, and before the host commit
+    /// callback runs. Hovering alone is not pending work.
+    ///
+    /// This only observes the current state: it does not validate guards,
+    /// cancel or commit a preview, change selection/history, or move focus.
+    #[must_use]
+    pub fn has_pending_table_column_resize(&self) -> bool {
+        self.column_resize.drag.borrow().is_some()
+    }
+
     /// Installs this view's optional measured column-drag capability.
     ///
     /// Disabled by default and dependent on `set_measured_table_layout(true)`.
