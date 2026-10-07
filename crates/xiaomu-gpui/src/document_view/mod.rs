@@ -72,7 +72,9 @@ use std::rc::Rc;
 
 use gpui::{App, Context, Entity, Focusable as _, Pixels, ScrollHandle, Window, prelude::*};
 
-use xiaomu_core::document::{ImagePresentationAttrs, NodeAttrs, NodeId, XiaomuDocument};
+use xiaomu_core::document::{
+    ImagePresentationAttrs, ImageSourceRef, NodeAttrs, NodeId, XiaomuDocument,
+};
 use xiaomu_core::selection::InlinePoint;
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
@@ -237,7 +239,10 @@ impl DocumentView {
         let document = self.session.borrow().document().clone();
         let node_data = document.node(node)?;
         let attrs = ImagePresentationAttrs::read(node_data.attrs()).ok()?;
-        self.image_loads.fresh_state(node, attrs.source().value())
+        let ImageSourceRef::AssetRef(source_key) = attrs.source() else {
+            return None;
+        };
+        self.image_loads.fresh_state(node, source_key)
     }
 
     /// Attaches the host persistence adapter (Ctrl/Cmd-S saves).
@@ -470,7 +475,10 @@ impl DocumentView {
         let document = self.session.borrow().document().clone();
         let node_data = document.node(node)?;
         let attrs = ImagePresentationAttrs::read(node_data.attrs()).ok()?;
-        self.image_loads.render_source(node, attrs.source().value())
+        let ImageSourceRef::AssetRef(source_key) = attrs.source() else {
+            return None;
+        };
+        self.image_loads.render_source(node, source_key)
     }
 
     /// Builds the label and background for one image placeholder.

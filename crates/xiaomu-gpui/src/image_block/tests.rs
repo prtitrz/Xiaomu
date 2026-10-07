@@ -1,5 +1,12 @@
 use super::*;
 use xiaomu_core::document::{NodeAttrs, NodeKind, NodeStoreBuilder};
+
+#[test]
+fn image_load_cache_keeps_its_send_contract() {
+    fn assert_send<T: Send>() {}
+    assert_send::<ImageLoadCache>();
+}
+
 fn node() -> NodeId {
     NodeStoreBuilder::new()
         .insert(
@@ -14,6 +21,7 @@ fn sink(cache: &Rc<ImageLoadCache>, node: NodeId, key: &str) -> Rc<NodeImageSink
         cache: cache.clone(),
         node,
         source_key: key.into(),
+        request: cache.entries.borrow()[&node].request.clone(),
     })
 }
 fn payload(key: &str, bytes: Vec<u8>) -> Result<ResolvedAsset, AssetError> {
@@ -50,4 +58,26 @@ fn mismatched_asset_identity_is_rejected_and_source_change_clears_texture() {
         Some(ImageLoadState::Failed(AssetError::InvalidRef))
     );
     assert!(cache.render_source(node, "new").is_none());
+}
+
+#[test]
+fn returning_to_same_source_does_not_revive_an_old_request() {
+    let cache = Rc::new(ImageLoadCache::default());
+    let node = node();
+    cache.begin_load(node, "same".into());
+    let old = sink(&cache, node, "same");
+    cache.begin_load(node, "other".into());
+    let intermediate = sink(&cache, node, "other");
+    cache.begin_load(node, "same".into());
+    sink(&cache, node, "same").resolved(payload("same", vec![3]));
+    old.resolved(payload("same", vec![1]));
+    intermediate.resolved(Err(AssetError::NotFound));
+    assert_eq!(cache.render_source(node, "same").unwrap().bytes, [3]);
+    assert_eq!(
+        cache.fresh_state(node, "same"),
+        Some(ImageLoadState::Resolved {
+            revision: 1,
+            byte_len: 1
+        })
+    );
 }

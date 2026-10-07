@@ -287,3 +287,110 @@ fn malformed_image_metadata_is_rejected_consistently_without_raw_mutation(cx: &m
         });
     }
 }
+
+#[gpui::test]
+fn same_string_source_kind_switch_never_displays_or_fetches_external_source(
+    cx: &mut TestAppContext,
+) {
+    let resolver = Rc::new(PendingResolver::default());
+    let asset = all_null("asset", "same");
+    let external = all_null("src", "same");
+    let (view, image) = fixture(asset.clone(), Some(resolver.clone()));
+    let view = cx.new(|_| view);
+    view.update(cx, |view, _| {
+        sync(view);
+        resolver.finish(0, payload("same", 1, 11));
+        assert_eq!(view.image_render_source(image).unwrap().bytes, [11]);
+        replace_attrs(view, image, external.clone());
+        // Public reads must stop exposing the asset even before the next sync.
+        assert_eq!(view.image_load_state(image), None);
+        assert!(view.image_render_source(image).is_none());
+        assert_eq!(view.image_placeholder_presentation(image).0, "图片");
+        sync(view);
+        assert_eq!(resolver.requests.borrow().len(), 1);
+        assert_eq!(view.image_loads.fresh_state(image, "same"), None);
+        assert!(view.image_loads.render_source(image, "same").is_none());
+        assert_raw_and_a11y(view, image, &external, None);
+
+        replace_attrs(view, image, asset.clone());
+        assert_eq!(view.image_load_state(image), None);
+        assert!(view.image_render_source(image).is_none());
+        sync(view);
+        assert_eq!(resolver.requests.borrow().len(), 2);
+        assert_eq!(view.image_load_state(image), Some(ImageLoadState::Loading));
+        resolver.finish(1, payload("same", 2, 22));
+        assert_eq!(view.image_render_source(image).unwrap().bytes, [22]);
+        assert_raw_and_a11y(view, image, &asset, None);
+    });
+}
+
+#[gpui::test]
+fn pending_load_is_discarded_for_external_or_invalid_attrs_even_without_service(
+    cx: &mut TestAppContext,
+) {
+    for raw in [
+        all_null("src", "same"),
+        changed(
+            &all_null("asset", "same"),
+            "alt",
+            Some(AttrValue::Bool(false)),
+        ),
+    ] {
+        let resolver = Rc::new(PendingResolver::default());
+        let (view, image) = fixture(all_null("asset", "same"), Some(resolver.clone()));
+        let view = cx.new(|_| view);
+        view.update(cx, |view, _| {
+            sync(view);
+            replace_attrs(view, image, raw.clone());
+            view.asset_service = None;
+            sync(view);
+            resolver.finish(0, payload("same", 1, 11));
+            assert_eq!(resolver.requests.borrow().len(), 1);
+            assert_eq!(view.image_loads.fresh_state(image, "same"), None);
+            assert!(view.image_loads.render_source(image, "same").is_none());
+            assert_eq!(view.image_load_state(image), None);
+            assert!(view.image_render_source(image).is_none());
+            assert_raw_and_a11y(view, image, &raw, None);
+        });
+    }
+}
+
+#[gpui::test]
+fn returning_to_same_asset_rejects_old_request_before_and_after_new_result(
+    cx: &mut TestAppContext,
+) {
+    for old_result in [payload("same", 1, 11), Err(AssetError::NotFound)] {
+        for old_first in [false, true] {
+            let resolver = Rc::new(PendingResolver::default());
+            let raw = all_null("asset", "same");
+            let (view, image) = fixture(raw.clone(), Some(resolver.clone()));
+            let view = cx.new(|_| view);
+            view.update(cx, |view, _| {
+                sync(view);
+                replace_attrs(view, image, all_null("src", "same"));
+                sync(view);
+                replace_attrs(view, image, raw.clone());
+                sync(view);
+                assert_eq!(resolver.requests.borrow().len(), 2);
+                if old_first {
+                    resolver.finish(0, old_result.clone());
+                    assert_eq!(view.image_load_state(image), Some(ImageLoadState::Loading));
+                    assert!(view.image_render_source(image).is_none());
+                }
+                resolver.finish(1, payload("same", 2, 22));
+                if !old_first {
+                    resolver.finish(0, old_result.clone());
+                }
+                assert_eq!(
+                    view.image_load_state(image),
+                    Some(ImageLoadState::Resolved {
+                        revision: 2,
+                        byte_len: 1
+                    })
+                );
+                assert_eq!(view.image_render_source(image).unwrap().bytes, [22]);
+                assert_raw_and_a11y(view, image, &raw, None);
+            });
+        }
+    }
+}

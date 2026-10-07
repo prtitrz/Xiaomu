@@ -797,8 +797,14 @@ Image 走 typed canonical 语义（`crates/xiaomu-core/src/document/image.rs`）
 与 accessibility 共用此读取规则；只有 placeholder 对无 alt 使用本地“图片”，a11y 保留
 None 与空字符串之别。旧 `ImageAttrs::new/from_attrs/to_attrs`、`AssetService::import_image`、
 `InsertImage` 和 Markdown exporter 的 strict 契约不变；能展示不代表宿主获准保存。
-GPUI 不主动下载 ExternalUrl，source-cache/stale/ref 检查与现有布局不变，显式尺寸 hints
+GPUI 不主动下载 ExternalUrl，源引用校验与现有布局不变，显式尺寸 hints
 不驱动布局。自动化可验证读取与 resolve/cache 一致性，不代表真实纹理解码、原生 GUI 或尺寸视觉对齐已验收。
+
+Image cache 只供 AssetRef 使用，ExternalUrl 不能因字符串相同命中已解析资产。
+sync 遇 ExternalUrl 或无效 attrs 会清掉该节点缓存，即使当前未挂 asset service。
+每次加载还携带独立内部 Arc 身份（保留 cache 的 Send）；旧 sink 持有身份直至回调结束，没有数值计数器回绕，
+asset→external→同 asset 或 asset A→B→A 后的旧成功/失败回调均不能覆盖新的请求。
+缓存公开 API、host 权限、布局与网络职责保持不变。
 
 Clipboard wire v4 携带 atomic 载荷（`ClipboardNodeContent::Atomic`、`WireContent::Atomic`、`WireKind::HorizontalRule/Image`）；collapsed atomic selection 投影为单 atomic root 的 ClipboardSlice，粘贴为聚焦块后的兄弟块；mixed inline/atomic 层级粘贴 fail closed（`SessionError::ClipboardAtomicUnsupported`）。plain-text fallback 语义化：image copy 在 plain text 中携带 ExternalUrl。
 
