@@ -18,7 +18,9 @@ use gpui::{
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Styled as _,
     StyledImage as _, px,
 };
-use xiaomu_core::document::{ImageAttrs, ImageSource, NodeContent, NodeId, XiaomuDocument};
+use xiaomu_core::document::{
+    ImagePresentationAttrs, ImageSourceRef, NodeContent, NodeId, XiaomuDocument,
+};
 use xiaomu_runtime::assets::{
     AssetError, AssetFormat, AssetRef, AssetService, AssetSink, ResolvedAsset,
 };
@@ -200,15 +202,15 @@ pub(crate) fn sync_image_loads(
         let Some(node_data) = document.node(node) else {
             continue;
         };
-        let Ok(attrs) = ImageAttrs::from_attrs(node_data.attrs()) else {
+        let Ok(attrs) = ImagePresentationAttrs::read(node_data.attrs()) else {
             continue;
         };
-        let ImageSource::AssetRef(value) = attrs.source() else {
+        let ImageSourceRef::AssetRef(value) = attrs.source() else {
             // External URLs are host-imported; the neutral placeholder shows
             // until a host contract for URL fetches exists.
             continue;
         };
-        let source_key = value.clone();
+        let source_key = value.to_owned();
         if cache.fresh_state(node, &source_key).is_some() {
             continue;
         }

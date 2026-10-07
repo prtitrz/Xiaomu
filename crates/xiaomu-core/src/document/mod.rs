@@ -7,6 +7,7 @@
 mod atom;
 mod attrs;
 mod content;
+mod image_presentation;
 mod input_marks;
 mod kind;
 mod link;
@@ -29,6 +30,7 @@ pub use image::{
     IMAGE_ATTR_ALT, IMAGE_ATTR_ASSET, IMAGE_ATTR_HEIGHT, IMAGE_ATTR_SRC, IMAGE_ATTR_TITLE,
     IMAGE_ATTR_WIDTH, ImageAttrs, ImageSource,
 };
+pub use image_presentation::{ImagePresentationAttrs, ImageSourceRef};
 pub use kind::{HeadingLevel, NodeKind};
 mod image;
 pub use link::{LinkAttributes, LinkMark};

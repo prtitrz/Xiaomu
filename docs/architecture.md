@@ -789,6 +789,17 @@ Atomic block 进入了统一的 document position 模型：`DocumentPosition::At
 
 Image 走 typed canonical 语义（`crates/xiaomu-core/src/document/image.rs`）：`ImageAttrs` 经 attrs 键 `src`/`asset`/`alt`/`title`/`width`/`height` 读写，`ImageSource::AssetRef`（宿主 opaque 引用）与 `ExternalUrl`（codec/host 显式导入）二选一。`EditIntent::InsertImage` 把 Image 原子块作为聚焦块兄弟插入。`AssetService::resolve(AssetRef, Rc<dyn AssetSink>)`（`crates/xiaomu-runtime/src/assets.rs`）是 host capability seam：宿主拥有存储/网络/缓存/权限，`ResolvedAsset` 携带 `revision` 供 stale 判定，回调无前端上下文、不直接改 canonical document。GPUI 侧（`image_block.rs`）以 node identity + source key 缓存 `Arc<gpui::Image>`，Resolved 状态经 `gpui::ImageSource::Image` 绘制真实纹理（`w_full` + `max_h(320px)` + `ObjectFit::Contain`），Loading/Failed/无 service 状态渲染占位；accessibility 把 Image 投影为 alt 文本、HorizontalRule 投影为 Separator。
 
+已有 raw Image 的展示独立使用 `ImagePresentationAttrs::read(&NodeAttrs)`：借用
+`ImageSourceRef` 与 alt/title 字符串，不修改或重建 canonical attrs。source 仍必须是唯一
+非空字符串；另一个 source key 即便为 null 也拒绝。alt/title 的 Missing/Null 仅在展示中
+解析为 None，空字符串保留 Some("")；width/height 接受 Missing/Null/正 u32，仅为 hints。
+未知 attrs 由 raw map 保留，错误已知类型仍拒绝。GPUI resolve、state/source 查询、placeholder
+与 accessibility 共用此读取规则；只有 placeholder 对无 alt 使用本地“图片”，a11y 保留
+None 与空字符串之别。旧 `ImageAttrs::new/from_attrs/to_attrs`、`AssetService::import_image`、
+`InsertImage` 和 Markdown exporter 的 strict 契约不变；能展示不代表宿主获准保存。
+GPUI 不主动下载 ExternalUrl，source-cache/stale/ref 检查与现有布局不变，显式尺寸 hints
+不驱动布局。自动化可验证读取与 resolve/cache 一致性，不代表真实纹理解码、原生 GUI 或尺寸视觉对齐已验收。
+
 Clipboard wire v4 携带 atomic 载荷（`ClipboardNodeContent::Atomic`、`WireContent::Atomic`、`WireKind::HorizontalRule/Image`）；collapsed atomic selection 投影为单 atomic root 的 ClipboardSlice，粘贴为聚焦块后的兄弟块；mixed inline/atomic 层级粘贴 fail closed（`SessionError::ClipboardAtomicUnsupported`）。plain-text fallback 语义化：image copy 在 plain text 中携带 ExternalUrl。
 
 **外部图片导入边界（2026-10-03 实验分支）：** 平台剪贴板现在优先有效 Xiaomu structured metadata，然后 PNG/JPEG encoded pixels，最后普通文本。图片只在非 CodeBlock 的 collapsed inline caret 导入；非空选区、atomic/cell range 和 composition 期间拒绝，保持原文档与历史。`AssetService::import_image` 为默认拒绝的可选同步能力；宿主验证和持久化后返回 `ImageAttrs(AssetRef)`，再发出单一 `InsertImage` history entry。宿主实现应限制尺寸/耗时；没有异步导入或外部文件读取。图片节点仍仅携带引用，不能假设跨宿主复制引用等于复制字节。
