@@ -21,6 +21,7 @@ mod clipboard;
 mod column_resize;
 mod history_clock;
 mod host_extensions;
+mod host_passive_plan;
 mod host_selection_intent;
 mod host_transaction;
 pub(crate) mod markers;

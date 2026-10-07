@@ -6,6 +6,7 @@
 //! records the inverse steps of every step; see [`super::inverse`].
 
 mod atom;
+mod document;
 mod structure;
 mod subtree_restore;
 mod table;
@@ -87,8 +88,16 @@ impl ApplyContext {
     fn apply_step(
         &mut self,
         step: &TransactionStep,
+        lineage: &crate::document::DocumentLineage,
+        snapshot_budget: &mut document::SnapshotBudget,
     ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
         match step {
+            TransactionStep::ReplaceDocument { template } => {
+                self.apply_replace_document(template, lineage, snapshot_budget)
+            }
+            TransactionStep::RestoreDocument { restore } => {
+                self.apply_restore_document(restore, lineage, snapshot_budget)
+            }
             TransactionStep::ReplaceText {
                 node,
                 range,
@@ -463,8 +472,10 @@ pub(super) fn apply_steps(
 
     let mut step_maps = Vec::new();
     let mut inverse_groups: Vec<Vec<TransactionStep>> = Vec::new();
+    let mut snapshot_budget = document::SnapshotBudget::default();
     for step in steps {
-        let (step_map, inverse_steps) = context.apply_step(step)?;
+        let (step_map, inverse_steps) =
+            context.apply_step(step, document.lineage(), &mut snapshot_budget)?;
         step_maps.extend(step_map);
         inverse_groups.push(inverse_steps);
     }
@@ -479,6 +490,7 @@ pub(super) fn apply_steps(
         document.root(),
         context.store,
         context.next_node_id,
+        document.lineage().clone(),
     )?;
 
     let inverse_steps = inverse_groups.into_iter().rev().flatten().collect();

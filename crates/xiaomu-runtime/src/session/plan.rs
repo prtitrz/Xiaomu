@@ -8,7 +8,7 @@ use xiaomu_core::selection::{InlinePoint, NodeGap};
 use xiaomu_core::text::TextRange;
 use xiaomu_core::transaction::Transaction;
 
-use super::DocumentSelection;
+use super::{DocumentChangeOrigin, DocumentSelection};
 
 /// How one plan participates in Runtime history grouping.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +37,12 @@ pub enum SelectionUpdate {
     /// Host whole-document replacement/deletion uses this instead of retaining
     /// stale pre-edit child counts. No text-endpoint inference is performed.
     AllDocument,
+    /// Collapse after the last editable inline descendant in document order.
+    ///
+    /// Trailing inline atoms are included in the exact mixed-inline gap.
+    /// If no inline descendant exists, use the validated root-end gap. This
+    /// is an explicit caller choice; replacement never copies a sender caret.
+    CaretAtDocumentEnd,
     /// Collapse the caret right after the replacement text of the primary
     /// edit (InsertText / single-block paste / IME commit).
     CaretAfterReplacement,
@@ -158,6 +164,7 @@ pub struct EditPlan {
     selection_update: SelectionUpdate,
     primary_edit: Option<PrimaryEdit>,
     history_policy: HistoryPolicy,
+    change_origin: DocumentChangeOrigin,
     stored_marks_after: Option<Option<MarkSet>>,
     pub(super) input_rule_undo: Option<Box<super::InputRuleUndoSpec>>,
 }
@@ -179,9 +186,26 @@ impl EditPlan {
             selection_update,
             primary_edit,
             history_policy: HistoryPolicy::Isolated,
+            change_origin: DocumentChangeOrigin::Local,
             stored_marks_after: None,
             input_rule_undo: None,
         }
+    }
+
+    /// Classifies this commit's notification without changing its history.
+    ///
+    /// `External` lets a host distinguish accepted external content from local
+    /// edits without suppressing listeners. A later Undo or Redo is `Local`.
+    #[must_use]
+    pub fn with_change_origin(mut self, origin: DocumentChangeOrigin) -> Self {
+        self.change_origin = origin;
+        self
+    }
+
+    /// Returns this commit's explicit listener classification.
+    #[must_use]
+    pub const fn change_origin(&self) -> DocumentChangeOrigin {
+        self.change_origin
     }
 
     /// Installs explicit typing marks together with a successful commit.

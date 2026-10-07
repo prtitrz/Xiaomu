@@ -86,6 +86,8 @@ pub enum Error {
     InvalidTaskItemChecked,
     /// Known cell attributes have an invalid type, span, or width list.
     InvalidTableAttrs,
+    /// Snapshot capture/replacement exceeds its bounded payload or work budget.
+    SnapshotResourceLimit,
     /// Table grids exceed the documented snapshot-wide resource budget.
     TableResourceLimit,
     /// A legacy table operation cannot preserve span semantics.
@@ -151,6 +153,9 @@ impl fmt::Display for Error {
             ),
             Self::InvalidTableAttrs => {
                 f.write_str("table cell attrs violate the geometry contract")
+            }
+            Self::SnapshotResourceLimit => {
+                f.write_str("snapshot exceeds the copy/restore resource budget")
             }
             Self::TableResourceLimit => {
                 f.write_str("table grids exceed the snapshot resource budget")

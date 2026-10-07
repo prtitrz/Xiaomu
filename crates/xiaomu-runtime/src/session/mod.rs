@@ -11,6 +11,7 @@
 //! at all. The session selection is valid for the current snapshot at every
 //! public read.
 
+mod apply_plan;
 mod atom_edit;
 mod atomic_block;
 mod caret;
@@ -61,7 +62,7 @@ pub use history_options::{
 pub use history_timestamp::HistoryTimestamp;
 pub use input_rule_undo::InputRuleUndoSpec;
 pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
-pub use listener::DocumentChangeListener;
+pub use listener::{DocumentChangeListener, DocumentChangeOrigin};
 pub use outcome::{SessionError, SessionOutcome};
 pub use policy::{IntentDisposition, PolicyError, SessionContext, SessionPolicy};
 pub use prepared_cut::PreparedCut;
@@ -300,8 +301,12 @@ impl DocumentSession {
     }
 
     fn notify_document_changed(&mut self) {
+        self.notify_document_changed_with_origin(DocumentChangeOrigin::Local);
+    }
+
+    fn notify_document_changed_with_origin(&mut self, origin: DocumentChangeOrigin) {
         for listener in &mut self.listeners {
-            listener.document_changed(&self.document, self.selection);
+            listener.document_changed_with_origin(&self.document, self.selection, origin);
         }
     }
 

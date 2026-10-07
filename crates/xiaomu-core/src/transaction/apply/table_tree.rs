@@ -1,11 +1,12 @@
 //! Fresh-ID materialization of a bounded opaque table tree in one store batch.
 
 use crate::document::{
-    InlineAtomPlacement, Node, NodeContent, NodeId, NodeKind, TableGrid, TableGridBudget,
-    allows_child,
+    Node, NodeContent, NodeId, NodeKind, TableGrid, TableGridBudget, allows_child,
 };
 use crate::mapping::StepMap;
-use crate::transaction::table_tree::{TemplateContent, TemplateNode};
+#[cfg(test)]
+use crate::transaction::forest::TemplateContent;
+use crate::transaction::forest::materialize_node;
 use crate::transaction::{TableTreeTemplate, TransactionStep};
 use crate::{Error, Result};
 
@@ -92,30 +93,4 @@ impl ApplyContext {
             vec![TransactionStep::RemoveNode { node: root }],
         ))
     }
-}
-
-/// Shared payload copy; the caller chooses which local identities are retained.
-pub(super) fn materialize_node(
-    node: &TemplateNode,
-    id: NodeId,
-    fresh: impl Fn(usize) -> Result<NodeId>,
-) -> Result<Node> {
-    let content = match &node.content {
-        TemplateContent::Children(children) => NodeContent::children(
-            children
-                .iter()
-                .map(|child| fresh(*child))
-                .collect::<Result<Vec<_>>>()?,
-        ),
-        TemplateContent::Inline { text, atoms } => {
-            let placements = atoms
-                .iter()
-                .map(|(local, offset)| Ok(InlineAtomPlacement::new(fresh(*local)?, *offset)))
-                .collect::<Result<Vec<_>>>()?;
-            NodeContent::Inline(text.with_replaced_atom_placements(placements)?)
-        }
-        TemplateContent::InlineAtom(content) => NodeContent::InlineAtom(content.clone()),
-        TemplateContent::Atomic => NodeContent::Atomic,
-    };
-    Node::new(id, node.kind.clone(), node.attrs.clone(), content)
 }

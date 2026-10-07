@@ -15,39 +15,102 @@ const MAX_BYTES: usize = 64 * 1024 * 1024;
 const MAX_TREE_DEPTH: usize = 128;
 const MAX_ATTR_DEPTH: usize = 64;
 
-#[derive(Default)]
-pub(super) struct CaptureBudget {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::transaction) struct CaptureBudget {
     nodes: usize,
     values: usize,
     bytes: usize,
+    limit: Error,
+}
+
+impl Default for CaptureBudget {
+    fn default() -> Self {
+        Self {
+            nodes: 0,
+            values: 0,
+            bytes: 0,
+            limit: Error::TableResourceLimit,
+        }
+    }
 }
 
 impl CaptureBudget {
-    pub(super) fn bytes(&self) -> usize {
+    pub(in crate::transaction) fn document() -> Self {
+        Self {
+            limit: Error::SnapshotResourceLimit,
+            ..Self::default()
+        }
+    }
+
+    pub(in crate::transaction) fn limit(&self) -> Error {
+        self.limit.clone()
+    }
+
+    pub(in crate::transaction) fn absorb(&mut self, other: &Self) -> Result<()> {
+        self.nodes = self
+            .nodes
+            .checked_add(other.nodes)
+            .ok_or_else(|| self.limit())?;
+        if self.nodes > MAX_NODES {
+            return Err(self.limit());
+        }
+        self.charge(other.bytes, other.values)
+    }
+
+    pub(in crate::transaction) fn maps(&mut self, roots: usize, nodes: usize) -> Result<()> {
+        self.array(roots, size_of::<crate::mapping::StepMap>())?;
+        self.array(nodes, size_of::<crate::document::NodeId>())
+    }
+
+    pub(in crate::transaction) fn operation(&mut self, bytes: usize) -> Result<()> {
+        self.charge(bytes, 1)
+    }
+
+    pub(in crate::transaction) fn bytes(&self) -> usize {
         self.bytes
     }
 
-    pub(super) fn pending(&self, done: usize, pending: usize, added: usize) -> Result<()> {
+    pub(in crate::transaction) fn pending(
+        &self,
+        done: usize,
+        pending: usize,
+        added: usize,
+    ) -> Result<()> {
         let count = done
             .checked_add(pending)
             .and_then(|n| n.checked_add(added))
-            .ok_or(Error::TableResourceLimit)?;
+            .ok_or_else(|| self.limit())?;
         if count > MAX_NODES {
-            return Err(Error::TableResourceLimit);
+            return Err(self.limit());
         }
         Ok(())
     }
 
-    pub(super) fn node(&mut self, node: &Node, depth: usize) -> Result<()> {
+    pub(in crate::transaction) fn node(&mut self, node: &Node, depth: usize) -> Result<()> {
         if depth >= MAX_TREE_DEPTH || self.nodes >= MAX_NODES {
-            return Err(Error::TableResourceLimit);
+            return Err(self.limit());
         }
         self.nodes += 1;
-        self.charge(size_of::<TemplateNode>(), 1)?;
+        self.charge(size_of::<TemplateNode>().max(size_of::<Node>()), 1)?;
         match node.kind() {
             NodeKind::Custom(key) => self.charge(key.len(), 0)?,
             NodeKind::InlineAtom(kind) => self.charge(kind.as_str().len(), 0)?,
-            _ => {}
+            NodeKind::Document
+            | NodeKind::Paragraph
+            | NodeKind::Heading(_)
+            | NodeKind::Quote
+            | NodeKind::BulletList
+            | NodeKind::OrderedList
+            | NodeKind::ListItem
+            | NodeKind::TaskList
+            | NodeKind::TaskItem
+            | NodeKind::CodeBlock
+            | NodeKind::HorizontalRule
+            | NodeKind::Image
+            | NodeKind::Table
+            | NodeKind::TableRow
+            | NodeKind::TableCell
+            | NodeKind::TableHeader => {}
         }
         for (key, value) in node.attrs().iter() {
             self.key(key)?;
@@ -76,39 +139,33 @@ impl CaptureBudget {
     }
 
     fn charge(&mut self, bytes: usize, values: usize) -> Result<()> {
-        self.bytes = self
-            .bytes
-            .checked_add(bytes)
-            .ok_or(Error::TableResourceLimit)?;
+        self.bytes = self.bytes.checked_add(bytes).ok_or_else(|| self.limit())?;
         self.values = self
             .values
             .checked_add(values)
-            .ok_or(Error::TableResourceLimit)?;
+            .ok_or_else(|| self.limit())?;
         if self.bytes > MAX_BYTES || self.values > MAX_VALUES {
-            return Err(Error::TableResourceLimit);
+            return Err(self.limit());
         }
         Ok(())
     }
 
     fn array(&mut self, count: usize, size: usize) -> Result<()> {
-        self.charge(
-            count.checked_mul(size).ok_or(Error::TableResourceLimit)?,
-            count,
-        )
+        self.charge(count.checked_mul(size).ok_or_else(|| self.limit())?, count)
     }
 
     fn key(&mut self, key: &str) -> Result<()> {
         self.charge(
             size_of::<String>()
                 .checked_add(key.len())
-                .ok_or(Error::TableResourceLimit)?,
+                .ok_or_else(|| self.limit())?,
             0,
         )
     }
 
     fn attr(&mut self, value: &AttrValue, depth: usize) -> Result<()> {
         if depth >= MAX_ATTR_DEPTH {
-            return Err(Error::TableResourceLimit);
+            return Err(self.limit());
         }
         self.charge(size_of::<AttrValue>(), 1)?;
         match value {
@@ -155,7 +212,7 @@ impl CaptureBudget {
                         self.string_attr(value)?;
                     }
                 }
-                _ => {}
+                Mark::Bold | Mark::Italic | Mark::Code | Mark::Underline | Mark::Strike => {}
             }
         }
         Ok(())
@@ -227,5 +284,46 @@ mod tests {
             CaptureBudget::default().pending(0, 0, MAX_NODES + 1),
             Err(Error::TableResourceLimit)
         );
+    }
+
+    #[test]
+    fn document_combined_payload_node_value_and_mapping_limits_are_checked() {
+        let mut budget = CaptureBudget {
+            bytes: MAX_BYTES - 1,
+            ..CaptureBudget::document()
+        };
+        let extra = CaptureBudget {
+            bytes: 2,
+            ..CaptureBudget::document()
+        };
+        assert_eq!(budget.absorb(&extra), Err(Error::SnapshotResourceLimit));
+        let mut budget = CaptureBudget {
+            nodes: MAX_NODES,
+            ..CaptureBudget::document()
+        };
+        let extra = CaptureBudget {
+            nodes: 1,
+            ..CaptureBudget::document()
+        };
+        assert_eq!(budget.absorb(&extra), Err(Error::SnapshotResourceLimit));
+        let mut budget = CaptureBudget {
+            values: MAX_VALUES,
+            ..CaptureBudget::document()
+        };
+        assert_eq!(budget.maps(1, 0), Err(Error::SnapshotResourceLimit));
+        let mut budget = CaptureBudget {
+            bytes: MAX_BYTES - 1,
+            ..CaptureBudget::document()
+        };
+        assert_eq!(budget.maps(0, 1), Err(Error::SnapshotResourceLimit));
+        assert_eq!(
+            CaptureBudget::document().maps(usize::MAX, 0),
+            Err(Error::SnapshotResourceLimit)
+        );
+        let mut budget = CaptureBudget {
+            nodes: usize::MAX,
+            ..CaptureBudget::document()
+        };
+        assert_eq!(budget.absorb(&extra), Err(Error::SnapshotResourceLimit));
     }
 }

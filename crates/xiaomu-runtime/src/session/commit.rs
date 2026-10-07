@@ -17,6 +17,7 @@ pub(super) struct PreparedCommit {
     timestamp: Option<HistoryTimestamp>,
     stored_marks_after: Option<Option<MarkSet>>,
     input_rule_undo: Option<std::rc::Rc<input_rule_undo::InputRuleUndoToken>>,
+    change_origin: DocumentChangeOrigin,
 }
 
 impl DocumentSession {
@@ -92,6 +93,7 @@ impl DocumentSession {
             timestamp,
             stored_marks_after,
             input_rule_undo,
+            change_origin: plan.change_origin(),
         })
     }
 
@@ -110,7 +112,7 @@ impl DocumentSession {
         if let Some(marks) = prepared.stored_marks_after {
             self.stored_marks = marks;
         }
-        self.notify_document_changed();
+        self.notify_document_changed_with_origin(prepared.change_origin);
         SessionOutcome::DocumentChanged
     }
 

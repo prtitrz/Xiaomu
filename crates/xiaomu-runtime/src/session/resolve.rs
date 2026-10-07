@@ -6,7 +6,7 @@
 
 use xiaomu_core::document::{NodeId, XiaomuDocument};
 use xiaomu_core::mapping::{ChangeMap, StepMap};
-use xiaomu_core::selection::{CursorAffinity, InlinePoint, TextPoint};
+use xiaomu_core::selection::{CursorAffinity, InlinePoint, NodeGap, TextPoint};
 
 use super::intent::{EditPlan, SelectionUpdate};
 use super::{DocumentPosition, DocumentSelection, SessionError};
@@ -25,6 +25,7 @@ pub(super) fn resolve_selection(
             Ok(*selection)
         }
         SelectionUpdate::AllDocument => Ok(DocumentSelection::all(document)),
+        SelectionUpdate::CaretAtDocumentEnd => document_end(document, affinity_of(before)),
         SelectionUpdate::CaretAfterReplacement | SelectionUpdate::CaretAtEditStart => {
             let edit = plan.primary_edit().ok_or(SessionError::SelectionInvalid)?;
             let raw = match plan.selection_update() {
@@ -139,6 +140,44 @@ pub(super) fn resolve_selection(
             Ok(DocumentSelection::collapsed(*gap))
         }
     }
+}
+
+/// Finds the final inline descendant without interpreting atomic fallback text.
+fn document_end(
+    document: &XiaomuDocument,
+    affinity: CursorAffinity,
+) -> Result<DocumentSelection, SessionError> {
+    let mut pending = vec![document.root()];
+    while let Some(id) = pending.pop() {
+        let content = document
+            .node(id)
+            .ok_or(SessionError::SelectionInvalid)?
+            .content();
+        if let Some(inline) = content.as_inline() {
+            let offset = inline.offset_at(inline.len_bytes())?;
+            return collapsed_inline_caret(
+                document,
+                id,
+                offset.as_usize(),
+                inline.atom_count_at(offset),
+                affinity,
+            );
+        }
+        if let Some(children) = content.as_children() {
+            pending.extend(children.iter().copied());
+        }
+    }
+    let root = document
+        .node(document.root())
+        .ok_or(SessionError::SelectionInvalid)?;
+    let count = root
+        .content()
+        .as_children()
+        .ok_or(SessionError::SelectionInvalid)?
+        .len();
+    let gap = NodeGap::new(document.root(), count);
+    gap.validate(document)?;
+    Ok(DocumentSelection::collapsed(gap))
 }
 
 /// Retains the full selection in the final snapshot, irrespective of temporary

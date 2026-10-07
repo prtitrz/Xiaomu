@@ -23,6 +23,7 @@ mod ime_coordinates;
 mod ime_geometry;
 mod input_handler;
 mod layout;
+mod passive;
 #[cfg(test)]
 mod policy_input_tests;
 mod projection;
@@ -172,6 +173,9 @@ pub struct ParagraphView {
     pub(crate) bounds_registry: BlockBoundsRegistry,
     pub(super) scroll_handle: Option<ScrollHandle>,
     pub(super) scroll_caret_pending: Cell<bool>,
+    /// Passive publication cancels already-queued scrolls without changing
+    /// ordinary edit/focus scrolling, including callbacks retaining old views.
+    passive_scroll_epoch: Rc<Cell<u64>>,
     pub(super) atom_renderers: Rc<InlineAtomRendererRegistry>,
     table_capability: Option<SharedTableCapability>,
     code_block_presentation: Option<CodeBlockPresentation>,
@@ -252,6 +256,7 @@ impl ParagraphView {
             bounds_registry,
             scroll_handle: None,
             scroll_caret_pending: Cell::new(true),
+            passive_scroll_epoch: Rc::new(Cell::new(0)),
             atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
             table_capability: None,
             code_block_presentation: None,

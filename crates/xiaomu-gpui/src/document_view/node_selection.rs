@@ -87,12 +87,14 @@ impl DocumentView {
                             let viewport = scroll_handle.bounds();
                             let maximum = scroll_handle.max_offset();
                             let revision = session.borrow().document().revision();
+                            let passive_epoch = scrolling_input.read(cx).passive_scroll_epoch();
                             // Apply after the current draw/effect cycle so all
                             // children paint with the same scroll coordinates.
                             // Unlike a display-link callback, this is also
                             // delivered by stock GPUI's virtual test window.
                             window.defer(cx, move |window, cx| {
-                                if !focus.is_focused(window)
+                                if scrolling_input.read(cx).passive_scroll_epoch() != passive_epoch
+                                    || !focus.is_focused(window)
                                     || session.borrow().selection().as_node_selection()
                                         != Some(node)
                                     || scroll_handle.offset() != previous
