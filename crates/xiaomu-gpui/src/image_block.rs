@@ -18,7 +18,9 @@ use gpui::{
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Styled as _,
     StyledImage as _, px,
 };
-use xiaomu_core::document::{ImageAttrs, ImageSource, NodeContent, NodeId, XiaomuDocument};
+use xiaomu_core::document::{
+    ImagePresentationAttrs, ImageSourceRef, NodeContent, NodeId, XiaomuDocument,
+};
 use xiaomu_runtime::assets::{
     AssetError, AssetFormat, AssetRef, AssetService, AssetSink, ResolvedAsset,
 };
@@ -45,6 +47,8 @@ struct ImageLoadEntry {
     state: ImageLoadState,
     /// The source key this state belongs to; a changed source is stale.
     source_key: String,
+    /// Unique while any sink from this request is alive; no counter can wrap.
+    request: Arc<()>,
 }
 
 /// Per-node load states for every image block in one document view.
@@ -70,14 +74,32 @@ impl ImageLoadCache {
 
     /// Marks a request as in flight.
     pub fn begin_load(&self, node: NodeId, source_key: String) {
+        self.begin_request(node, source_key);
+    }
+
+    fn begin_request(&self, node: NodeId, source_key: String) -> Arc<()> {
+        let request = Arc::new(());
         self.render_sources.borrow_mut().remove(&node);
         self.entries.borrow_mut().insert(
             node,
             ImageLoadEntry {
                 state: ImageLoadState::Loading,
                 source_key,
+                request: Arc::clone(&request),
             },
         );
+        request
+    }
+
+    fn request_is_current(&self, node: NodeId, source_key: &str, request: &Arc<()>) -> bool {
+        self.entries.borrow().get(&node).is_some_and(|entry| {
+            entry.source_key == source_key && Arc::ptr_eq(&entry.request, request)
+        })
+    }
+
+    fn discard(&self, node: NodeId) {
+        self.entries.borrow_mut().remove(&node);
+        self.render_sources.borrow_mut().remove(&node);
     }
 
     /// Returns the render source for `node`, or `None` when absent or stale.
@@ -126,14 +148,14 @@ struct NodeImageSink {
     cache: SharedImageLoadCache,
     node: NodeId,
     source_key: String,
+    request: Arc<()>,
 }
 
 impl AssetSink for NodeImageSink {
     fn resolved(self: Rc<Self>, result: Result<ResolvedAsset, AssetError>) {
-        if self
+        if !self
             .cache
-            .fresh_state(self.node, &self.source_key)
-            .is_none()
+            .request_is_current(self.node, &self.source_key, &self.request)
         {
             return;
         }
@@ -193,22 +215,24 @@ pub(crate) fn sync_image_loads(
     cache: &SharedImageLoadCache,
     service: Option<&Rc<dyn AssetService>>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     for node in image_nodes(document) {
         let Some(node_data) = document.node(node) else {
             continue;
         };
-        let Ok(attrs) = ImageAttrs::from_attrs(node_data.attrs()) else {
+        let Ok(attrs) = ImagePresentationAttrs::read(node_data.attrs()) else {
+            cache.discard(node);
             continue;
         };
-        let ImageSource::AssetRef(value) = attrs.source() else {
+        let ImageSourceRef::AssetRef(value) = attrs.source() else {
             // External URLs are host-imported; the neutral placeholder shows
             // until a host contract for URL fetches exists.
+            cache.discard(node);
             continue;
         };
-        let source_key = value.clone();
+        let Some(service) = service else {
+            continue;
+        };
+        let source_key = value.to_owned();
         if cache.fresh_state(node, &source_key).is_some() {
             continue;
         }
@@ -220,13 +244,14 @@ pub(crate) fn sync_image_loads(
             );
             continue;
         };
-        cache.begin_load(node, source_key.clone());
+        let request = cache.begin_request(node, source_key.clone());
         service.resolve(
             asset_ref,
             Rc::new(NodeImageSink {
                 cache: Rc::clone(cache),
                 node,
                 source_key,
+                request,
             }),
         );
     }

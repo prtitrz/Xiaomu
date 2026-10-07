@@ -57,6 +57,8 @@ mod host_form_order_tests;
 #[cfg(test)]
 mod host_intent_tests;
 #[cfg(test)]
+mod image_presentation_tests;
+#[cfg(test)]
 mod list_marker_tests;
 #[cfg(test)]
 mod select_all_inline_atoms_tests;
@@ -70,7 +72,9 @@ use std::rc::Rc;
 
 use gpui::{App, Context, Entity, Focusable as _, Pixels, ScrollHandle, Window, prelude::*};
 
-use xiaomu_core::document::{ImageAttrs, ImageSource, NodeAttrs, NodeId, XiaomuDocument};
+use xiaomu_core::document::{
+    ImagePresentationAttrs, ImageSourceRef, NodeAttrs, NodeId, XiaomuDocument,
+};
 use xiaomu_core::selection::InlinePoint;
 use xiaomu_runtime::session::{DocumentPosition, EditIntent};
 
@@ -234,12 +238,11 @@ impl DocumentView {
     pub fn image_load_state(&self, node: NodeId) -> Option<ImageLoadState> {
         let document = self.session.borrow().document().clone();
         let node_data = document.node(node)?;
-        let attrs = ImageAttrs::from_attrs(node_data.attrs()).ok()?;
-        let source_key = match attrs.source() {
-            ImageSource::AssetRef(value) => value.clone(),
-            ImageSource::ExternalUrl(url) => url.clone(),
+        let attrs = ImagePresentationAttrs::read(node_data.attrs()).ok()?;
+        let ImageSourceRef::AssetRef(source_key) = attrs.source() else {
+            return None;
         };
-        self.image_loads.fresh_state(node, &source_key)
+        self.image_loads.fresh_state(node, source_key)
     }
 
     /// Attaches the host persistence adapter (Ctrl/Cmd-S saves).
@@ -471,12 +474,11 @@ impl DocumentView {
     pub fn image_render_source(&self, node: NodeId) -> Option<std::sync::Arc<gpui::Image>> {
         let document = self.session.borrow().document().clone();
         let node_data = document.node(node)?;
-        let attrs = ImageAttrs::from_attrs(node_data.attrs()).ok()?;
-        let source_key = match attrs.source() {
-            ImageSource::AssetRef(value) => value.clone(),
-            ImageSource::ExternalUrl(url) => url.clone(),
+        let attrs = ImagePresentationAttrs::read(node_data.attrs()).ok()?;
+        let ImageSourceRef::AssetRef(source_key) = attrs.source() else {
+            return None;
         };
-        self.image_loads.render_source(node, &source_key)
+        self.image_loads.render_source(node, source_key)
     }
 
     /// Builds the label and background for one image placeholder.
@@ -488,10 +490,10 @@ impl DocumentView {
         let Some(node_data) = document.node(node) else {
             return (String::new(), gpui::rgba(0xeeeeeeff));
         };
-        let Ok(attrs) = ImageAttrs::from_attrs(node_data.attrs()) else {
+        let Ok(attrs) = ImagePresentationAttrs::read(node_data.attrs()) else {
             return ("invalid image attrs".to_owned(), gpui::rgba(0xf6d5d5ff));
         };
-        let alt = attrs.alt().to_owned();
+        let alt = attrs.alt().unwrap_or("图片").to_owned();
         let state = self.image_load_state(node);
         match state {
             Some(ImageLoadState::Loading) => (format!("加载中：{alt}"), gpui::rgba(0xe8eef7ff)),

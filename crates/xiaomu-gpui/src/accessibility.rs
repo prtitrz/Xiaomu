@@ -173,9 +173,11 @@ fn project_node(document: &XiaomuDocument, id: NodeId) -> Option<AccessibilityNo
             // fallback exposes whatever stable text the semantics carry
             // (image alt text; a separator stays textless).
             let text = match node.kind() {
-                NodeKind::Image => xiaomu_core::document::ImageAttrs::from_attrs(node.attrs())
-                    .map(|image| image.alt().to_owned())
-                    .ok(),
+                NodeKind::Image => {
+                    xiaomu_core::document::ImagePresentationAttrs::read(node.attrs())
+                        .ok()
+                        .and_then(|image| image.alt().map(str::to_owned))
+                }
                 _ => None,
             };
             (text, false, Vec::new())
