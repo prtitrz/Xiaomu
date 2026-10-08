@@ -46,6 +46,7 @@ pub struct PrepaintState {
     caret_geometry: Option<(usize, CursorAffinity, Bounds<Pixels>)>,
     chips: Vec<PaintQuad>,
     selection: Vec<PaintQuad>,
+    reading: Vec<PaintQuad>,
     cache_key: Option<LayoutCacheKey>,
 }
 
@@ -339,8 +340,11 @@ impl Element for ParagraphElement {
             None
         };
 
+        let reading = view.reading_highlight_quads(&layout, bounds, window.content_mask().bounds);
+
         PrepaintState {
             layout: Some(layout),
+            reading,
             cursor,
             caret_geometry,
             chips,
@@ -368,6 +372,10 @@ impl Element for ParagraphElement {
 
         for chip in prepaint.chips.drain(..) {
             window.paint_quad(chip);
+        }
+
+        for highlight in prepaint.reading.drain(..) {
+            window.paint_quad(highlight);
         }
 
         for selection in prepaint.selection.drain(..) {
@@ -429,6 +437,7 @@ impl Element for ParagraphElement {
                     revision,
                 ));
             }
+            view.record_reading_measurement();
             view.last_layout = Some(layout);
             view.last_caret = prepaint.caret_geometry;
             view.last_bounds = Some(bounds);

@@ -16,4 +16,5 @@ mod session_clipboard;
 pub mod assets;
 pub mod clipboard;
 pub mod persistence;
+pub mod reading;
 pub mod session;

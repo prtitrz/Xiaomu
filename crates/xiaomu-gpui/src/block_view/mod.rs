@@ -27,6 +27,7 @@ mod passive;
 #[cfg(test)]
 mod policy_input_tests;
 mod projection;
+mod reading;
 mod scroll;
 #[cfg(test)]
 mod tests;
@@ -155,6 +156,8 @@ pub struct ParagraphView {
     pub(super) session: SharedSession,
     history_clock: Option<SharedHistoryClock>,
     node: NodeId,
+    reading: Option<crate::document_view::reading::SharedReadingState>,
+    reading_measurement: Option<(crate::document_view::ReadingViewSnapshot, u64)>,
     /// A frontend-only empty input surface anchored to an explicit range
     /// selection. Its offsets never identify canonical document content.
     range_input: bool,
@@ -245,6 +248,8 @@ impl ParagraphView {
             session,
             history_clock,
             node,
+            reading: None,
+            reading_measurement: None,
             range_input: false,
             focus_handle,
             last_layout: None,

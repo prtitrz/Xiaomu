@@ -7,17 +7,23 @@
 use std::ops::Range;
 
 use crate::block_alignment::BlockAlignment;
-use gpui::{Bounds, Pixels, Point, Size, WrappedLine, point, px, size};
+#[cfg(test)]
+use gpui::{Bounds, px};
+use gpui::{Pixels, Point, Size, WrappedLine, point, size};
 use xiaomu_core::selection::CursorAffinity;
 
 #[path = "aligned_decorations.rs"]
 mod aligned_decorations;
 #[path = "mixed_layout.rs"]
 mod mixed_layout;
+#[path = "selection_layout.rs"]
+mod selection_layout;
 
 #[cfg(test)]
 #[path = "alignment_layout_tests.rs"]
 mod alignment_tests;
+
+type SelectionPositionIndex = std::rc::Rc<std::cell::OnceCell<Vec<Vec<(usize, Pixels)>>>>;
 
 /// Measured wrapped text for one block.
 ///
@@ -29,6 +35,7 @@ mod alignment_tests;
 #[derive(Clone, Debug)]
 pub(crate) struct BlockTextLayout {
     lines: Vec<WrappedLine>,
+    selection_positions: SelectionPositionIndex,
     mixed: Option<std::rc::Rc<crate::mixed_size::MixedLayout>>,
     line_height: Pixels,
     sized_font_size: Option<Pixels>,
@@ -54,6 +61,7 @@ impl BlockTextLayout {
         measured.height = measured.height.max(line_height);
         let mut layout = Self {
             lines,
+            selection_positions: Default::default(),
             mixed: None,
             line_height,
             sized_font_size: None,
@@ -329,69 +337,6 @@ impl BlockTextLayout {
             CursorAffinity::Before
         };
         (index, affinity)
-    }
-
-    pub(super) fn selection_rects(&self, range: Range<usize>) -> Vec<Bounds<Pixels>> {
-        if self.unavailable {
-            return Vec::new();
-        }
-        if self.mixed.is_some() {
-            return self.mixed_selection_rects(range);
-        }
-        if range.start >= range.end {
-            return Vec::new();
-        }
-
-        let mut rects = Vec::new();
-        for visual in self.visual_rows() {
-            let start = range.start.max(visual.range.start);
-            let end = range.end.min(visual.range.end);
-            if start >= end {
-                continue;
-            }
-
-            let start_x = if start == visual.range.start {
-                if self.alignment_enabled {
-                    let line = &self.lines[visual.logical_line];
-                    visual.x
-                        + line
-                            .unwrapped_layout
-                            .x_for_index(start - visual.logical_start)
-                        - visual.start_x
-                } else {
-                    visual.x
-                }
-            } else {
-                self.position_for_index(start)
-                    .map(|position| position.x)
-                    .unwrap_or(visual.x)
-            };
-            let end_x = self
-                .position_for_index(end)
-                .map(|position| position.x)
-                .unwrap_or(start_x);
-            let left = start_x.min(end_x);
-            let width = (start_x.max(end_x) - left).max(px(1.0));
-            rects.push(Bounds::new(
-                point(left, visual.y),
-                size(width, self.line_height),
-            ));
-        }
-        // A selected logical LF occupies no shaped glyph width. Still give
-        // that caret unit a visible EOL marker, including consecutive/empty
-        // lines; soft-wrap boundaries have no LF and never enter this loop.
-        let mut logical_start = 0usize;
-        for line in self.lines.iter().take(self.lines.len().saturating_sub(1)) {
-            let newline = logical_start + line.len();
-            if range.start <= newline
-                && newline < range.end
-                && let Some(position) = self.position_for_index(newline)
-            {
-                rects.push(Bounds::new(position, size(px(4.0), self.line_height)));
-            }
-            logical_start = newline + 1;
-        }
-        rects
     }
 
     fn visual_rows(&self) -> &[VisualRow] {

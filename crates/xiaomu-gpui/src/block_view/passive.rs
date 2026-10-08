@@ -7,7 +7,14 @@ impl ParagraphView {
         self.passive_scroll_epoch.get()
     }
 
+    pub(crate) fn cancel_caret_scroll(&self) {
+        self.scroll_caret_pending.set(false);
+        self.passive_scroll_epoch
+            .set(self.passive_scroll_epoch.get().wrapping_add(1));
+    }
+
     pub(crate) fn invalidate_passive_layout(&mut self) {
+        self.reading_measurement = None;
         self.last_layout = None;
         self.last_bounds = None;
         self.last_caret = None;

@@ -204,6 +204,68 @@ impl ParagraphView {
         )
     }
 
+    /// Resolve a reading endpoint without temporarily installing it as focus.
+    pub(super) fn reading_caret_height(
+        &self,
+        at: xiaomu_core::selection::InlinePoint,
+    ) -> Result<Option<Pixels>, TextSizeError> {
+        let Some(capability) = self
+            .text_size_capability
+            .as_ref()
+            .filter(|_| !self.is_range_input())
+        else {
+            return Ok(None);
+        };
+        let Some(style) = self.resolved_size_style(capability)? else {
+            return Ok(None);
+        };
+        let session = self.session.borrow();
+        let document = session.document();
+        let is_caret = session.selection().is_collapsed()
+            && session.selection().focus() == xiaomu_runtime::session::DocumentPosition::Inline(at);
+        let inherited = document
+            .inherited_inline_marks(at)
+            .map_err(|_| TextSizeError::new(self.node, 0..0, TextSizeErrorKind::InvalidStyle))?;
+        let marks = if is_caret {
+            session.stored_marks().unwrap_or(&inherited)
+        } else {
+            &inherited
+        };
+        let attribute = |marks: &xiaomu_core::document::MarkSet| {
+            marks
+                .as_slice()
+                .iter()
+                .find_map(|mark| match mark {
+                    Mark::TextStyle(style) => Some(style.attributes().font_size().clone()),
+                    _ => None,
+                })
+                .unwrap_or(StringAttribute::Missing)
+        };
+        let effective = resolve_font_size(&attribute(marks), style.context()).map_err(|error| {
+            TextSizeError::new(self.node, 0..0, TextSizeErrorKind::FontSize(error))
+        })?;
+        let explicit = |marks: &xiaomu_core::document::MarkSet| {
+            let value = attribute(marks);
+            match &value {
+                StringAttribute::Value(value) if !value.trim().is_empty() => {
+                    resolve_font_size(&attribute(marks), style.context()).ok()
+                }
+                _ => None,
+            }
+        };
+        capability.caret_height(
+            self.node,
+            TextSizeCaretContext::new(
+                effective,
+                is_caret
+                    .then(|| session.stored_marks().and_then(explicit))
+                    .flatten(),
+                adjacent_marks(document, at, true).and_then(explicit),
+                adjacent_marks(document, at, false).and_then(explicit),
+            ),
+        )
+    }
+
     pub(super) fn presented_caret_height(&self) -> Result<Option<Pixels>, TextSizeError> {
         let Some(capability) = self
             .text_size_capability

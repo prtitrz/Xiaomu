@@ -3,7 +3,6 @@
 use super::{BlockTextLayout, VisualRow, row_for_caret};
 use crate::mixed_size::{Layout, MixedLayout};
 use gpui::{App, Bounds, Pixels, Point, Window, point, px, size};
-use std::ops::Range;
 use std::rc::Rc;
 use xiaomu_core::selection::CursorAffinity;
 
@@ -76,22 +75,6 @@ impl BlockTextLayout {
             .closest_index_for_point(point(position.x - self.rows[row_ix].x, position.y))
             .expect("every mixed row has an edge");
         (hit.index, hit.affinity)
-    }
-
-    pub(super) fn mixed_selection_rects(&self, range: Range<usize>) -> Vec<Bounds<Pixels>> {
-        self.mixed
-            .as_ref()
-            .expect("mixed dispatch")
-            .selection_rects(range.start, range.end)
-            .into_iter()
-            .map(|mut rect| {
-                if let Some(row) = self.rows.iter().find(|row| row.y == rect.origin.y) {
-                    rect.origin.x += row.x;
-                }
-                rect.size.width = rect.size.width.max(px(1.0));
-                rect
-            })
-            .collect()
     }
 
     /// A caret/native collapsed range uses the actual row, including mixed
