@@ -1,5 +1,11 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-08 原生拒绝反馈补齐：普通 ParagraphView typing、显式 UTF-16 replacement
+与 IME commit 的 session 失败发出内容无关的 `NativeInput`；字号 view 保持
+`TextSizeInput`。All/node/cell-range proxy 与普通子 view 同样转发原 revision，
+保留 policy、selection、history 和 clipboard 边界；成功、NoChange 和取消静默。
+虚拟回归不替代宿主真实 GUI/banner 验收，见 [反馈契约](architecture.md#multi-block-documentview)。
+
 2026-10-07 bounded extension: the existing opt-in prepared Cut also admits explicit
 whole-node and collapsed Atomic sources. Final collapsed inline selection, isolated
 history and all prepublication checks remain unchanged; ordinary text/gap sources,

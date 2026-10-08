@@ -627,8 +627,14 @@ policy 任意字符串；失败 session 借用释放、回滚完成后才发出�
 订阅并自持 subscription，负责忽略旧 view、展示与清除反馈。事件不推进 document /
 selection listener、history、epoch 或 dirty，也不改 `EditorHooks` 必填接口。
 覆盖范围限 `apply_edit_intent` / `apply_edit_intent_with_selection`、host command routing、Copy/Cut 投影和无损传输、
-已识别 native Paste metadata 拒绝；成功、NoChange、composition guard 保持静默。
-直接 ParagraphView typing/IME、直接 session 调用、selection/navigation、history、
+已识别 native Paste metadata 拒绝，以及 ParagraphView 原生 typing、显式 replacement range
+与 IME commit 的 session 失败。普通输入使用 `NativeInput`，已启用字号的输入 view 保持
+`TextSizeInput`；普通 paragraph 与 All/node/cell-range proxy 都将原事件及发出时 revision
+转发给所属 DocumentView；转发先比较既有 session/epoch 身份，阻止保留的旧 native
+handler 在宿主原位替换 view 后向新 view 发出旧拒绝。standalone ParagraphView 可直接订阅。
+成功、NoChange、取消
+composition 与 composition guard 保持静默；字号 preedit/layout admission 的既有
+`TextSizePreedit` / `TextSizeLayout` 例外保持。直接 session 调用、selection/navigation、history、
 persistence、image import 和返回 Result 的 `apply_edit_transaction` 不在此事件流内。
 这不是通用错误或保存状态流。事件同时记录发出时内容无关的
 `DocumentRevision`；宿主先匹配Entity，再与当前canonical revision比较，可过滤

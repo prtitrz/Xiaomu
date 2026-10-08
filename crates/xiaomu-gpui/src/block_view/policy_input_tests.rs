@@ -1,6 +1,7 @@
 //! Explicit native replacement ranges remain atomic when policy refuses input.
 
 use super::*;
+use crate::document_view::{EditorRejection, EditorRejectionReason, EditorRejectionStage};
 use gpui::{AppContext as _, EntityInputHandler, TestAppContext, WindowHandle};
 use xiaomu_core::document::{
     Mark, NodeAttrs, NodeContent, NodeKind, NodeStoreBuilder, XiaomuDocument,
@@ -122,6 +123,19 @@ fn platform_range_rejection_preserves_marks_selection_group_and_all_listeners(
         let document = session.borrow().document().clone();
         let selection = session.borrow().selection();
         let marks = session.borrow().stored_marks().cloned();
+        let revision = document.revision();
+        let entity = handle.update(cx, |_, _, cx| cx.entity()).unwrap();
+        let events = Rc::new(Cell::new(0));
+        let seen = events.clone();
+        let _subscription = cx.update(|cx| {
+            cx.subscribe(&entity, move |emitter, event: &EditorRejection, cx| {
+                assert_eq!(event.stage(), EditorRejectionStage::NativeInput);
+                assert_eq!(event.reason(), EditorRejectionReason::Policy);
+                assert_eq!(event.document_revision(), revision);
+                assert_eq!(emitter.read(cx).session.borrow().history_depths(), (1, 0));
+                seen.set(seen.get() + 1);
+            })
+        });
         handle
             .update(cx, |view, window, cx| {
                 view.replace_text_in_range(Some(0..1), "!", window, cx)
@@ -133,12 +147,14 @@ fn platform_range_rejection_preserves_marks_selection_group_and_all_listeners(
         assert_eq!(session.borrow().stored_marks(), marks.as_ref());
         assert_eq!(session.borrow().history_depths(), (1, 0));
         assert_eq!(counts.get(), (0, 0));
+        assert_eq!(events.get(), 1);
         handle
             .update(cx, |view, window, cx| {
                 view.replace_text_in_range(None, "b", window, cx)
             })
             .unwrap();
         assert_eq!(session.borrow().history_depths(), (1, 0));
+        assert_eq!(events.get(), 1, "successful input stays silent");
         session.borrow_mut().undo().unwrap();
         assert!(
             session
