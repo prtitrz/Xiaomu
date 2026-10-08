@@ -186,7 +186,7 @@ impl Row {
         )
     }
 
-    fn selection_rect(&self, selection: &Range<usize>) -> Option<Bounds<Pixels>> {
+    pub(crate) fn selection_rect(&self, selection: &Range<usize>) -> Option<Bounds<Pixels>> {
         let start = selection.start.max(self.range.start);
         let end = selection.end.min(self.range.end);
         let newline_selected = self.hard_break_after

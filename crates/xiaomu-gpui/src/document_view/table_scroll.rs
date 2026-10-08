@@ -173,6 +173,14 @@ impl Element for TableScrollViewport {
         // This div shares the parent's Taffy tree and LayoutId. Unlike the
         // separately laid-out table cells, its origin must not be added twice.
         self.content.as_mut().unwrap().prepaint(window, cx);
+        if let Some(scroll) = self.scroll.borrow().as_ref() {
+            let _ = self.view.update(cx, |view, _| {
+                view.reading
+                    .borrow_mut()
+                    .tables
+                    .insert(self.table, scroll.clone());
+            });
+        }
     }
     fn paint(
         &mut self,

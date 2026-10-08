@@ -202,24 +202,22 @@ impl InlineAtomDisplayProjection {
             return None;
         }
         let raw = point.text_offset().as_usize();
-        let atom_count = self
+        let first = self
             .atoms
-            .iter()
-            .filter(|atom| atom.text_offset.as_usize() == raw)
-            .count();
-        if point.atom_index() > atom_count {
+            .partition_point(|atom| atom.text_offset.as_usize() < raw);
+        let last = self
+            .atoms
+            .partition_point(|atom| atom.text_offset.as_usize() <= raw);
+        if point.atom_index() > last - first {
             return None;
         }
-
-        let inserted_before: usize = self
-            .atoms
-            .iter()
-            .filter(|atom| {
-                let atom_raw = atom.text_offset.as_usize();
-                atom_raw < raw || (atom_raw == raw && atom.atom_index < point.atom_index())
-            })
-            .map(|atom| atom.display_range.len())
-            .sum();
+        let before = first + point.atom_index();
+        // Each display end already contains the prefix sum of inserted bytes.
+        // The ordered projection therefore maps arbitrary gaps in O(log atoms).
+        let inserted_before = before.checked_sub(1).map_or(0, |index| {
+            let atom = &self.atoms[index];
+            atom.display_range.end - atom.text_offset.as_usize()
+        });
         Some(raw + inserted_before)
     }
 

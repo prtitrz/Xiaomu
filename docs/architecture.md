@@ -888,3 +888,17 @@ Linux `unmark_text` now preserves a nonempty, non-rejected overlay through the e
 ## Stock Linux XIM decoder source
 
 The workspace overrides only `xim-ctext` with an audited local copy of the official Zed Git revision `16f35a2c881b815a2b6cdfd6687988e84f8447d8` (genuine upstream version 0.3.0, not the registry 0.3.0 release). Its small patch preserves literal ASCII and charset-return suffixes and rejects high-bit conversion overflow. The original revision and released 0.4.1 were rejected after reproducible ASCII-prefix regressions. GPUI and `zed-xim` stay stock registry packages; unknown Git sources remain denied, and a provenance/patch-reversal guard verifies the vendor. Downstream hosts must use this audited copy and repeat the root-only Cargo patch; dependency manifests cannot impose it. See [dependency rationale, integration instructions and native limits](linux-xim-decoder.md).
+
+### Passive reading presentation
+
+`DocumentView` now owns optional revision-, session-instance- and view-bound
+reading highlights and passive target reveal. `ReadingRange` uses exact
+`InlinePoint` endpoints; decoration paint shares `InlineAtomDisplayProjection`
+and native measured text rows without editing canonical marks/selection.
+Reveal traverses nested table horizontal viewports and the document viewport;
+queued scrolls are guarded against stale revisions, requests and measurements.
+`reading_start` uses visible ordered selection start or actual viewport-top
+hit geometry, and `focus_selection_without_scroll` restores existing selection
+focus. Hosts retain pane/query lifetime and product semantics. See the
+[passive reading contract](passive-reading.md); native GUI/IME acceptance remains
+separate from mounted deterministic tests.

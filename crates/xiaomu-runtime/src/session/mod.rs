@@ -26,6 +26,7 @@ mod history_options;
 #[cfg(test)]
 mod history_options_tests;
 mod history_timestamp;
+mod identity;
 mod image;
 mod input_rule_undo;
 mod intent;
@@ -60,6 +61,7 @@ pub use history_options::{
     EmptyHistoryBehavior, HistoryOptions, HistorySelectionMode, SelectionOnlyGrouping,
 };
 pub use history_timestamp::HistoryTimestamp;
+pub use identity::DocumentSessionIdentity;
 pub use input_rule_undo::InputRuleUndoSpec;
 pub use intent::{CaretMove, EditIntent, EditPlan, PrimaryEdit, SelectionUpdate};
 pub use listener::{DocumentChangeListener, DocumentChangeOrigin};
@@ -82,6 +84,7 @@ use xiaomu_core::transaction::Transaction;
 /// selection update cannot be resolved, or the resolved selection fails
 /// validation, the session keeps its previous state unchanged.
 pub struct DocumentSession {
+    identity: DocumentSessionIdentity,
     document: XiaomuDocument,
     selection: DocumentSelection,
     history: HistoryStack,
@@ -110,6 +113,7 @@ impl DocumentSession {
             .validate(&document)
             .map_err(|_| SessionError::SelectionInvalid)?;
         Ok(Self {
+            identity: DocumentSessionIdentity::new(),
             document,
             selection,
             history: HistoryStack::new(),
