@@ -610,10 +610,11 @@ impl DocumentView {
                             cx,
                         )
                     });
-                    let feedback = cx.subscribe(&view, |_, _, event: &EditorRejection, cx| {
-                        cx.emit(*event);
-                    });
-                    view.update(cx, |view, _| view.text_size_feedback = Some(feedback));
+                    let feedback =
+                        cx.subscribe(&view, |this, input, event: &EditorRejection, cx| {
+                            this.forward_input_rejection(&input, event, cx);
+                        });
+                    view.update(cx, |view, _| view.rejection_feedback = Some(feedback));
                     (node, view)
                 }
             })

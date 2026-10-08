@@ -190,7 +190,7 @@ pub struct ParagraphView {
     /// falling through to ordinary typing and deleting selected atoms.
     rejected_composition: bool,
     focus_out_subscription: Option<Subscription>,
-    pub(crate) text_size_feedback: Option<Subscription>,
+    pub(crate) rejection_feedback: Option<Subscription>,
 }
 
 impl ParagraphView {
@@ -266,7 +266,7 @@ impl ParagraphView {
             composition: None,
             rejected_composition: false,
             focus_out_subscription: None,
-            text_size_feedback: None,
+            rejection_feedback: None,
         }
     }
 
@@ -475,15 +475,14 @@ impl ParagraphView {
             Ok(_) => true,
             Err(error) => {
                 eprintln!("xiaomu: intent rejected: {error}");
-                if self.text_size_capability.is_some() {
-                    use crate::document_view::{EditorRejection, EditorRejectionStage};
-                    let revision = self.session.borrow().document().revision();
-                    cx.emit(EditorRejection::from_session(
-                        EditorRejectionStage::TextSizeInput,
-                        &error,
-                        revision,
-                    ));
-                }
+                use crate::document_view::{EditorRejection, EditorRejectionStage};
+                let stage = if self.text_size_capability.is_some() {
+                    EditorRejectionStage::TextSizeInput
+                } else {
+                    EditorRejectionStage::NativeInput
+                };
+                let revision = self.session.borrow().document().revision();
+                cx.emit(EditorRejection::from_session(stage, &error, revision));
                 false
             }
         };

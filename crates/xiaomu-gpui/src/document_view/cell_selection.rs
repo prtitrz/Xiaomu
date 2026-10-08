@@ -6,7 +6,7 @@ use xiaomu_core::document::{NodeId, XiaomuDocument};
 use xiaomu_core::selection::InlinePoint;
 use xiaomu_runtime::session::DocumentPosition;
 
-use super::{DocumentView, navigation, visual_navigation::NavStep};
+use super::{DocumentView, EditorRejection, navigation, visual_navigation::NavStep};
 use crate::block_view::ParagraphView;
 
 actions!(xiaomu_gpui, [SelectCell, EscapeCellRange]);
@@ -74,7 +74,11 @@ impl DocumentView {
                     cx,
                 )
             });
+            let feedback = cx.subscribe(&view, |this, input, event: &EditorRejection, cx| {
+                this.forward_input_rejection(&input, event, cx);
+            });
             view.update(cx, |view, _| {
+                view.rejection_feedback = Some(feedback);
                 view.attach_scroll_handle(self.scroll_handle.clone());
                 view.attach_table_capability(self.table_capability.clone());
             });

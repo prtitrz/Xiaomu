@@ -1,7 +1,9 @@
-//! Optional, payload-free feedback for rejected document-view commands.
+//! Optional, payload-free feedback for rejected document-view commands and native input.
 
 use super::DocumentView;
-use gpui::{Context, EventEmitter};
+use crate::block_view::ParagraphView;
+use gpui::{Context, Entity, EventEmitter};
+use std::rc::Rc;
 use xiaomu_core::document::DocumentRevision;
 use xiaomu_runtime::session::SessionError;
 
@@ -28,6 +30,9 @@ pub enum EditorRejectionStage {
     TextSizeInput,
     /// An opted-in size view could not produce safe current-frame geometry.
     TextSizeLayout,
+    /// A native typing, explicit replacement or IME commit session intent failed.
+    /// Font-size-capable input views retain [`Self::TextSizeInput`] instead.
+    NativeInput,
 }
 
 /// A bounded, content-free classification for host rejection feedback.
@@ -89,7 +94,7 @@ impl EditorRejectionReason {
     }
 }
 
-/// Optional GPUI feedback for one failed `DocumentView` command boundary.
+/// Optional GPUI feedback for one failed command or native-input boundary.
 ///
 /// Subscribe to the particular `Entity<DocumentView>` with GPUI's `subscribe`
 /// or `subscribe_in`; retain the subscription for as long as feedback is needed.
@@ -106,14 +111,20 @@ impl EditorRejectionReason {
 /// to discard a queued diagnostic after a later canonical edit. It is not a
 /// full immutable session snapshot, persistence timestamp or global sequence.
 ///
-/// Coverage is intentionally narrow: failed `apply_edit_intent` and
-/// `apply_edit_intent_with_selection` calls, host edit command routing, Copy/Cut projection or lossless transport, and rejected
-/// native Paste metadata. Successful edits, `NoChange`, empty/unsupported foreign
-/// clipboards, legacy Copy text fallback, and composition/presentation guards do
-/// not emit, except opted-in font-size composition admission and native-input
-/// failures (`TextSizePreedit` / `TextSizeInput` / `TextSizeLayout`). These are forwarded from the
-/// originating child to its owning DocumentView. Legacy `ParagraphView` typing
-/// and IME input, direct session calls,
+/// Coverage includes failed `apply_edit_intent` and
+/// `apply_edit_intent_with_selection` calls, host edit command routing, Copy/Cut
+/// projection or lossless transport, rejected native Paste metadata, and failed
+/// `ParagraphView` typing, explicit replacement and IME commit session calls.
+/// Native input failures use `NativeInput`, or the existing `TextSizeInput` for
+/// font-size-capable input views. Paragraph and document-range input children
+/// forward the original event and revision to their owning `DocumentView`.
+/// Forwarding checks the existing session and view-epoch identities, so a
+/// retained child cannot report into a view replaced in the same GPUI Entity.
+/// Standalone `ParagraphView` hosts can subscribe to that entity directly.
+/// Successful edits, `NoChange`, empty/unsupported foreign clipboards, legacy
+/// Copy text fallback, cancelled composition and composition/presentation guards
+/// do not emit, except opted-in font-size admission failures
+/// (`TextSizePreedit` / `TextSizeLayout`). Direct session calls,
 /// selection/navigation/checkbox actions, image import, history, persistence and
 /// the explicitly returned errors from `apply_edit_transaction` are not covered.
 /// This is not a universal engine error stream or a save-status event.
@@ -196,6 +207,20 @@ impl EventEmitter<EditorRejection> for DocumentView {}
 impl EventEmitter<EditorRejection> for crate::block_view::ParagraphView {}
 
 impl DocumentView {
+    pub(super) fn forward_input_rejection(
+        &self,
+        input: &Entity<ParagraphView>,
+        event: &EditorRejection,
+        cx: &mut Context<Self>,
+    ) {
+        let input = input.read(cx);
+        // Native handlers can retain a child after an in-place host view
+        // replacement. Session revisions alone cannot identify its owner.
+        if Rc::ptr_eq(&self.session, &input.session) && Rc::ptr_eq(&self.epoch, &input.epoch) {
+            cx.emit(*event);
+        }
+    }
+
     pub(super) fn emit_rejection(
         &self,
         stage: EditorRejectionStage,
@@ -220,3 +245,7 @@ impl DocumentView {
 #[cfg(test)]
 #[path = "rejection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "rejection_input_tests.rs"]
+mod input_tests;

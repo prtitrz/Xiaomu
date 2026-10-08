@@ -262,7 +262,7 @@ fn ctrl_v_policy_failures_emit_once_after_rollback_without_change_notifications(
 }
 
 #[gpui::test]
-fn no_change_success_and_direct_paragraph_failure_do_not_emit(cx: &mut TestAppContext) {
+fn no_change_and_success_are_silent_but_native_input_failure_emits(cx: &mut TestAppContext) {
     let (m, mode) = configured(cx);
     let (events, _subscription) = watch(&m, None, cx);
     let before = Snapshot::capture(&m);
@@ -272,13 +272,11 @@ fn no_change_success_and_direct_paragraph_failure_do_not_emit(cx: &mut TestAppCo
     before.assert_session(&m.session, &m.counts);
     assert!(events.borrow().is_empty());
     mode.set(Mode::RejectCandidate);
-    cx.simulate_input(m.window.into(), "direct native input");
+    cx.simulate_input(m.window.into(), "!");
     cx.background_executor.run_until_parked();
     before.assert_session(&m.session, &m.counts);
-    assert!(
-        events.borrow().is_empty(),
-        "ParagraphView input is explicitly outside this event contract"
-    );
+    assert_event(&events, Stage::NativeInput, Reason::Policy);
+    events.borrow_mut().clear();
     mode.set(Mode::Allow);
     install_text(cx, "accepted");
     press(&m, "ctrl-v", cx);
