@@ -240,7 +240,7 @@ impl DocumentView {
         };
         match target {
             Some(navigation::NavUnit::Text(block)) => {
-                self.place(InlinePoint::at_start_of(block.node), window, cx)
+                self.place(InlinePoint::at_start_of(block.node), window, cx);
             }
             Some(navigation::NavUnit::Atomic(node)) => {
                 let _ = self.session.borrow_mut().set_atomic_selection(node);

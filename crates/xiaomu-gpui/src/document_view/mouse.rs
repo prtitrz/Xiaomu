@@ -71,15 +71,21 @@ impl DocumentView {
                     eprintln!("xiaomu: click placed caret in {description}");
                 }
             }
-            if event.modifiers.shift {
-                self.move_focus_to(hit.point, true, window, cx);
+            let accepted = if event.modifiers.shift {
+                self.move_focus_to(hit.point, true, window, cx)
             } else {
-                self.place(hit.point, window, cx);
+                let accepted = self.place(hit.point, window, cx);
                 // Activation is a plain click on a chip; shift-extend only
                 // grows the selection.
                 if let Some(chip) = hit.chip {
                     self.emit_atom_action(chip, ATOM_ACTION_CLICK);
                 }
+                accepted
+            };
+            if accepted {
+                // The scroll surface's default focus would otherwise replace
+                // the inline input owner when clicking padding near its caret.
+                window.prevent_default();
             }
         }
     }

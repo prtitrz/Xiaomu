@@ -796,6 +796,8 @@ P4A 收口 gate（`crates/xiaomu-runtime/tests/p4a_integration_gate.rs` + `crate
 
 ## P4.6-P4.8 Atomic Block / Image 事实
 
+GPUI inline 点击及键盘选择成功时也恢复 selection focus 所属输入的 native focus，包含 `NoChange`；相同 caret 的重点击不增加选区、历史或 caret-scroll 请求。成功 pointer placement 抑制 scroll surface 的默认获焦，避免段落旁 padding 点击在命中 inline caret 后又失去输入焦点；拒绝的选择保持原有行为。此逻辑只在显式交互的 GPUI 私有 helper 内，Runtime 被动同步不获焦。`inline_focus_tests` 覆盖空/非空双编辑器真实 pointer、同选区 Shift 点击、Undo、只读策略与非法选择；虚拟测试不替代宿主原生 IME 验收。
+
 GPUI 原子块点击在成功安装 node selection 后必须同时把键盘焦点交给该 `DocumentView`，即便重点击返回 `NoChange` 也重新获焦。Canonical selection 与 native focus 是两个状态；不能依赖此前文本段落碰巧仍拥有焦点。`atomic_focus_gpui` 覆盖冷 Image/HorizontalRule 点击、失焦后的相同选中重点击、Delete/Backspace 与 Undo。该回归不修改平台输入、IME owner 或 composition 等待语义。
 
 Atomic block 进入了统一的 document position 模型：`DocumentPosition::Atomic(NodeId)` 只接受 atomic content 节点，`Slots` 以节点自身 slot 排序（gap-before < atomic < gap-after），mapping 经 `ChangeMap::map_node_selection`，公开 seam 为 `DocumentSession::set_atomic_selection`。Backspace/Delete 在 collapsed atomic selection 上删除整块并把 caret 收敛到该块占据的 gap（`SelectionUpdate::CaretAtGap`），undo 恢复块并重新安装 node selection。GPUI 侧 `navigation::nav_units` 把文档顺序推广为 text + atomic 序列，横向步进以 one-caret-unit 语义跨越 `text ↔ atomic ↔ text`；atomic selection 上 Up/Down/LineStart/LineEnd 为有意 no-op（atomic 块没有可视行）。跨块纯文本选区的 flat leaf 投影不携带中间 atomic 节点：这是 one-caret-unit 模型的有意语义——文本范围删除不吞并 atomic 块，atomic 删除必须经显式 node selection。

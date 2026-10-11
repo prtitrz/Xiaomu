@@ -426,7 +426,9 @@ impl DocumentView {
             && let Some(edge) = self.horizontal_selection_edge(matches!(step, NavStep::Right))
         {
             match edge {
-                NavTarget::Inline(point) => self.move_focus_to(point, false, window, cx),
+                NavTarget::Inline(point) => {
+                    self.move_focus_to(point, false, window, cx);
+                }
                 NavTarget::Atomic(node) => self.move_focus_to_atomic(node, window, cx),
             }
             return;
@@ -461,7 +463,9 @@ impl DocumentView {
                     return;
                 };
                 match target {
-                    NavTarget::Inline(point) => self.move_focus_to(point, extend, window, cx),
+                    NavTarget::Inline(point) => {
+                        self.move_focus_to(point, extend, window, cx);
+                    }
                     NavTarget::Atomic(node) => self.move_focus_to_atomic(node, window, cx),
                 }
             }

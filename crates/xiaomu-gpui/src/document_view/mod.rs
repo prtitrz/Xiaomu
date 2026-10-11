@@ -447,21 +447,28 @@ impl DocumentView {
 
     /// Places the selection endpoints at exact mixed-inline positions,
     /// routing focus afterwards. Same-boundary atom gaps that have no
-    /// text-only projection are preserved verbatim.
+    /// text-only projection are preserved verbatim. Returns whether Runtime
+    /// accepted the selection, including an unchanged selection.
     fn set_inline_selection(
         &mut self,
         anchor: InlinePoint,
         focus: InlinePoint,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.desired_x = None;
         let outcome = self
             .session
             .borrow_mut()
             .set_inline_selection(anchor, focus);
+        let accepted = outcome.is_ok();
         match outcome {
-            Ok(xiaomu_runtime::session::SessionOutcome::NoChange) => {}
+            Ok(xiaomu_runtime::session::SessionOutcome::NoChange) => {
+                // Explicit pointer/keyboard selection also owns native focus.
+                // Clicking the existing caret after another control took focus
+                // must restore input without changing selection or scrolling.
+                self.route_focus(window, cx);
+            }
             Ok(_) => {
                 self.route_focus(window, cx);
                 self.request_focus_scroll(cx);
@@ -469,11 +476,12 @@ impl DocumentView {
             Err(error) => eprintln!("xiaomu: selection rejected: {error}"),
         }
         cx.notify();
+        accepted
     }
 
     /// Collapses the caret onto `point`.
-    fn place(&mut self, point: InlinePoint, window: &mut Window, cx: &mut Context<Self>) {
-        self.set_inline_selection(point, point, window, cx);
+    fn place(&mut self, point: InlinePoint, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.set_inline_selection(point, point, window, cx)
     }
 
     /// Returns the decoded render source of one image block, when a fresh
@@ -544,7 +552,7 @@ impl DocumentView {
         extend: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let anchor = if extend {
             match self.session.borrow().selection().anchor() {
                 // Mixed-inline anchors keep their atom ordinal; keyboard and
@@ -630,3 +638,6 @@ impl Render for DocumentView {
 
 #[cfg(test)]
 mod reading_tests;
+
+#[cfg(test)]
+mod inline_focus_tests;
