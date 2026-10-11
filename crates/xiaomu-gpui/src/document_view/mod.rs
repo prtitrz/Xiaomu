@@ -65,6 +65,8 @@ mod host_intent_tests;
 #[cfg(test)]
 mod image_presentation_tests;
 #[cfg(test)]
+mod image_sizing_tests;
+#[cfg(test)]
 mod list_marker_tests;
 #[cfg(test)]
 mod select_all_inline_atoms_tests;
@@ -136,6 +138,8 @@ pub struct DocumentView {
     asset_service: Option<Rc<dyn AssetService>>,
     /// Per-node image load states shared with resolve callbacks.
     image_loads: SharedImageLoadCache,
+    image_sizing: crate::image_block::ImageSizingPolicy,
+    image_session: Option<xiaomu_runtime::session::DocumentSessionIdentity>,
     command_router: Option<Rc<dyn crate::editor_commands::EditorCommandRouter>>,
     code_block_presentation: Option<crate::code_presentation::CodeBlockPresentation>,
     list_marker_provider: Option<Rc<dyn crate::list_marker::ListMarkerLabelProvider>>,
@@ -170,6 +174,8 @@ impl DocumentView {
             atom_capability: None,
             asset_service: None,
             image_loads: Rc::new(ImageLoadCache::default()),
+            image_sizing: Default::default(),
+            image_session: None,
             command_router: None,
             code_block_presentation: None,
             list_marker_provider: None,
@@ -178,8 +184,17 @@ impl DocumentView {
         }
     }
 
+    /// Sets a read-only per-view image layout policy.
+    ///
+    /// Notify the mounted view after changing this setting. Decode completion
+    /// and resize reflow never create edits or history entries.
+    pub fn set_image_sizing_policy(&mut self, policy: crate::image_block::ImageSizingPolicy) {
+        self.image_sizing = policy;
+    }
+
     /// Attaches the host asset resolver for image blocks.
     pub fn set_asset_service(&mut self, service: Rc<dyn AssetService>) {
+        self.image_loads.clear();
         self.asset_service = Some(service);
     }
 
@@ -484,7 +499,7 @@ impl DocumentView {
         self.set_inline_selection(point, point, window, cx)
     }
 
-    /// Returns the decoded render source of one image block, when a fresh
+    /// Returns the encoded render source of one image block, when a fresh
     /// resolve has landed.
     #[must_use]
     pub fn image_render_source(&self, node: NodeId) -> Option<std::sync::Arc<gpui::Image>> {
@@ -615,7 +630,14 @@ impl Render for DocumentView {
         }
 
         {
-            let document = self.session.borrow().document().clone();
+            let session = self.session.borrow();
+            let identity = session.identity();
+            if self.image_session.as_ref() != Some(&identity) {
+                self.image_loads.clear();
+                self.image_session = Some(identity);
+            }
+            let document = session.document().clone();
+            drop(session);
             sync_image_loads(&document, &self.image_loads, self.asset_service.as_ref());
         }
 

@@ -802,7 +802,7 @@ GPUI 原子块点击在成功安装 node selection 后必须同时把键盘焦�
 
 Atomic block 进入了统一的 document position 模型：`DocumentPosition::Atomic(NodeId)` 只接受 atomic content 节点，`Slots` 以节点自身 slot 排序（gap-before < atomic < gap-after），mapping 经 `ChangeMap::map_node_selection`，公开 seam 为 `DocumentSession::set_atomic_selection`。Backspace/Delete 在 collapsed atomic selection 上删除整块并把 caret 收敛到该块占据的 gap（`SelectionUpdate::CaretAtGap`），undo 恢复块并重新安装 node selection。GPUI 侧 `navigation::nav_units` 把文档顺序推广为 text + atomic 序列，横向步进以 one-caret-unit 语义跨越 `text ↔ atomic ↔ text`；atomic selection 上 Up/Down/LineStart/LineEnd 为有意 no-op（atomic 块没有可视行）。跨块纯文本选区的 flat leaf 投影不携带中间 atomic 节点：这是 one-caret-unit 模型的有意语义——文本范围删除不吞并 atomic 块，atomic 删除必须经显式 node selection。
 
-Image 走 typed canonical 语义（`crates/xiaomu-core/src/document/image.rs`）：`ImageAttrs` 经 attrs 键 `src`/`asset`/`alt`/`title`/`width`/`height` 读写，`ImageSource::AssetRef`（宿主 opaque 引用）与 `ExternalUrl`（codec/host 显式导入）二选一。`EditIntent::InsertImage` 把 Image 原子块作为聚焦块兄弟插入。`AssetService::resolve(AssetRef, Rc<dyn AssetSink>)`（`crates/xiaomu-runtime/src/assets.rs`）是 host capability seam：宿主拥有存储/网络/缓存/权限，`ResolvedAsset` 携带 `revision` 供 stale 判定，回调无前端上下文、不直接改 canonical document。GPUI 侧（`image_block.rs`）以 node identity + source key 缓存 `Arc<gpui::Image>`，Resolved 状态经 `gpui::ImageSource::Image` 绘制真实纹理（`w_full` + `max_h(320px)` + `ObjectFit::Contain`），Loading/Failed/无 service 状态渲染占位；accessibility 把 Image 投影为 alt 文本、HorizontalRule 投影为 Separator。
+Image 走 typed canonical 语义（`crates/xiaomu-core/src/document/image.rs`）：`ImageAttrs` 经 attrs 键 `src`/`asset`/`alt`/`title`/`width`/`height` 读写，`ImageSource::AssetRef`（宿主 opaque 引用）与 `ExternalUrl`（codec/host 显式导入）二选一。`EditIntent::InsertImage` 把 Image 原子块作为聚焦块兄弟插入。`AssetService::resolve(AssetRef, Rc<dyn AssetSink>)`（`crates/xiaomu-runtime/src/assets.rs`）是 host capability seam：宿主拥有存储/网络/缓存/权限，`ResolvedAsset` 携带 `revision` 供 stale 判定，回调无前端上下文、不直接改 canonical document。GPUI 侧（`image_block.rs`）以 node identity + source key 缓存 `Arc<gpui::Image>`，默认布局的 Resolved 状态经 `gpui::ImageSource::Image` 绘制真实纹理（`w_full` + `max_h(320px)` + `ObjectFit::Contain`），Loading/Failed/无 service 状态渲染占位；accessibility 把 Image 投影为 alt 文本、HorizontalRule 投影为 Separator。
 
 已有 raw Image 的展示独立使用 `ImagePresentationAttrs::read(&NodeAttrs)`：借用
 `ImageSourceRef` 与 alt/title 字符串，不修改或重建 canonical attrs。source 仍必须是唯一
@@ -812,14 +812,33 @@ Image 走 typed canonical 语义（`crates/xiaomu-core/src/document/image.rs`）
 与 accessibility 共用此读取规则；只有 placeholder 对无 alt 使用本地“图片”，a11y 保留
 None 与空字符串之别。旧 `ImageAttrs::new/from_attrs/to_attrs`、`AssetService::import_image`、
 `InsertImage` 和 Markdown exporter 的 strict 契约不变；能展示不代表宿主获准保存。
-GPUI 不主动下载 ExternalUrl，源引用校验与现有布局不变，显式尺寸 hints
-不驱动布局。自动化可验证读取与 resolve/cache 一致性，不代表真实纹理解码、原生 GUI 或尺寸视觉对齐已验收。
+GPUI 不主动下载 ExternalUrl。默认 `ImageSizingPolicy::FitContainer` 保留既有
+全宽、320px 高度上限；宿主可对单个 `DocumentView` 显式调用
+`set_image_sizing_policy(ImageSizingPolicy::ResponsiveIntrinsic)`，或通过
+`EditorInstance::with_image_sizing_policy` 配置该实例创建的视图。该模式以真实 PNG/JPEG
+解码像素尺寸作为逻辑像素 intrinsic ratio，width hint 请求 border-box 宽度（可放大），
+无 width hint 时使用天然 content 宽度加两侧 1px border；始终夹到当前局部可用宽度，
+再成对计算内容宽高。height hint 保留但不限制展示高度，宽高 Missing/Null 不写回 raw attrs。
+边框选中前后固定 1px；原子选择与显式 node selection 均不额外改变图片尺寸。
+该能力不实现通用 CSS、拖拽缩放或浏览器 margin/预加载比例占位等价；默认原生块外边距不变。
+
+Responsive image 使用独立 measured element：request-layout 通过本帧父容器可用宽度
+计算完整高度，prepaint 才构造等宽高的纹理子树，避免在 GPUI measured callback 中递归 layout，
+也不借用上一帧宽度。后续段落与原有文档纵向滚动范围因此来自同一轮布局；不启用表格能力。
+GPUI 的公共 `Image::to_image_data` 执行解码，通过私有 `Asset` 共享任务；每个新节点请求各自
+等待一次完成并通知自己的 view，避免 GPUI stock asset 仅通知第一个请求 view 的跨窗口缺口。
+自然尺寸与绘制复用同一 `Arc<RenderImage>`，不引入另一图片解码依赖。无 bytes、decode pending
+与失败时维持确定的 96px 占位，decode 失败有明确标签；不承诺无 layout shift。
+尺寸/解码状态均属于 view，不产生 transaction、history 或 dirty/save 信号。
+真实平台 GUI 与跨产品视觉等价仍须独立验收，虚拟平台几何测试不替代该证据。
 
 Image cache 只供 AssetRef 使用，ExternalUrl 不能因字符串相同命中已解析资产。
 sync 遇 ExternalUrl 或无效 attrs 会清掉该节点缓存，即使当前未挂 asset service。
 每次加载还携带独立内部 Arc 身份（保留 cache 的 Send）；旧 sink 持有身份直至回调结束，没有数值计数器回绕，
 asset→external→同 asset 或 asset A→B→A 后的旧成功/失败回调均不能覆盖新的请求。
-缓存公开 API、host 权限、布局与网络职责保持不变。
+删除的节点会在同步时清理 cache，替换 session 或 asset service 清空旧请求。
+解码完成同时验证 node、source、请求身份与确切 render-source Arc；旧回调不能改变替换图片。
+同一 source 的 width/height metadata 编辑不会重新 resolve 或 decode。host 权限与网络职责保持不变。
 
 Clipboard wire v4 携带 atomic 载荷（`ClipboardNodeContent::Atomic`、`WireContent::Atomic`、`WireKind::HorizontalRule/Image`）；collapsed atomic selection 投影为单 atomic root 的 ClipboardSlice，粘贴为聚焦块后的兄弟块；mixed inline/atomic 层级粘贴 fail closed（`SessionError::ClipboardAtomicUnsupported`）。plain-text fallback 语义化：image copy 在 plain text 中携带 ExternalUrl。
 

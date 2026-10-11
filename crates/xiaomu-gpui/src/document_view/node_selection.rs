@@ -50,13 +50,22 @@ impl DocumentView {
         if self.session.borrow().selection().as_node_selection() != Some(node) {
             return block;
         }
+        let responsive_image = self.image_sizing
+            == crate::image_block::ImageSizingPolicy::ResponsiveIntrinsic
+            && self
+                .session
+                .borrow()
+                .document()
+                .node(node)
+                .is_some_and(|node| matches!(node.kind(), xiaomu_core::document::NodeKind::Image));
         let mut selected = div()
             .debug_selector(move || format!("node-selection-{node:?}"))
             .relative()
             .w_full()
             .min_w_0()
-            .min_h(px(28.0))
-            .border_1()
+            .when(!responsive_image, |selected| {
+                selected.min_h(px(28.0)).border_1()
+            })
             .border_color(gpui::rgba(0x2b6cb8ff))
             .bg(gpui::rgba(0x3377cc22))
             .child(block);

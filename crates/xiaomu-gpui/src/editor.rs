@@ -74,6 +74,7 @@ pub struct EditorInstance {
     atom_renderers: Option<Rc<InlineAtomRendererRegistry>>,
     atom_capability: Option<SharedAtomCapability>,
     asset_service: Option<SharedImageAssetService>,
+    image_sizing: crate::image_block::ImageSizingPolicy,
     command_router: Option<Rc<dyn EditorCommandRouter>>,
     code_block_presentation: Option<CodeBlockPresentation>,
     list_marker_provider: Option<Rc<dyn ListMarkerLabelProvider>>,
@@ -152,12 +153,26 @@ impl EditorInstance {
             atom_renderers: hooks.atom_renderers,
             atom_capability: hooks.atom_capability,
             asset_service: hooks.asset_service,
+            image_sizing: Default::default(),
             command_router: None,
             code_block_presentation: None,
             list_marker_provider: None,
             block_alignment_provider: None,
             text_size_capability: None,
         }
+    }
+
+    /// Chooses visual image sizing for views created by this instance.
+    ///
+    /// Defaults to the original fit-container renderer. This changes neither
+    /// canonical dimensions nor image-import/persistence behavior.
+    #[must_use]
+    pub fn with_image_sizing_policy(
+        mut self,
+        policy: crate::image_block::ImageSizingPolicy,
+    ) -> Self {
+        self.image_sizing = policy;
+        self
     }
 
     /// Installs an optional, pure command router for views built by this instance.
@@ -238,6 +253,7 @@ impl EditorInstance {
         if let Some(service) = &self.asset_service {
             view.set_asset_service(service.clone());
         }
+        view.set_image_sizing_policy(self.image_sizing);
         view.set_command_router(self.command_router.clone());
         view.set_code_block_presentation(self.code_block_presentation.clone());
         view.set_list_marker_provider(self.list_marker_provider.clone());
