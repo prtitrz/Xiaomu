@@ -27,6 +27,19 @@ pub(crate) fn encode_marks(marks: &MarkSet) -> Result<String, PersistenceError> 
                     None => format!("link:{}", escape_mark_field(href)),
                 }
             }
+            Mark::TextStyle(style)
+                if style.attributes().color().is_missing()
+                    && style.attributes().font_family().is_missing()
+                    && style.attributes().font_size().as_str().is_some() =>
+            {
+                let value = style.attributes().font_size().as_str().unwrap();
+                if value.chars().any(char::is_control) {
+                    return Err(PersistenceError(
+                        "fixture font-size values cannot contain control characters".to_owned(),
+                    ));
+                }
+                format!("size:{}", escape_mark_field(value))
+            }
             Mark::TextStyle(_) => {
                 return Err(PersistenceError(
                     "fixture format cannot losslessly encode TextStyle marks".to_owned(),
@@ -120,6 +133,17 @@ fn parse_one_mark(token: &str) -> Result<Mark, String> {
     if token == "strike" {
         return Ok(Mark::Strike);
     }
+    if let Some(rest) = token.strip_prefix("size:") {
+        let value = unescape_mark_field(rest);
+        if value.chars().any(char::is_control) {
+            return Err("fixture font-size values cannot contain control characters".to_owned());
+        }
+        return Ok(Mark::TextStyle(
+            xiaomu_core::document::TextStyleMark::from_attributes(
+                xiaomu_core::document::TextStyleAttributes::default().with_font_size(value.into()),
+            ),
+        ));
+    }
     if let Some(rest) = token.strip_prefix("link:") {
         let fields = split_escaped(rest, ':');
         match fields.as_slice() {
@@ -196,7 +220,7 @@ mod text_style_tests {
     use xiaomu_core::document::{StringAttribute, TextStyleAttributes, TextStyleMark};
 
     #[test]
-    fn every_text_style_presence_state_is_explicitly_refused() {
+    fn size_only_style_round_trips_and_other_presence_states_are_refused() {
         let states = [
             StringAttribute::Missing,
             StringAttribute::Null,
@@ -216,10 +240,17 @@ mod text_style_tests {
                         let marks =
                             MarkSet::new(other_marks.into_iter().chain([style.clone()])).unwrap();
                         let before = marks.clone();
-                        assert_eq!(
-                            encode_marks(&marks).unwrap_err().0,
-                            "fixture format cannot losslessly encode TextStyle marks"
-                        );
+                        if color.is_missing()
+                            && font_family.is_missing()
+                            && font_size.as_str().is_some()
+                        {
+                            assert_eq!(parse_marks(&encode_marks(&marks).unwrap()).unwrap(), marks);
+                        } else {
+                            assert_eq!(
+                                encode_marks(&marks).unwrap_err().0,
+                                "fixture format cannot losslessly encode TextStyle marks"
+                            );
+                        }
                         assert_eq!(marks, before);
                     }
                 }
@@ -232,5 +263,97 @@ mod text_style_tests {
         for token in ["textStyle", "text_style", "textStyle:red:Serif:12px"] {
             assert_eq!(parse_marks(token), Err(format!("unknown mark: {token}")));
         }
+    }
+}
+
+#[cfg(test)]
+mod font_size_store_tests {
+    use super::*;
+    use crate::store::{FixtureStore, canonical_semantics_equal};
+    use xiaomu_core::document::{
+        InlineContent, NodeAttrs, NodeContent, NodeKind, NodeStoreBuilder, TextRun,
+        TextStyleAttributes, TextStyleMark, XiaomuDocument,
+    };
+    use xiaomu_runtime::persistence::DocumentPersistence;
+
+    fn document(value: &str) -> XiaomuDocument {
+        let mut builder = NodeStoreBuilder::new();
+        let marks = MarkSet::new([Mark::TextStyle(TextStyleMark::from_attributes(
+            TextStyleAttributes::default().with_font_size(value.into()),
+        ))])
+        .unwrap();
+        let paragraph = builder
+            .insert(
+                NodeKind::Paragraph,
+                NodeAttrs::empty(),
+                NodeContent::Inline(
+                    InlineContent::new([TextRun::new("before after", marks).unwrap()]).unwrap(),
+                ),
+            )
+            .unwrap();
+        let root = builder
+            .insert(
+                NodeKind::Document,
+                NodeAttrs::empty(),
+                NodeContent::children([paragraph]),
+            )
+            .unwrap();
+        XiaomuDocument::new(root, builder.finish()).unwrap()
+    }
+
+    #[test]
+    fn whole_store_rejects_control_sizes_without_replacing_saved_bytes() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "xiaomu-size-store-{}-{nonce}.txt",
+            std::process::id()
+        ));
+        let mut store = FixtureStore::new(path.clone());
+        let accepted = document("30px");
+        store.save(&accepted).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        for control in [
+            '\t', '\n', '\r', '\0', '\u{000b}', '\u{001b}', '\u{007f}', '\u{0085}',
+        ] {
+            let value = format!("30{control}px");
+            let rejected = document(&value);
+            let snapshot = rejected.clone();
+            let error = store.save(&rejected).unwrap_err();
+            assert!(error.0.contains("control characters"));
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert_eq!(rejected.store(), snapshot.store());
+            assert_eq!(rejected.revision(), snapshot.revision());
+            assert!(canonical_semantics_equal(
+                &accepted,
+                &store.load().unwrap().unwrap()
+            ));
+            assert!(parse_marks(&format!("size:{value}")).is_err());
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn whole_store_round_trips_font_sizes_with_mark_delimiters() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "xiaomu-size-roundtrip-{}-{nonce}.txt",
+            std::process::id()
+        ));
+        let mut store = FixtureStore::new(path.clone());
+        for value in ["30px", "", "树 🌲 e\u{301}:,\\"] {
+            let original = document(value);
+            store.save(&original).unwrap();
+            assert!(canonical_semantics_equal(
+                &original,
+                &store.load().unwrap().unwrap()
+            ));
+        }
+        std::fs::remove_file(path).unwrap();
     }
 }

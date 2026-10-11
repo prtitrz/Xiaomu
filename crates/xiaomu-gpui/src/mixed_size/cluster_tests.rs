@@ -116,6 +116,7 @@ fn layout_for_line(line: ShapedLine) -> MixedLayout {
     }];
     let carets = rows::caret_positions(&fragments, 0);
     MixedLayout {
+        first_line_inset: px(0.0),
         rows: vec![Row {
             range: 0..len,
             y: px(0.0),

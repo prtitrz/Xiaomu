@@ -14,6 +14,9 @@
 //! bar with muted text, list items indent per nesting depth and show a projected bullet or ordinal marker.
 
 pub(crate) mod actions;
+#[cfg(test)]
+mod first_line_inset_tests;
+
 mod block_tree;
 mod child_sync;
 pub(crate) mod reading;

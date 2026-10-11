@@ -45,6 +45,8 @@ pub(crate) struct BlockTextLayout {
     alignment: BlockAlignment,
     alignment_enabled: bool,
     alignment_width: Pixels,
+    first_line_inset: Pixels,
+    shaping_width: Option<Pixels>,
     paint_lines: Option<Vec<WrappedLine>>,
     decoration_runs: Vec<gpui::TextRun>,
     decorations: Vec<aligned_decorations::Stroke>,
@@ -71,6 +73,8 @@ impl BlockTextLayout {
             alignment: BlockAlignment::Left,
             alignment_enabled: false,
             alignment_width: measured.width,
+            first_line_inset: Pixels::ZERO,
+            shaping_width: None,
             paint_lines: None,
             decoration_runs: Vec::new(),
             decorations: Vec::new(),
@@ -84,8 +88,13 @@ impl BlockTextLayout {
         self.alignment = alignment;
         self.alignment_enabled = true;
         self.alignment_width = width;
-        for row in &mut self.rows {
-            row.x = alignment.offset(width, row.width);
+        for (index, row) in self.rows.iter_mut().enumerate() {
+            let inset = if index == 0 {
+                self.first_line_inset
+            } else {
+                Pixels::ZERO
+            };
+            row.x = inset + alignment.offset(width - inset, row.width);
         }
         self
     }
@@ -95,6 +104,21 @@ impl BlockTextLayout {
             Some(alignment) => self.aligned(alignment, width),
             None => self,
         }
+    }
+
+    /// Retain the exact input used to partition rows. Prepaint can align these
+    /// rows but cannot relabel them as shaped at a different available width.
+    pub(super) fn with_shaping_width(mut self, width: Option<Pixels>) -> Self {
+        self.shaping_width = width;
+        self
+    }
+
+    pub(super) fn uses_first_line_inset(&self) -> bool {
+        self.first_line_inset > Pixels::ZERO
+    }
+
+    pub(crate) fn shaping_width(&self) -> Option<Pixels> {
+        self.shaping_width
     }
 
     pub(super) fn has_alignment(&self) -> bool {

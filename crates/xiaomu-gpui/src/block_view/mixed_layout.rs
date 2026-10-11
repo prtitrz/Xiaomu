@@ -21,6 +21,7 @@ impl BlockTextLayout {
     fn from_mixed(mixed: MixedLayout) -> Self {
         let mut layout = Self::new(Vec::new(), mixed.rows[0].height);
         layout.size = mixed.size;
+        layout.first_line_inset = mixed.first_line_inset;
         layout.rows = mixed
             .rows
             .iter()

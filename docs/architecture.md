@@ -551,7 +551,7 @@ TextStyle family/marks 与 atom display projection 共用既有解析器。可�
 必须精确覆盖 inline nodes，policy 与 DocumentView 各准备一次并复用规范化样式，
 避免反复祖先扫描；capability 本身不安装 policy。
 
-uniform 仍走 stock GPUI paragraph shaping；mixed 使用真实尺寸片段与同一逐行几何
+zero-inset uniform 仍走 stock GPUI paragraph shaping；mixed 或 positive first-line inset 使用真实尺寸片段与同一逐行几何
 驱动 paint、caret、selection、hit、vertical navigation 和 native range bounds。
 width-independent admission 保守拒绝复杂脚本、grapheme/cluster 内字号边界、跨界
 上下文和 1MiB/4096-call 每块工作预算超限；失败不以默认字号替换 canonical 请求。
@@ -923,3 +923,19 @@ hit geometry, and `focus_selection_without_scroll` restores existing selection
 focus. Hosts retain pane/query lifetime and product semantics. See the
 [passive reading contract](passive-reading.md); native GUI/IME acceptance remains
 separate from mounted deterministic tests.
+
+## Optional first-line inset geometry
+
+`TextSizeCapability::with_first_line_inset_provider` installs a pure document/node/
+base-font projection shared by final-candidate validation and rendering. Uniform
+text needs no size marks, but a positive inset uses the conservative real-row
+renderer and its script/cluster/work-budget gates. Zero/absent preserves the old
+path. Only the first visual row consumes the inset, including a leading empty
+logical line; narrow boxes overflow one indivisible cluster without inventing a
+blank row. Inset plus per-row available-box alignment is shared by paint and all
+interaction geometry. Exact inset participates in cache identity. Positive-inset
+row partitions retain the exact logical request width/key; final Taffy-rounded
+bounds drive idempotent per-row alignment, as stock GPUI does. Prepaint never
+relabels a shape with a different width or reflows after height allocation. Configuration
+replacement/removal requires rebuilt/revalidated policy and view. See the
+[API, resource limit and evidence boundaries](first-line-inset.md).

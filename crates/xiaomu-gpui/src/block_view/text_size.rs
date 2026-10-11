@@ -37,6 +37,9 @@ impl SizedContent {
         use std::hash::{Hash, Hasher};
         let mut state = std::collections::hash_map::DefaultHasher::new();
         previous.hash(&mut state);
+        f32::from(self.style.first_line_inset)
+            .to_bits()
+            .hash(&mut state);
         self.empty_size
             .map(|size| f32::from(size).to_bits())
             .hash(&mut state);
