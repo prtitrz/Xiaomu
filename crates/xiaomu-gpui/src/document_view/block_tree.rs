@@ -1,7 +1,7 @@
 //! Recursive block presentation, including complete root-range highlighting.
 
 use super::{DocumentView, markers};
-use crate::image_block::{ImageBlockPresentation, render_image_block};
+use crate::image_block::{ImageBlockLayout, ImageBlockPresentation, render_image_block};
 use gpui::{Context, MouseButton, MouseDownEvent, div, prelude::*, px};
 use xiaomu_core::document::{NodeContent, NodeId, NodeKind};
 
@@ -28,7 +28,14 @@ impl DocumentView {
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let width = width.map(|width| {
-            if self.session.borrow().selection().as_node_selection() == Some(id) {
+            let session = self.session.borrow();
+            let responsive_image = self.image_sizing
+                == crate::image_block::ImageSizingPolicy::ResponsiveIntrinsic
+                && session
+                    .document()
+                    .node(id)
+                    .is_some_and(|node| matches!(node.kind(), NodeKind::Image));
+            if session.selection().as_node_selection() == Some(id) && !responsive_image {
                 width.inset(px(2.0))
             } else {
                 width
@@ -145,17 +152,60 @@ impl DocumentView {
                 let selected = {
                     let session = self.session.borrow();
                     session.selection().as_atomic_node() == Some(id)
+                        || (self.image_sizing
+                            == crate::image_block::ImageSizingPolicy::ResponsiveIntrinsic
+                            && session.selection().as_node_selection() == Some(id))
                         || session.selection().is_all(session.document())
                 };
                 let (label, state_color) = self.image_placeholder_presentation(id);
                 let source = self.image_render_source(id);
+                let (width, height) = {
+                    let session = self.session.borrow();
+                    session
+                        .document()
+                        .node(id)
+                        .and_then(|node| {
+                            xiaomu_core::document::ImagePresentationAttrs::read(node.attrs())
+                                .ok()
+                                .map(|attrs| (attrs.width(), attrs.height()))
+                        })
+                        .unwrap_or_default()
+                };
+                let layout = ImageBlockLayout {
+                    sizing: self.image_sizing,
+                    cache: self.image_loads.clone(),
+                    source_key: {
+                        let session = self.session.borrow();
+                        session.document().node(id).and_then(|node| {
+                            xiaomu_core::document::ImagePresentationAttrs::read(node.attrs())
+                                .ok()
+                                .map(|attrs| attrs.source().value().to_owned())
+                        })
+                    },
+                    width,
+                    _height: height,
+                };
                 let presentation = ImageBlockPresentation {
                     selected,
                     label,
                     state_color,
                     source,
                 };
-                render_image_block(id, index, &presentation, cx)
+                let image = render_image_block(id, index, &presentation, &layout, cx);
+                if self.image_sizing == crate::image_block::ImageSizingPolicy::ResponsiveIntrinsic
+                    && list_depth > 0
+                {
+                    // Ordinary list markers live on inline rows. Images need
+                    // the same local content inset without a synthetic marker.
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .pl(px(markers::MARKER_COLUMN * list_depth as f32))
+                        .child(image)
+                        .into_any_element()
+                } else {
+                    image
+                }
             }
             NodeContent::Atomic => {
                 // Atomic blocks are whole-node selectable: the rule renders

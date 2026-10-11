@@ -1,0 +1,50 @@
+xiaomu-fixture-doc v5
+h1	Responsive images	
+p	Resize the window. Click an image, then edit its AFTER line. Ctrl+Z / Ctrl+Shift+Z; Ctrl+S to save.	
+p	BEFORE Small PNG natural96x64	
+@	alt=s:Small PNG natural96x64	asset=s:image-01.png
+img
+p	AFTER Small PNG natural96x64 editable text	
+p	BEFORE Small JPEG natural80x48	
+@	alt=s:Small JPEG natural80x48	asset=s:image-02.jpg
+img
+p	AFTER Small JPEG natural80x48 editable text	
+p	BEFORE Width48	
+@	alt=s:Width48	asset=s:image-01.png	width=i:48
+img
+p	AFTER Width48 editable text	
+p	BEFORE Height32 automatic	
+@	alt=s:Height32 automatic	asset=s:image-01.png	height=i:32
+img
+p	AFTER Height32 automatic editable text	
+p	BEFORE Mismatched48x200 automatic height	
+@	alt=s:Mismatched48x200 automatic height	asset=s:image-01.png	height=i:200	width=i:48
+img
+p	AFTER Mismatched48x200 automatic height editable text	
+p	BEFORE Explicit upscale192	
+@	alt=s:Explicit upscale192	asset=s:image-01.png	width=i:192
+img
+p	AFTER Explicit upscale192 editable text	
+p	BEFORE Wide1200x240 clamp	
+@	alt=s:Wide1200x240 clamp	asset=s:image-04.png
+img
+p	AFTER Wide1200x240 clamp editable text	
+p	BEFORE Tall120x720 no height cap	
+@	alt=s:Tall120x720 no height cap	asset=s:image-03.png
+img
+p	AFTER Tall120x720 no height cap editable text	
+quote
+p	BEFORE quote local width	
+@	alt=s:Local width	asset=s:image-01.png	width=i:1600
+img
+p	AFTER quote editable text	
+end
+ul
+li
+p	BEFORE ul local width	
+@	alt=s:Local width	asset=s:image-01.png	width=i:1600
+img
+p	AFTER ul editable text	
+end
+end
+p	END: this line must remain reachable by scrolling after the images.	

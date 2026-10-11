@@ -11,7 +11,7 @@
 //!                    DocumentPersistence seam
 //! ```
 //!
-//! Usage: `editor_harness [store-path]` (default `./xiaomu-harness-store.txt`).
+//! Usage: `editor_harness [store-path] [--responsive-images]` (default `./xiaomu-harness-store.txt`).
 //! Delete the file to start from the built-in demo fixture again.
 
 use std::cell::RefCell;
@@ -24,7 +24,8 @@ mod store;
 
 use xiaomu_core::document::{AttrValue, NodeContent, NodeId, XiaomuDocument};
 use xiaomu_gpui::atom_capability::{AtomAction, InlineAtomHostCapability};
-use xiaomu_gpui::editor::{EditorHooks, run_document_editor_with_hooks};
+use xiaomu_gpui::editor::{EditorHooks, EditorInstance, run_editor_instance};
+use xiaomu_gpui::image_block::ImageSizingPolicy;
 use xiaomu_gpui::inline_atom::{InlineAtomRenderer, InlineAtomRendererRegistry, InlineAtomView};
 use xiaomu_runtime::persistence::DocumentPersistence;
 use xiaomu_runtime::session::{DocumentChangeListener, DocumentSelection};
@@ -32,8 +33,11 @@ use xiaomu_runtime::session::{DocumentChangeListener, DocumentSelection};
 use store::{FixtureStore, caret_at_first_block, demo_fixture};
 
 fn main() {
-    let path = std::env::args()
-        .nth(1)
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let responsive = args.iter().any(|arg| arg == "--responsive-images");
+    let path = args
+        .into_iter()
+        .find(|arg| arg != "--responsive-images")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("xiaomu-harness-store.txt"));
     let store = Rc::new(RefCell::new(FixtureStore::new(path.clone())));
@@ -73,7 +77,15 @@ fn main() {
 
     // The counter survives the run because GPUI quits when the window
     // closes; report what the listen leg observed.
-    let result = run_document_editor_with_hooks(document, selection, hooks);
+    let result = EditorInstance::new(document, DocumentSelection::text(selection), hooks).and_then(
+        |instance| {
+            run_editor_instance(instance.with_image_sizing_policy(if responsive {
+                ImageSizingPolicy::ResponsiveIntrinsic
+            } else {
+                ImageSizingPolicy::FitContainer
+            }))
+        },
+    );
     let edits = counter.borrow().document_changes;
     eprintln!("xiaomu: session ended after {edits} committed changes");
     if let Err(error) = result {
@@ -163,6 +175,54 @@ mod tests {
     use super::*;
     use crate::store::{canonical_semantics_equal, escape_text, parse_document, unescape_text};
     use xiaomu_core::document::{NodeContent as TestNodeContent, NodeKind as TestNodeKind};
+
+    #[test]
+    fn responsive_image_fixture_is_bounded_and_round_trips() {
+        let document = parse_document(include_str!("../fixtures/responsive-images.txt")).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "xiaomu-responsive-images-{}.txt",
+            std::process::id()
+        ));
+        let mut store = FixtureStore::new(path.clone());
+        store.save(&document).unwrap();
+        let restored = store.load().unwrap().unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(canonical_semantics_equal(&document, &restored));
+        assert_eq!(
+            document
+                .store()
+                .iter()
+                .filter(|node| matches!(node.kind(), TestNodeKind::Image))
+                .count(),
+            10
+        );
+        for (bytes, width, height) in [
+            (
+                include_bytes!("../fixtures/responsive-images.txt.assets/image-01.png").as_slice(),
+                96,
+                64,
+            ),
+            (
+                include_bytes!("../fixtures/responsive-images.txt.assets/image-02.jpg").as_slice(),
+                80,
+                48,
+            ),
+            (
+                include_bytes!("../fixtures/responsive-images.txt.assets/image-03.png").as_slice(),
+                120,
+                720,
+            ),
+            (
+                include_bytes!("../fixtures/responsive-images.txt.assets/image-04.png").as_slice(),
+                1200,
+                240,
+            ),
+        ] {
+            assert!(bytes.len() < 2048);
+            let decoded = image::load_from_memory(bytes).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), (width, height));
+        }
+    }
 
     #[test]
     fn fixture_round_trips_through_the_adapter() {

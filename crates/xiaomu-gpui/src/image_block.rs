@@ -5,11 +5,16 @@
 //! per-node load state for the placeholder renderer. Entries are keyed by
 //! node identity and validated against the node's current source, so a
 //! resolve that lands after an edit (or a changed source) is discarded as
-//! stale instead of poisoning the view cache. Decoded texture painting
-//! arrives with the follow-up slice; resolved bytes are only metered here.
+//! stale instead of poisoning the view cache. Responsive sizing uses GPUI's
+//! decoded texture and read-only per-view geometry, never document metadata
+//! as a substitute for the actual intrinsic ratio.
+
+mod decode;
+mod sizing;
+pub use sizing::ImageSizingPolicy;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -49,18 +54,25 @@ struct ImageLoadEntry {
     source_key: String,
     /// Unique while any sink from this request is alive; no counter can wrap.
     request: Arc<()>,
+    decode_started: bool,
+    decoded: Option<Result<Arc<gpui::RenderImage>, ()>>,
 }
 
 /// Per-node load states for every image block in one document view.
 #[derive(Default)]
 pub struct ImageLoadCache {
     entries: RefCell<HashMap<NodeId, ImageLoadEntry>>,
-    /// Decoded-ready render sources per node, validated against the source
+    /// Resolved encoded render sources per node, validated against the source
     /// key like the states above.
     render_sources: RefCell<HashMap<NodeId, (String, Arc<GpuiImage>)>>,
 }
 
 impl ImageLoadCache {
+    pub(crate) fn clear(&self) {
+        self.entries.borrow_mut().clear();
+        self.render_sources.borrow_mut().clear();
+    }
+
     /// Returns the fresh state for `node`, or `None` when no request was
     /// made or the state belongs to a different source.
     #[must_use]
@@ -86,6 +98,8 @@ impl ImageLoadCache {
                 state: ImageLoadState::Loading,
                 source_key,
                 request: Arc::clone(&request),
+                decode_started: false,
+                decoded: None,
             },
         );
         request
@@ -115,6 +129,10 @@ impl ImageLoadCache {
     /// Stores the render source for one fresh resolve.
     pub fn store_render_source(&self, node: NodeId, source_key: String, image: Arc<GpuiImage>) {
         if self.fresh_state(node, &source_key).is_some() {
+            if let Some(entry) = self.entries.borrow_mut().get_mut(&node) {
+                entry.decode_started = false;
+                entry.decoded = None;
+            }
             self.render_sources
                 .borrow_mut()
                 .insert(node, (source_key, image));
@@ -215,7 +233,17 @@ pub(crate) fn sync_image_loads(
     cache: &SharedImageLoadCache,
     service: Option<&Rc<dyn AssetService>>,
 ) {
-    for node in image_nodes(document) {
+    let nodes = image_nodes(document);
+    let present: HashSet<_> = nodes.iter().copied().collect();
+    cache
+        .entries
+        .borrow_mut()
+        .retain(|node, _| present.contains(node));
+    cache
+        .render_sources
+        .borrow_mut()
+        .retain(|node, _| present.contains(node));
+    for node in nodes {
         let Some(node_data) = document.node(node) else {
             continue;
         };
@@ -257,7 +285,7 @@ pub(crate) fn sync_image_loads(
     }
 }
 
-/// Everything the image block renderer needs for one paint pass.
+/// State and selection presentation for one image block paint pass.
 pub struct ImageBlockPresentation {
     /// Whether the block carries the active whole-node selection.
     pub selected: bool,
@@ -265,20 +293,60 @@ pub struct ImageBlockPresentation {
     pub label: String,
     /// Placeholder background tint.
     pub state_color: gpui::Rgba,
-    /// The decoded-ready render source, when a fresh resolve landed.
+    /// The encoded render source, when a fresh byte resolve landed.
     pub source: Option<Arc<GpuiImage>>,
+}
+
+pub(crate) struct ImageBlockLayout {
+    /// Per-view layout policy.
+    pub sizing: ImageSizingPolicy,
+    /// Validated canonical width hint; never written back by layout.
+    pub width: Option<u32>,
+    /// Validated canonical height hint, automatic in responsive mode.
+    pub _height: Option<u32>,
+    pub cache: SharedImageLoadCache,
+    pub source_key: Option<String>,
 }
 
 /// Renders one image block: the resolved texture when available, otherwise
 /// the stateful placeholder. The block stays whole-node selectable either
-/// way; intrinsic aspect ratio comes from the decoded source, capped to a
-/// display height.
+/// way. The default policy retains its legacy height cap; the responsive
+/// policy measures both axes from the decoded source and local width.
 pub(crate) fn render_image_block(
     node: NodeId,
     index: usize,
     presentation: &ImageBlockPresentation,
+    layout: &ImageBlockLayout,
     cx: &mut gpui::Context<DocumentView>,
 ) -> gpui::AnyElement {
+    if layout.sizing == ImageSizingPolicy::ResponsiveIntrinsic {
+        return gpui::div()
+            .id(("atomic-block", index))
+            .w_full()
+            .my_3()
+            .flex()
+            .flex_col()
+            .items_start()
+            .min_w_0()
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |this, _: &gpui::MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.select_atomic_block(node, window, cx);
+                }),
+            )
+            .child(sizing::ResponsiveImage {
+                cache: layout.cache.clone(),
+                node,
+                source: layout.source_key.clone(),
+                width: layout.width,
+                selected: presentation.selected,
+                label: presentation.label.clone(),
+                state_color: presentation.state_color,
+                selector: format!("image-content-{node:?}"),
+            })
+            .into_any_element();
+    }
     let border = if presentation.selected {
         gpui::rgba(0x2b6cb8ff)
     } else {

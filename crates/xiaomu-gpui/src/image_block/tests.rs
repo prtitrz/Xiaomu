@@ -81,3 +81,56 @@ fn returning_to_same_source_does_not_revive_an_old_request() {
         })
     );
 }
+
+#[test]
+fn deleted_image_drops_request_and_rejects_late_resolve() {
+    let cache = Rc::new(ImageLoadCache::default());
+    let node = node();
+    cache.begin_load(node, "deleted".into());
+    let pending = sink(&cache, node, "deleted");
+    let mut builder = NodeStoreBuilder::new();
+    let paragraph = builder
+        .insert(
+            NodeKind::Paragraph,
+            NodeAttrs::empty(),
+            NodeContent::empty_inline(),
+        )
+        .unwrap();
+    let root = builder
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([paragraph]),
+        )
+        .unwrap();
+    let document = XiaomuDocument::new(root, builder.finish()).unwrap();
+    sync_image_loads(&document, &cache, None);
+    pending.resolved(payload(
+        "deleted",
+        include_bytes!("fixtures/landscape.png").to_vec(),
+    ));
+    assert!(cache.fresh_state(node, "deleted").is_none());
+    assert!(cache.render_source(node, "deleted").is_none());
+}
+
+#[test]
+fn clearing_for_new_session_invalidates_same_node_and_source_request() {
+    let cache = Rc::new(ImageLoadCache::default());
+    let node = node();
+    cache.begin_load(node, "same".into());
+    let stale = sink(&cache, node, "same");
+    cache.clear();
+    cache.begin_load(node, "same".into());
+    sink(&cache, node, "same").resolved(payload(
+        "same",
+        include_bytes!("fixtures/tall.png").to_vec(),
+    ));
+    stale.resolved(payload(
+        "same",
+        include_bytes!("fixtures/landscape.png").to_vec(),
+    ));
+    assert_eq!(
+        cache.render_source(node, "same").unwrap().bytes,
+        include_bytes!("fixtures/tall.png")
+    );
+}
