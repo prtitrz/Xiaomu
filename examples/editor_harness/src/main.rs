@@ -20,6 +20,7 @@ use std::rc::Rc;
 
 mod assets;
 mod atomic_file;
+mod first_line_inset;
 mod store;
 
 use xiaomu_core::document::{AttrValue, NodeContent, NodeId, XiaomuDocument};
@@ -34,6 +35,10 @@ use store::{FixtureStore, caret_at_first_block, demo_fixture};
 
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--first-line-inset") {
+        first_line_inset::run(&args);
+        return;
+    }
     let responsive = args.iter().any(|arg| arg == "--responsive-images");
     let path = args
         .into_iter()

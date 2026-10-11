@@ -11,6 +11,7 @@ pub(super) struct Prepared<'a> {
     pub(super) base_size: Pixels,
     pub(super) line_height: f32,
     pub(super) wrap_width: Pixels,
+    pub(super) first_line_inset: Pixels,
     pub(super) limits: WorkLimits,
 }
 
@@ -22,6 +23,9 @@ impl<'a> Prepared<'a> {
             .is_some_and(|size| !positive(size) || !positive(size * input.line_height))
             || !positive(input.base_size)
             || !positive(input.wrap_width)
+            || !f32::from(input.first_line_inset).is_finite()
+            || !(0.0..=crate::first_line_inset::MAX_FIRST_LINE_INSET_PX)
+                .contains(&f32::from(input.first_line_inset))
             || !input.line_height.is_finite()
             || input.line_height <= 0.0
             || !positive(input.base_size * input.line_height)
@@ -101,6 +105,11 @@ impl<'a> Prepared<'a> {
             base_size: input.base_size,
             line_height: input.line_height,
             wrap_width: input.wrap_width,
+            first_line_inset: if input.first_line_inset == Pixels::ZERO {
+                Pixels::ZERO
+            } else {
+                input.first_line_inset
+            },
             limits: input.limits,
         })
     }

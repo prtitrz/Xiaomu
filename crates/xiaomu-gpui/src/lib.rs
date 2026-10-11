@@ -29,6 +29,7 @@ pub mod code_presentation;
 pub mod document_view;
 pub mod editor;
 pub mod editor_commands;
+pub mod first_line_inset;
 pub mod font_size;
 pub mod history_clock;
 pub mod image_block;

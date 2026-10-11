@@ -2,14 +2,17 @@
 //!
 //! Keep one capability for the editor's lifetime and give clones to both the
 //! view and the host's final `SessionPolicy::validate_document` implementation.
-//! Canonical strings are never rewritten. Uniform text uses stock GPUI shaping;
-//! mixed-size text has conservative script, cluster/seam and work-budget gates.
+//! Canonical strings are never rewritten. Uniform text with zero first-line
+//! inset uses stock GPUI shaping. Mixed sizes or positive first-line insets
+//! have conservative script, cluster/seam and work-budget gates.
 //! Admission is independent of viewport width and is not browser-layout parity.
 
 #[cfg(test)]
 mod batch_tests;
 mod caret;
 mod error;
+#[cfg(test)]
+mod first_line_inset_policy_tests;
 #[cfg(test)]
 mod policy_tests;
 mod resolve;
@@ -50,6 +53,7 @@ pub struct TextSizeStyle {
     line_height: f32,
     font_family: Option<String>,
     color: Hsla,
+    pub(crate) first_line_inset: Pixels,
 }
 
 impl TextSizeStyle {
@@ -66,6 +70,7 @@ impl TextSizeStyle {
             line_height,
             font_family: None,
             color: black(),
+            first_line_inset: Pixels::ZERO,
         }
     }
 
@@ -160,13 +165,32 @@ pub trait TextSizeStyleProvider {
 pub struct TextSizeCapability {
     system: Arc<WindowTextSystem>,
     provider: Rc<dyn TextSizeStyleProvider>,
+    first_line_inset_provider: Option<Rc<dyn crate::first_line_inset::FirstLineInsetProvider>>,
 }
 
 impl TextSizeCapability {
     /// Captures the exact native text system and geometry provider used by views.
     #[must_use]
     pub fn new(system: Arc<WindowTextSystem>, provider: Rc<dyn TextSizeStyleProvider>) -> Self {
-        Self { system, provider }
+        Self {
+            system,
+            provider,
+            first_line_inset_provider: None,
+        }
+    }
+
+    /// Enables host-resolved first-line geometry with the same native style
+    /// and final-candidate admission used for font sizes. Share this configured
+    /// capability with the session policy and view before admitting a document.
+    /// Positive insets require the conservative LTR/cluster/work-budget gate,
+    /// even for uniform text; absent/zero insets preserve the existing path.
+    #[must_use]
+    pub fn with_first_line_inset_provider(
+        mut self,
+        provider: Rc<dyn crate::first_line_inset::FirstLineInsetProvider>,
+    ) -> Self {
+        self.first_line_inset_provider = Some(provider);
+        self
     }
 
     /// Preflights every inline block, including marked hard breaks and the exact
@@ -175,8 +199,9 @@ impl TextSizeCapability {
     ///
     /// Returns the first unsupported block with its display UTF-8 range. The
     /// width-independent mixed-layout reservation is 1 MiB of repeated shaped
-    /// bytes and 4096 shape calls per block. Uniform text retains the stock
-    /// native Unicode path and is not constrained by those mixed-work limits.
+    /// bytes and 4096 shape calls per block. Uniform text with zero inset retains
+    /// the stock native Unicode path without those row-layout work limits.
+    /// Positive insets apply the same conservative gate even at uniform size.
     /// Unsupported CSS sizes, complex mixed scripts and unsafe seams fail closed.
     pub fn validate_document(
         &self,
@@ -206,7 +231,8 @@ impl TextSizeCapability {
         document: &XiaomuDocument,
         node: &Node,
     ) -> Result<TextSizeStyle, TextSizeError> {
-        self.resolve_style(node.id(), self.provider.style(document, node))
+        let style = self.resolve_style(node.id(), self.provider.style(document, node))?;
+        self.resolve_first_line_inset(document, node, style)
     }
 
     pub(crate) fn prepare_styles(
@@ -247,8 +273,43 @@ impl TextSizeCapability {
         };
         styles
             .into_iter()
-            .map(|(id, style)| self.resolve_style(id, style).map(|style| (id, style)))
+            .map(|(id, style)| {
+                let style = self.resolve_style(id, style)?;
+                let node = document.node(id).expect("validated inline style key");
+                self.resolve_first_line_inset(document, node, style)
+                    .map(|style| (id, style))
+            })
             .collect()
+    }
+
+    fn resolve_first_line_inset(
+        &self,
+        document: &XiaomuDocument,
+        node: &Node,
+        mut style: TextSizeStyle,
+    ) -> Result<TextSizeStyle, TextSizeError> {
+        let inset = self
+            .first_line_inset_provider
+            .as_ref()
+            .map_or(0.0, |provider| {
+                provider.first_line_inset(document, node, style.context().parent_px())
+            });
+        if !inset.is_finite()
+            || !(0.0..=crate::first_line_inset::MAX_FIRST_LINE_INSET_PX).contains(&inset)
+        {
+            return Err(TextSizeError::new(
+                node.id(),
+                0..0,
+                TextSizeErrorKind::InvalidFirstLineInset,
+            ));
+        }
+        // Normalize negative zero to preserve the exact absent-provider key.
+        style.first_line_inset = if inset == 0.0 {
+            Pixels::ZERO
+        } else {
+            px(inset)
+        };
+        Ok(style)
     }
 
     fn resolve_style(

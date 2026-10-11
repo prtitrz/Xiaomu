@@ -34,15 +34,21 @@ pub(super) fn build(
         start = end + 1;
     }
     let mut measured_size = size(px(0.0), px(0.0));
-    for row in &mut rows {
+    for (index, row) in rows.iter_mut().enumerate() {
         row.y = measured_size.height;
-        measured_size.width = measured_size.width.max(row.width);
+        let inset = if index == 0 {
+            input.first_line_inset
+        } else {
+            px(0.0)
+        };
+        measured_size.width = measured_size.width.max(inset + row.width);
         measured_size.height += row.height;
     }
     Ok(MixedLayout {
         rows,
         size: measured_size,
         text_len: input.text.len(),
+        first_line_inset: input.first_line_inset,
     })
 }
 
@@ -82,16 +88,21 @@ fn wrap(
 ) -> Result<(), Unsupported> {
     let mut start = 0;
     while start < clusters.len() {
+        let available = if rows.is_empty() {
+            (input.wrap_width - input.first_line_inset).max(px(0.0))
+        } else {
+            input.wrap_width
+        };
         let mut end = start;
         let mut width = px(0.0);
         while end < clusters.len() {
             let next_width = width + clusters[end].width;
-            if next_width > input.wrap_width && end > start {
+            if next_width > available && end > start {
                 break;
             }
             width = next_width;
             end += 1;
-            if width > input.wrap_width {
+            if width > available {
                 break; // One indivisible oversized cluster is permitted to overflow.
             }
         }
@@ -105,7 +116,7 @@ fn wrap(
             input,
             clusters[start].range.start..clusters[end - 1].range.end,
         )?;
-        if row.width > input.wrap_width && end > start + 1 {
+        if row.width > available && end > start + 1 {
             // Bound reflow independently of width: one candidate and at most
             // one atomic fallback. Do not repeatedly re-shape shorter prefixes.
             // A contextual edge may leave a sparse row, but never a split

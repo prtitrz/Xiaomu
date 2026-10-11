@@ -1,0 +1,37 @@
+xiaomu-fixture-doc v5
+p	01 Baseline / 0px / left	bold
+@	harnessAlign=s:left	harnessInset=i:0
+p	Alpha betamax gamma delta epsilon zeta eta theta iota kappa lambda mu. Alpha beta gamma delta.	
+p	02 Inset / 36px / left	bold
+@	harnessAlign=s:left	harnessInset=i:36
+p	Alpha betamax gamma delta epsilon zeta eta theta iota kappa lambda mu. Alpha beta gamma delta.	
+p	03 Inset / 36px / center	bold
+@	harnessAlign=s:center	harnessInset=i:36
+p	Alpha betamax gamma delta epsilon zeta eta theta iota kappa lambda mu. Alpha beta gamma delta.	
+p	04 Inset / 36px / right	bold
+@	harnessAlign=s:right	harnessInset=i:36
+p	Alpha betamax gamma delta epsilon zeta eta theta iota kappa lambda mu. Alpha beta gamma delta.	
+p	05 Internal and trailing canonical LF	bold
+@	harnessAlign=s:left	harnessInset=i:36
+p	Alpha beta\nDelta epsilon zeta\n	
+p	06 Leading canonical LF	bold
+@	harnessAlign=s:left	harnessInset=i:36
+p	\nAlpha beta gamma	
+p	07 Empty paragraph (click below)	bold
+@	harnessAlign=s:left	harnessInset=i:36
+p		
+p	08 Mixed font size / 30px then 18px	bold
+@	harnessAlign=s:left	harnessInset=i:36
+p	Alpha 	size:30px	beta gamma delta epsilon zeta	
+p	09 Underline and strike	bold
+@	harnessAlign=s:left	harnessInset=i:36
+p	Alpha betamax gamma delta epsilon zeta eta theta iota kappa lambda mu. Alpha beta gamma delta.	underline,strike
+p	10 Narrow ASCII	bold
+@	harnessAlign=s:left	harnessInset=i:36
+p	ABCDEF	
+p	11 Narrow CJK	bold
+@	harnessAlign=s:left	harnessInset=i:36
+p	中文测试中文	
+p	12 Emoji grapheme	bold
+@	harnessAlign=s:left	harnessInset=i:36
+p	👨‍👩‍👧‍👦 AB	

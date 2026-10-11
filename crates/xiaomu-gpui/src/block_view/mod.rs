@@ -15,6 +15,8 @@ mod alignment_input_tests;
 mod display;
 mod element;
 #[cfg(test)]
+mod first_line_inset_input_tests;
+#[cfg(test)]
 mod hard_break_display_tests;
 mod ime;
 #[cfg(test)]

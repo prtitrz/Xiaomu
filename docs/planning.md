@@ -1,5 +1,14 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-11 bounded extension: optional host-resolved first-line inset shares the
+existing fixed-style `TextSizeCapability` and final-candidate policy. Positive
+insets use real first-row reduced-width layout, including uniform paragraphs;
+zero/absent keeps the previous route. Conservative LTR/cluster/work budgets,
+exact cache identity and shared interaction geometry are explicit. Host attr/
+context policy, unrestricted bidi and native platform acceptance remain separate.
+See [the first-line contract](first-line-inset.md).
+
+
 2026-10-08 原生拒绝反馈补齐：普通 ParagraphView typing、显式 UTF-16 replacement
 与 IME commit 的 session 失败发出内容无关的 `NativeInput`；字号 view 保持
 `TextSizeInput`。All/node/cell-range proxy 与普通子 view 同样转发原 revision，

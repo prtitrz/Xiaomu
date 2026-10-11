@@ -5,7 +5,7 @@
 //! byte positions are projected into visual rows for caret, selection and
 //! pointer geometry.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
@@ -34,7 +34,12 @@ pub struct ParagraphElement {
 
 /// Measured block layout shared between GPUI's layout and prepaint phases.
 #[derive(Clone, Default)]
-pub struct RequestLayoutState(Rc<RefCell<Option<BlockTextLayout>>>, u64, Pixels);
+pub struct RequestLayoutState(
+    Rc<RefCell<Option<BlockTextLayout>>>,
+    u64,
+    Pixels,
+    Rc<Cell<Option<LayoutCacheKey>>>,
+);
 
 /// Layout results computed during prepaint and consumed during paint.
 ///
@@ -121,7 +126,12 @@ impl Element for ParagraphElement {
         let mut style = Style::default();
         style.size.width = relative(1.0).into();
 
-        let state = RequestLayoutState(Rc::new(RefCell::new(None)), fingerprint, line_height);
+        let state = RequestLayoutState(
+            Rc::new(RefCell::new(None)),
+            fingerprint,
+            line_height,
+            Rc::new(Cell::new(None)),
+        );
         let measured_state = state.clone();
         let layout_id = window.request_measured_layout(
             style,
@@ -137,6 +147,7 @@ impl Element for ParagraphElement {
                         .with_alignment(alignment, width)
                         .with_text_sizes(sized_enabled, width)
                 });
+                measured_state.3.set(cache_key);
                 // None is not a cache identity: intrinsic width probes have
                 // no key, and a painted preedit deliberately has no key too.
                 // Treating None == None as a hit resurrects cancelled preedit.
@@ -186,7 +197,9 @@ impl Element for ParagraphElement {
                     }
                 };
                 let width = wrap_width.unwrap_or(layout.size().width);
-                let mut layout = layout.with_alignment(alignment, width);
+                let mut layout = layout
+                    .with_alignment(alignment, width)
+                    .with_shaping_width(wrap_width);
                 if aligned_decorations && !layout.paint_lines().is_empty() {
                     let mut plain = runs.clone();
                     for run in &mut plain {
@@ -251,6 +264,16 @@ impl Element for ParagraphElement {
             .clone()
             .unwrap_or_else(|| BlockTextLayout::new(Vec::new(), request_layout.2))
             .with_alignment(view.effective_block_alignment(), bounds.size.width);
+        // Stock GPUI measures at logical width before Taffy rounds the final
+        // allocation. Keep that row-partition identity; alignment above uses
+        // the final allocated box and is recomputed for every prepaint.
+        let cache_key = if layout.uses_first_line_inset() {
+            (!composing && layout.shaping_width().is_some())
+                .then(|| request_layout.3.get())
+                .flatten()
+        } else {
+            cache_key
+        };
 
         let caret = view
             .composing_caret_byte()

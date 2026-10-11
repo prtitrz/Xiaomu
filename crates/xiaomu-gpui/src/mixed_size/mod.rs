@@ -1,11 +1,14 @@
 //! Conservative GPUI-local real-size layout shared by opt-in editor views.
 //!
-//! Uniform input delegates to stock GPUI, including its Unicode/bidi behavior.
-//! Mixed input admits only conservative LTR scripts and observable cluster/seam
+//! Uniform input with zero inset delegates to stock GPUI, including its Unicode/bidi behavior.
+//! Mixed or positively indented input admits only conservative LTR scripts and observable cluster/seam
 //! invariants. GPUI 0.2.2 omits cluster ends, advances and bidi levels, so this is
 //! not a general Unicode shaping engine. Rejection must gate editing, never
 //! silently discard the requested sizes. All offsets below are display UTF-8
 //! bytes; the host continues to own canonical/display/UTF-16 projection.
+
+#[cfg(test)]
+mod first_line_inset_tests;
 
 mod budget;
 #[cfg(test)]
@@ -49,6 +52,8 @@ pub(crate) struct Input<'a> {
     pub(crate) base_color: Hsla,
     pub(crate) line_height: f32,
     pub(crate) wrap_width: Pixels,
+    /// Logical-pixel inset consumed by the first visual row of the entire block.
+    pub(crate) first_line_inset: Pixels,
     pub(crate) limits: WorkLimits,
 }
 
@@ -70,7 +75,7 @@ impl Default for WorkLimits {
     }
 }
 
-/// Uniform text stays on the existing complete-paragraph GPUI path. Hosts must
+/// Uniform text with zero inset stays on the existing complete-paragraph GPUI path. Hosts must
 /// dispatch explicitly; a mixed layout is never repackaged as a `WrappedLine`.
 #[derive(Debug)]
 pub(crate) enum Layout {
@@ -91,6 +96,7 @@ pub(crate) struct MixedLayout {
     pub(crate) rows: Vec<Row>,
     pub(crate) size: Size<Pixels>,
     pub(crate) text_len: usize,
+    pub(crate) first_line_inset: Pixels,
 }
 
 #[derive(Debug)]
@@ -183,7 +189,7 @@ fn admit_prepared(
     system: &WindowTextSystem,
     prepared: &shape::Prepared<'_>,
 ) -> Result<Admission, Unsupported> {
-    if prepared.sizes.len() <= 1 {
+    if prepared.sizes.len() <= 1 && prepared.first_line_inset == Pixels::ZERO {
         return Ok(Admission::Uniform);
     }
     budget::check(prepared)?;
@@ -204,7 +210,7 @@ fn admit_prepared(
     Ok(Admission::MixedLtr)
 }
 
-/// Shape an entire block. Single-size input preserves GPUI's native pathway;
+/// Shape an entire block. Single-size input at zero inset preserves GPUI's native pathway;
 /// mixed input supports LF, UAX14 wrapping, shared baselines and safe clusters.
 pub(crate) fn layout(system: &WindowTextSystem, input: Input<'_>) -> Result<Layout, Unsupported> {
     let prepared = shape::Prepared::new(input)?;

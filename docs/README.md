@@ -31,6 +31,8 @@ CI 与原生交互验收是两类证据，不可互相替代。P4 后补的 Wind
 
 可选宿主字号能力：[固定样式、同源 admission 与受限原生混排](mixed-font-size.md)。
 
+可选宿主首行展示能力：[同源 admission 与真实首行 reflow](first-line-inset.md)。
+
 ## 维护规则
 
 已结束的审计移入 [历史归档](archive/README.md)，不与当前路线并列。阶段契约、验收记录和 ADR 保留；只有追溯旧问题时才需要读归档。

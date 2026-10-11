@@ -16,6 +16,8 @@ pub enum TextSizeErrorKind {
     FontSize(FontSizeError),
     /// The host supplied invalid line-height or non-finite geometry.
     InvalidStyle,
+    /// The host returned a negative, non-finite, or over-budget first-line inset.
+    InvalidFirstLineInset,
     /// A batch provider omitted an inline node or supplied an extra node key.
     InvalidStyleMap,
     /// A canonical block or referenced atom could not be projected.

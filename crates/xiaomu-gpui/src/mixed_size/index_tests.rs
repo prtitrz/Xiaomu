@@ -10,6 +10,7 @@ fn input<'a>(text: &'a str, runs: &'a [TextRun]) -> Input<'a> {
         runs,
         base_font: font(".SystemUIFont"),
         empty_size: None,
+        first_line_inset: px(0.0),
         base_size: px(12.0),
         base_color: gpui::black(),
         line_height: 1.5,

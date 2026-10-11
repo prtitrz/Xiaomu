@@ -27,6 +27,7 @@ impl ResolvedText {
             runs: &self.runs,
             base_font: style.base_font().clone(),
             empty_size: None,
+            first_line_inset: style.first_line_inset,
             base_size: px(style.context().parent_px()),
             base_color: style.color(),
             line_height: style.line_height(),
