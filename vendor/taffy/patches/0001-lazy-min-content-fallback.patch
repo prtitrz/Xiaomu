@@ -1,0 +1,7 @@
+diff --git a/src/compute/flexbox.rs b/src/compute/flexbox.rs
+--- a/src/compute/flexbox.rs
++++ b/src/compute/flexbox.rs
+@@ -794,2 +794,2 @@
+-        child.resolved_minimum_main_size = style_min_main_size.unwrap_or({
++        child.resolved_minimum_main_size = style_min_main_size.unwrap_or_else(|| {
+             let min_content_main_size = {

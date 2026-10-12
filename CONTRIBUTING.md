@@ -20,14 +20,25 @@ Before opening a pull request, run:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
+cargo test --locked -p xiaomu-gpui --test taffy_min_content
 cargo test --locked --manifest-path vendor/xim-ctext/Cargo.toml
+cargo test --locked --manifest-path vendor/taffy/Cargo.toml --target-dir target
 python tools/check_source_size.py
 python tools/check_dependency_boundaries.py
 python tools/check_xim_decoder_source.py
+python tools/check_taffy_source.py
 cargo deny check bans licenses sources
 ```
 
 Dependency policy is checked in CI with `cargo-deny`.
+
+The Taffy standalone command runs only the inline tests and doctests included in
+the published 0.9.0 crate, which omits the full upstream conformance suite. Its
+original manifests and lockfile remain unchanged. Keep its build output outside
+`vendor/taffy`; the source guard rejects unexpected vendored files. See
+[`vendor/taffy/LOCAL_PATCHES.md`](vendor/taffy/LOCAL_PATCHES.md) for provenance and
+the minimal upstream backport. Library checks do not establish a host speedup or
+replace native application acceptance.
 
 ## Change scope
 

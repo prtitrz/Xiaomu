@@ -908,7 +908,21 @@ Linux `unmark_text` now preserves a nonempty, non-rejected overlay through the e
 
 ## Stock Linux XIM decoder source
 
-The workspace overrides only `xim-ctext` with an audited local copy of the official Zed Git revision `16f35a2c881b815a2b6cdfd6687988e84f8447d8` (genuine upstream version 0.3.0, not the registry 0.3.0 release). Its small patch preserves literal ASCII and charset-return suffixes and rejects high-bit conversion overflow. The original revision and released 0.4.1 were rejected after reproducible ASCII-prefix regressions. GPUI and `zed-xim` stay stock registry packages; unknown Git sources remain denied, and a provenance/patch-reversal guard verifies the vendor. Downstream hosts must use this audited copy and repeat the root-only Cargo patch; dependency manifests cannot impose it. See [dependency rationale, integration instructions and native limits](linux-xim-decoder.md).
+The workspace overrides `xim-ctext` with an audited local copy of the official Zed Git revision `16f35a2c881b815a2b6cdfd6687988e84f8447d8` (genuine upstream version 0.3.0, not the registry 0.3.0 release). Its small patch preserves literal ASCII and charset-return suffixes and rejects high-bit conversion overflow. The original revision and released 0.4.1 were rejected after reproducible ASCII-prefix regressions. GPUI and `zed-xim` stay stock registry packages; unknown Git sources remain denied, and a provenance/patch-reversal guard verifies the vendor. Downstream hosts must use this audited copy and repeat the root-only Cargo patch; dependency manifests cannot impose it. See [dependency rationale, integration instructions and native limits](linux-xim-decoder.md).
+
+## Taffy lazy min-content backport
+
+The only other workspace override is `taffy` 0.9.0, imported from the complete
+official crate archive with original manifests, features, API and package version.
+One production line makes the flexbox min-content fallback lazy, following
+upstream PR #1119. The fallback body and layout algorithm are otherwise unchanged.
+`tools/check_taffy_source.py` validates every imported file and reconstructs the
+official source by reversing the patch. Permanent 0.9.0 `TaffyTree` regressions
+exercise callback suppression, automatic-min controls, row/column/overflow
+cases, rounded/unrounded geometry and cache invalidation. Hosts must repeat both
+root patches as described in the [embedding instructions](../README.md#embedding-dependency-patches).
+These library properties do not establish host-level performance or native GUI
+acceptance; see [the source and test boundaries](../vendor/taffy/LOCAL_PATCHES.md).
 
 ### Passive reading presentation
 

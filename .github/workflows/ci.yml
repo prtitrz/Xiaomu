@@ -20,6 +20,7 @@ jobs:
       - run: python tools/check_source_size.py
       - run: python tools/check_dependency_boundaries.py
       - run: python tools/check_xim_decoder_source.py
+      - run: python tools/check_taffy_source.py
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check bans licenses sources
@@ -64,9 +65,14 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --all-targets
+      - name: Test lazy min-content regression explicitly
+        run: cargo test --locked -p xiaomu-gpui --test taffy_min_content
       - name: Test original decoder suite
         if: matrix.os == 'ubuntu-latest'
         run: cargo test --locked --manifest-path vendor/xim-ctext/Cargo.toml
+      - name: Test published Taffy inline tests and doctests
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --locked --manifest-path vendor/taffy/Cargo.toml --target-dir target
 
   ci-success:
     name: CI Success

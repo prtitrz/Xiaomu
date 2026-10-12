@@ -19,3 +19,5 @@ unicode-script = "=0.5.8"
 gpui = { workspace = true, features = ["test-support"] }
 # Exercise the pinned transitive XIM decoder with portable synthetic vectors.
 xim-ctext = "=0.3.0"
+# Exercise the exact GPUI layout dependency and its narrow lazy fallback patch.
+taffy = "=0.9.0"
