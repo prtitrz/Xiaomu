@@ -113,10 +113,6 @@ impl BlockTextLayout {
         self
     }
 
-    pub(super) fn uses_first_line_inset(&self) -> bool {
-        self.first_line_inset > Pixels::ZERO
-    }
-
     pub(crate) fn shaping_width(&self) -> Option<Pixels> {
         self.shaping_width
     }

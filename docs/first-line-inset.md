@@ -53,7 +53,7 @@ extent includes the first-row inset.
 There are deliberately two widths, following stock GPUI 0.2.2: Taffy can round
 final allocation after logical-width measurement. Wrapping and its cached row
 partition retain the exact request width; alignment uses the final allocated box.
-Prepaint never relabels a positive-inset shape as measured at a different width,
+Prepaint never relabels a width-sensitive opt-in shape as measured at a different width,
 and never reflows after height has been allocated. It recomputes shared row origins
 idempotently in the allocated box on every frame, including cache hits. Different
 logical widths remain distinct cache identities even when they round to the same

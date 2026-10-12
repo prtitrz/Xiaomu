@@ -16,6 +16,8 @@
 pub(crate) mod actions;
 #[cfg(test)]
 mod first_line_inset_tests;
+#[cfg(test)]
+mod layout_cache_provenance_tests;
 
 mod block_tree;
 mod child_sync;

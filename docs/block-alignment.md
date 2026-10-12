@@ -84,3 +84,13 @@ wrapped wavy/strike colors and baselines, native soft-wrap affinity, preedit
 cancel/commit/undo, reversed selections, nested table scrolling and resize
 preview cancellation. Virtual-font metrics and input callbacks do not establish
 real-font shaping or OS candidate-window placement parity.
+
+## Logical wrapping and allocated alignment widths
+
+Stock GPUI measures text at a logical width before Taffy rounds the final box.
+The editor retains that exact request cache key for alignment/text-size opt-ins,
+including zero-inset blocks. Prepaint recomputes shared row origins against the
+final allocated box but never relabels the cached row partition to that width.
+Distinct logical widths stay distinct even when their rounded bounds coincide.
+This fixes a preexisting cache-input provenance defect; mounted tests compare
+warmed and forced-fresh shapes without asserting an unobserved visible artifact.

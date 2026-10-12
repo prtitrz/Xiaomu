@@ -267,7 +267,7 @@ impl Element for ParagraphElement {
         // Stock GPUI measures at logical width before Taffy rounds the final
         // allocation. Keep that row-partition identity; alignment above uses
         // the final allocated box and is recomputed for every prepaint.
-        let cache_key = if layout.uses_first_line_inset() {
+        let cache_key = if view.effective_block_alignment().is_some() {
             (!composing && layout.shaping_width().is_some())
                 .then(|| request_layout.3.get())
                 .flatten()

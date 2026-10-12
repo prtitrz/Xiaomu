@@ -933,9 +933,20 @@ renderer and its script/cluster/work-budget gates. Zero/absent preserves the old
 path. Only the first visual row consumes the inset, including a leading empty
 logical line; narrow boxes overflow one indivisible cluster without inventing a
 blank row. Inset plus per-row available-box alignment is shared by paint and all
-interaction geometry. Exact inset participates in cache identity. Positive-inset
-row partitions retain the exact logical request width/key; final Taffy-rounded
+interaction geometry. Exact inset participates in cache identity. All width-sensitive opt-in
+row partitions (alignment, text-size and first-line inset) retain the exact logical request width/key; final Taffy-rounded
 bounds drive idempotent per-row alignment, as stock GPUI does. Prepaint never
 relabels a shape with a different width or reflows after height allocation. Configuration
 replacement/removal requires rebuilt/revalidated policy and view. See the
 [API, resource limit and evidence boundaries](first-line-inset.md).
+
+### Width-sensitive cache provenance correction
+
+The original alignment/text-size prepaint path could replace an exact logical
+shape key with rounded allocated width. For example, a layout shaped at228.25px
+could be labeled228.5px and later reused for an actual228.5px request. Mounted
+regressions demonstrate the wrong input provenance against a forced fresh shape;
+they do not claim a reproduced visible line-partition defect. The request key is
+now retained for alignment/text-size/inset opt-ins; prepaint still recomputes
+alignment against final allocated bounds. Intrinsic probes and composition remain
+uncacheable; the legacy neither-capability-nor-alignment path is unchanged.
