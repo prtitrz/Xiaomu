@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-exclude = ["vendor/xim-ctext"]
+exclude = ["vendor/xim-ctext", "vendor/taffy"]
 members = [
   "crates/xiaomu-core",
   "crates/xiaomu-runtime",
@@ -28,8 +28,9 @@ xiaomu-core = { version = "0.1.0", path = "crates/xiaomu-core" }
 xiaomu-runtime = { version = "0.1.0", path = "crates/xiaomu-runtime" }
 xiaomu-gpui = { version = "0.1.0", path = "crates/xiaomu-gpui" }
 
-# Narrow decoder repair based on official Git 16f35a2's genuine version 0.3.0.
-# See vendor/xim-ctext/PROVENANCE.json and its auditable local patch.
+# Narrow decoder repair and Taffy 0.9.0 lazy min-content backport.
+# See each vendor's PROVENANCE.json and auditable local patch.
 # GPUI and zed-xim remain stock registry packages. Hosts must repeat this root patch.
 [patch.crates-io]
 xim-ctext = { path = "vendor/xim-ctext" }
+taffy = { path = "vendor/taffy" }

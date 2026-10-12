@@ -86,6 +86,24 @@ The [top-level plan](docs/planning.md) is the single execution roadmap. Historic
 
 Stock Linux input uses a narrowly patched, explicitly vendored `xim-ctext` decoder based on an identified official Git revision. Embedding applications must use that audited copy and repeat the root Cargo override; it is not inherited from Xiaomu as a dependency. See [the decoder and native-test boundaries](docs/linux-xim-decoder.md). This does not replace GPUI or add a custom input-owner/wait protocol.
 
+## Embedding dependency patches
+
+The workspace also carries a one-line lazy min-content backport in Taffy 0.9.0,
+the exact version required by stock GPUI 0.2.2. The official crate manifests,
+features and API are unchanged; [provenance and verification](vendor/taffy/LOCAL_PATCHES.md)
+describe the source import and regression. A host must repeat both overrides in
+its own workspace-root manifest because Cargo does not inherit dependency patches:
+
+```toml
+[patch.crates-io]
+xim-ctext = { path = "path/to/Xiaomu/vendor/xim-ctext" }
+taffy = { path = "path/to/Xiaomu/vendor/taffy" }
+```
+
+Point these paths at the reviewed Xiaomu revision and verify the host's resolved
+dependency graph and lockfile. This avoids redundant intrinsic measurements in
+the tested library cases; a native host speedup requires separate measurement.
+
 ## Development
 
 Structured clipboard compatibility: valid v4/v5/v6 payloads remain supported; explicit null node attributes use conditional v7. Exact five-field link attributes use conditional v8 when the classic href/title form is insufficient; ordinary links keep older versions. TextStyle marks preserve color/fontFamily/fontSize missing/null/string states and use conditional v9; documents without TextStyle keep the v4–v8 feature choice. Data preservation does not imply renderer support for every CSS string. Decoding rejects unknown structural wire fields, wrong types and duplicate JSON keys rather than silently dropping data. Canonical attribute/object map keys remain extensible and preserved. See [null attributes](docs/adr/0006-nullable-node-attrs.md), [exact link attributes](docs/adr/0007-exact-link-attributes.md) and [text-style values](docs/adr/0008-exact-text-style.md).
@@ -102,6 +120,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 python tools/check_source_size.py
 python tools/check_dependency_boundaries.py
+python tools/check_xim_decoder_source.py
+python tools/check_taffy_source.py
 ```
 
 ## License

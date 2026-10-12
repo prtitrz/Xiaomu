@@ -26,8 +26,11 @@ def main():
     provenance = json.loads((VENDOR / "PROVENANCE.json").read_text())
     vendor_manifest = tomllib.loads((VENDOR / "Cargo.toml").read_text())
     errors = []
-    if manifest.get("patch", {}).get("crates-io", {}) != {"xim-ctext": {"path": "vendor/xim-ctext"}}:
-        errors.append("root patch must override only the reviewed local decoder")
+    if manifest.get("patch", {}).get("crates-io", {}) != {
+        "xim-ctext": {"path": "vendor/xim-ctext"},
+        "taffy": {"path": "vendor/taffy"},
+    }:
+        errors.append("root patch must override exactly the reviewed decoder and Taffy copies")
     for name, version, source in [
         ("gpui", "0.2.2", REGISTRY),
         ("zed-xim", "0.4.0-zed", REGISTRY),
