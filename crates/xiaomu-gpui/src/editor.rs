@@ -69,6 +69,7 @@ pub struct EditorHooks {
 /// the embedding seam used by the P3.6 multi-editor integration fixture.
 pub struct EditorInstance {
     session: SharedSession,
+    read_only_input: bool,
     history_clock: SharedHistoryClock,
     persistence: Option<Rc<RefCell<dyn DocumentPersistence>>>,
     atom_renderers: Option<Rc<InlineAtomRendererRegistry>>,
@@ -148,6 +149,7 @@ impl EditorInstance {
         }
         Self {
             session: Rc::new(RefCell::new(session)),
+            read_only_input: false,
             history_clock,
             persistence: hooks.persistence,
             atom_renderers: hooks.atom_renderers,
@@ -160,6 +162,24 @@ impl EditorInstance {
             block_alignment_provider: None,
             text_size_capability: None,
         }
+    }
+
+    /// Disables user editing in every subsequently built view of this instance.
+    ///
+    /// The mode is fixed for each view and all its future native input children.
+    /// Selection, Copy, scrolling and reading highlights/reveal remain available.
+    /// Native input (including IME preedit), editing commands, Cut/Paste, history
+    /// traversal, Save and mutation controls are ignored before side effects.
+    /// Existing constructors and views remain editable by default.
+    ///
+    /// This is an input boundary, not a frozen session or authorization policy.
+    /// Controlled host transactions/plans and direct session access remain
+    /// available. Bind an independent [`SessionPolicy`] when those paths must
+    /// also be restricted; host-owned controls must respect the same boundary.
+    #[must_use]
+    pub fn with_read_only_input(mut self) -> Self {
+        self.read_only_input = true;
+        self
     }
 
     /// Chooses visual image sizing for views created by this instance.
@@ -240,7 +260,8 @@ impl EditorInstance {
     #[must_use]
     pub fn build_view(&self) -> DocumentView {
         let mut view =
-            DocumentView::new_with_history_clock(self.session.clone(), self.history_clock.clone());
+            DocumentView::new_with_history_clock(self.session.clone(), self.history_clock.clone())
+                .with_read_only_input(self.read_only_input);
         if let Some(persistence) = &self.persistence {
             view.set_persistence(persistence.clone());
         }

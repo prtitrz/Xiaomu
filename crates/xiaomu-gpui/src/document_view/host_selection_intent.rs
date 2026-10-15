@@ -17,7 +17,7 @@ impl DocumentView {
     ///
     /// Uses the same composition/presentation guards, history clock, rejection
     /// events and view updates as [`Self::apply_edit_intent`]. Active native
-    /// composition or hidden table endpoints (current or target) silently ignore
+    /// composition, read-only input mode or hidden table endpoints silently ignore
     /// the command. Accepted selection-only changes also restore native focus.
     /// Hosts must derive the target from the current snapshot without yielding
     /// before this call; product-specific target and editing rules remain in

@@ -621,6 +621,15 @@ stock X11/Wayland 在 composing 时跳过显式 position update，而同步 pree
 
 `DocumentView` 持有共享 session，并按文档序为 inline-bearing block 挂载 `ParagraphView`。焦点跟随 `DocumentSelection` focus node 路由。
 
+`EditorInstance::with_read_only_input()` 在后续构造的 view 上固定用户输入只读模式，
+默认仍可编辑；普通、嵌套表格与 All/node/cell-range 输入代理（包括宿主更新后新建的
+children）在构造时继承。原生 typing/replacement/preedit/unmark、编辑 intent、
+Cut/Paste、Undo/Redo、Save、checkbox 与列宽拖动在副作用前静默返回；选择、Copy、
+滚动、reading highlights/reveal 与 atom activation 保留。该模式不冻结 session，
+host transaction/passive plan 继续由独立 `SessionPolicy` 准入。当前仅有 clipboard
+image import，没有原生 file/image-drop importer；宿主 drop 必须在自行 import 前检查。
+详见 [只读输入边界](read-only-input.md)。
+
 `DocumentView` 实现可选的 `EventEmitter<EditorRejection>`。事件只携带固定的
 `EditorRejectionStage` / `EditorRejectionReason`，不携带正文、剪贴板、attrs 或
 policy 任意字符串；失败 session 借用释放、回滚完成后才发出。宿主对具体 Entity

@@ -73,6 +73,7 @@ impl DocumentView {
                     self.history_clock.clone(),
                     cx,
                 )
+                .with_read_only_input(self.read_only_input)
             });
             let feedback = cx.subscribe(&view, |this, input, event: &EditorRejection, cx| {
                 this.forward_input_rejection(&input, event, cx);

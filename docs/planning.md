@@ -1,5 +1,13 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-15 bounded extension: `EditorInstance::with_read_only_input()` fixes a
+per-view input guard inherited by every future paragraph/range child. It blocks
+native preedit, mutation commands, clipboard/import side effects and mutation
+controls while keeping selection/Copy/reading. Controlled host updates remain
+under the independent SessionPolicy. Default editable behavior and Core/Runtime
+are unchanged; native OS and consumer acceptance remain separate. See the
+[read-only input contract](read-only-input.md).
+
 2026-10-11 bounded extension: optional host-resolved first-line inset shares the
 existing fixed-style `TextSizeCapability` and final-candidate policy. Positive
 insets use real first-row reduced-width layout, including uniform paragraphs;

@@ -112,6 +112,11 @@ Engineering rules live in [docs/engineering-rules.md](docs/engineering-rules.md)
 
 GPUI hosts can opt into [native mixed font sizes](docs/mixed-font-size.md) with a fixed style provider and the same final-candidate admission policy. Uniform text with zero inset retains stock shaping; mixed text has explicit script, cluster and work-budget limits. The optional [first-line inset provider](docs/first-line-inset.md) shares this admission contract for genuine first-row reflow, including uniform paragraphs. Native font and IME acceptance remains separate from virtual tests.
 
+Embedded readers can opt into [read-only user input](docs/read-only-input.md)
+without changing default editable behavior. Native preedit and clipboard/import
+side effects are guarded before they begin; host updates still require their
+independent session policy.
+
 The main local gates are:
 
 ```bash

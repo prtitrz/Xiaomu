@@ -14,6 +14,9 @@ impl DocumentView {
         position: Point<Pixels>,
         cx: &App,
     ) -> Option<(usize, TableColumnResizeIntent)> {
+        if self.read_only_input {
+            return None;
+        }
         let capability = self.column_resize.capability.as_ref()?;
         if !self.table_capability.borrow().enabled() || self.has_active_composition(cx) {
             return None;
