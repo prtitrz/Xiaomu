@@ -40,3 +40,5 @@ CI 与原生交互验收是两类证据，不可互相替代。P4 后补的 Wind
 后续发现缺口时，先核实现有代码和验收证据，再把接受的工作及优先级写入 planning / phase contract。已完成、延期、待决策要明确区分，不能只在审计结尾留下一条无人跟进的建议。
 
 独立编辑器的普通历史快照同步：[committed snapshot import](snapshot-import.md)。
+
+固定的只读用户输入模式：[输入/剪贴板边界与独立宿主 policy](read-only-input.md)。

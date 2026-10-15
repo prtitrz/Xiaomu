@@ -21,6 +21,7 @@ mod layout_cache_provenance_tests;
 
 mod block_tree;
 mod child_sync;
+mod read_only_input;
 pub(crate) mod reading;
 mod reading_geometry;
 mod reading_scroll;
@@ -104,6 +105,7 @@ use visual_navigation::NavStep;
 /// A multi-block editor view over one shared session.
 pub struct DocumentView {
     session: SharedSession,
+    read_only_input: bool,
     reading: reading::SharedReadingState,
     history_clock: Option<crate::history_clock::SharedHistoryClock>,
     /// Render generation: bumped on every edit so block layout caches
@@ -159,6 +161,7 @@ impl DocumentView {
     pub fn new(session: SharedSession) -> Self {
         Self {
             session,
+            read_only_input: false,
             reading: Default::default(),
             history_clock: None,
             epoch: Rc::new(Cell::new(0)),
@@ -344,7 +347,8 @@ impl DocumentView {
     ///
     /// Toolbars and host controls should use this instead of editing the
     /// shared session directly. An active native composition ignores the
-    /// command. Otherwise the session's policy runs normally; accepted edits
+    /// command, as does read-only input mode. Otherwise the session's policy
+    /// runs normally; accepted edits
     /// invalidate layout, sync child views, restore focus and request caret
     /// scrolling using the built-in action behavior. Rejections are logged,
     /// emit [`EditorRejection`], and leave canonical session state unchanged.
@@ -364,6 +368,9 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.read_only_input {
+            return;
+        }
         if self.selection_has_hidden_table_endpoint()
             || target.is_some_and(|selection| {
                 let session = self.session.borrow();

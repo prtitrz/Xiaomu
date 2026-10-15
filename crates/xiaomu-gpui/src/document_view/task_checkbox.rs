@@ -59,7 +59,9 @@ impl DocumentView {
             .flex_shrink_0()
             .flex()
             .items_center()
-            .cursor(gpui::CursorStyle::PointingHand)
+            .when(!self.read_only_input, |checkbox| {
+                checkbox.cursor(gpui::CursorStyle::PointingHand)
+            })
             .on_mouse_down(MouseButton::Left, |_, window, cx| {
                 // The stock platform has already unmarked the previous input
                 // handler before pointer dispatch. Do not initiate an unmark,
@@ -130,7 +132,7 @@ impl DocumentView {
     fn toggle_task_checked(&mut self, item: NodeId, window: &mut Window, cx: &mut Context<Self>) {
         // Programmatic commands retain the ordinary composition safeguard;
         // real platform pointer delivery unmarks before reaching this path.
-        if self.focused_child_composing(window, cx) {
+        if self.read_only_input || self.focused_child_composing(window, cx) {
             return;
         }
         let outcome = {

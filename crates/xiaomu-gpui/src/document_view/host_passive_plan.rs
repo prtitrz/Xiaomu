@@ -27,6 +27,8 @@ impl DocumentView {
     /// this view already owned it, including child, range and root surfaces.
     /// Fresh input surfaces do not request caret scrolling. Viewport offsets
     /// remain subject to the normal layout clamp when content becomes smaller.
+    /// Read-only input mode does not block this controlled host-update API;
+    /// the bound session policy remains responsible for admission.
     pub fn apply_passive_edit_plan(
         &mut self,
         plan: &EditPlan,

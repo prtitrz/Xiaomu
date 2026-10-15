@@ -32,6 +32,9 @@ impl ParagraphView {
     /// Commits `text` over the composition's canonical base range as exactly
     /// one Runtime intent and one undo unit.
     pub(crate) fn commit_composition(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.read_only_input {
+            return;
+        }
         let Some(state) = self.composition.take() else {
             return;
         };
@@ -72,6 +75,9 @@ impl ParagraphView {
         new_selected_range: Option<std::ops::Range<usize>>,
         cx: &mut Context<Self>,
     ) {
+        if self.read_only_input {
+            return;
+        }
         if self.input_is_hidden_by_table() {
             self.cancel_if_composing(cx);
             return;

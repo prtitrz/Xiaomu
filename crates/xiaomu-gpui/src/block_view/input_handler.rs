@@ -36,11 +36,11 @@ impl EntityInputHandler for ParagraphView {
 
     fn selected_text_range(
         &mut self,
-        _ignore_disabled_input: bool,
+        ignore_disabled_input: bool,
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
-        if self.input_is_hidden_by_table() {
+        if (self.read_only_input && !ignore_disabled_input) || self.input_is_hidden_by_table() {
             return None;
         }
         let text = self.display_content().0;
@@ -82,6 +82,9 @@ impl EntityInputHandler for ParagraphView {
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only_input {
+            return;
+        }
         if self.input_is_hidden_by_table() {
             self.cancel_if_composing(cx);
             return;
@@ -116,6 +119,9 @@ impl EntityInputHandler for ParagraphView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.read_only_input {
+            return;
+        }
         if self.input_is_hidden_by_table() {
             self.cancel_if_composing(cx);
             return;

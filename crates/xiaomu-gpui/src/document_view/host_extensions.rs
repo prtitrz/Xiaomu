@@ -217,7 +217,7 @@ impl DocumentView {
             EditorCommandContext<'_>,
         ) -> Result<CommandRoute, xiaomu_runtime::session::PolicyError>,
     ) -> bool {
-        if self.focused_child_composing(window, cx) {
+        if self.read_only_input || self.focused_child_composing(window, cx) {
             return true;
         }
         let Some(router) = &self.command_router else {

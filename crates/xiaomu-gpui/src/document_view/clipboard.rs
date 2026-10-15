@@ -45,7 +45,10 @@ impl DocumentView {
     pub(crate) fn cut(&mut self, _: &ClipboardCut, window: &mut Window, cx: &mut Context<Self>) {
         // Admission precedes every clipboard write, including the legacy path.
         // These presentation/composition guards are deliberately silent.
-        if self.selection_has_hidden_table_endpoint() || self.focused_child_composing(window, cx) {
+        if self.read_only_input
+            || self.selection_has_hidden_table_endpoint()
+            || self.focused_child_composing(window, cx)
+        {
             return;
         }
         let prepared_outcome = {
@@ -137,7 +140,7 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.focused_child_composing(window, cx) {
+        if self.read_only_input || self.focused_child_composing(window, cx) {
             return;
         }
         let content = match PlatformClipboard::new(&*cx).read_content_checked() {

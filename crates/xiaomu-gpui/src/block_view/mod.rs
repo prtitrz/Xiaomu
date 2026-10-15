@@ -156,6 +156,7 @@ pub(crate) enum SelectionProjection {
 /// A block editor view rendering one inline node of the shared session.
 pub struct ParagraphView {
     pub(super) session: SharedSession,
+    read_only_input: bool,
     history_clock: Option<SharedHistoryClock>,
     node: NodeId,
     reading: Option<crate::document_view::reading::SharedReadingState>,
@@ -248,6 +249,7 @@ impl ParagraphView {
         let focus_handle = cx.focus_handle();
         Self {
             session,
+            read_only_input: false,
             history_clock,
             node,
             reading: None,
@@ -275,6 +277,12 @@ impl ParagraphView {
             focus_out_subscription: None,
             rejection_feedback: None,
         }
+    }
+
+    /// Sets the owning view's fixed mode before this child is mounted.
+    pub(crate) fn with_read_only_input(mut self, read_only: bool) -> Self {
+        self.read_only_input = read_only;
+        self
     }
 
     /// Reuses native input/IME for a cell, whole-block or complete root range.
@@ -460,6 +468,9 @@ impl ParagraphView {
         selection: Option<xiaomu_runtime::session::DocumentSelection>,
         cx: &mut Context<Self>,
     ) {
+        if self.read_only_input {
+            return;
+        }
         if self.input_is_hidden_by_table() {
             self.cancel_if_composing(cx);
             return;

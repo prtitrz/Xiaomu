@@ -140,7 +140,8 @@ impl DocumentView {
                 };
                 let session = self.session.borrow();
                 let document = session.document();
-                Rc::ptr_eq(&self.session, &drag.session)
+                !self.read_only_input
+                    && Rc::ptr_eq(&self.session, &drag.session)
                     && document.root() == drag.document.root()
                     && document.revision() == drag.intent.revision
                     && document.store() == drag.document.store()

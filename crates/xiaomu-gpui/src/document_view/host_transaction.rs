@@ -30,6 +30,8 @@ impl DocumentView {
     /// `None` means active composition deferred the command without any change.
     /// Errors preserve canonical state/history and do not advance the view epoch.
     /// A successful transaction is one isolated Undo unit with mapped selection.
+    /// Read-only input mode does not block this controlled host-update API;
+    /// the bound session policy remains responsible for admission.
     pub fn apply_edit_transaction(
         &mut self,
         transaction: &Transaction,
