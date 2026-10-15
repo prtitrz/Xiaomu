@@ -1,6 +1,6 @@
 //! Mixed-inline canonical-to-display coordinate projection.
 //!
-//! Canonical [`TextOffset`](xiaomu_core::text::TextOffset) values count only
+//! Canonical [`TextOffset`] values count only
 //! UTF-8 text bytes. Inline atoms count as caret units but consume no canonical
 //! bytes, while their renderer output does consume bytes in GPUI's shaped
 //! display string. This module keeps those coordinate spaces explicit so

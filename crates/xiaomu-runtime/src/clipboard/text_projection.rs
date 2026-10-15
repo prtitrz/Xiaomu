@@ -2,15 +2,15 @@
 
 use xiaomu_core::document::NodeKind;
 
-use super::{ClipboardInline, ClipboardNode, ClipboardNodeContent};
+use super::{ClipboardInline, ClipboardNode, ClipboardNodeContent, ClipboardTextProjection};
 
-#[derive(Default)]
-struct TextBetween {
+struct TextBetween<'a> {
     text: String,
     first: bool,
+    projection: &'a ClipboardTextProjection,
 }
 
-impl TextBetween {
+impl TextBetween<'_> {
     fn block(&mut self) {
         if self.first {
             self.first = false;
@@ -68,7 +68,7 @@ impl TextBetween {
             let end = cursor + text.len();
             let mut offset = 0;
             while let Some(atom) = atoms.peek().filter(|atom| atom.anchor().as_usize() <= end) {
-                if !atom.kind().is_hard_break() {
+                if !self.projection.emits_lf(atom.kind()) {
                     return Err(());
                 }
                 let anchor = atom.anchor().as_usize().checked_sub(cursor).ok_or(())?;
@@ -81,7 +81,7 @@ impl TextBetween {
             cursor = end;
         }
         for atom in atoms {
-            if !atom.kind().is_hard_break() || atom.anchor().as_usize() != cursor {
+            if !self.projection.emits_lf(atom.kind()) || atom.anchor().as_usize() != cursor {
                 return Err(());
             }
             self.text.push('\n');
@@ -90,11 +90,15 @@ impl TextBetween {
     }
 }
 
-pub(super) fn project(roots: &[ClipboardNode]) -> Result<String, ()> {
-    super::export_budget::roots(roots)?;
+pub(super) fn project(
+    roots: &[ClipboardNode],
+    projection: &ClipboardTextProjection,
+) -> Result<String, ()> {
+    super::export_budget::roots(roots, Some(projection))?;
     let mut projection = TextBetween {
         text: String::new(),
         first: true,
+        projection,
     };
     for root in roots {
         projection.node(root)?;

@@ -1,6 +1,37 @@
 use super::*;
 use xiaomu_core::document::{InlineContent, NodeStoreBuilder};
 
+#[test]
+fn leaf_descriptor_cost_is_reserved_before_source_or_fragment_expansion() {
+    let projection = ClipboardTextProjection::text_between_lf_with_atoms((0..32).map(|index| {
+        xiaomu_core::document::AtomKind::new(format!("{index:02}{}", "\u{1}".repeat(126))).unwrap()
+    }))
+    .unwrap();
+    let mut descriptor = Budget::default();
+    descriptor.projection(Some(&projection)).unwrap();
+    assert_eq!(descriptor.bytes, 128 + 32 * (128 * 6 + 8));
+    assert_eq!(descriptor.values, 8 + 32);
+    let small = source(attrs(AttrValue::String(String::new())));
+    let mut base = Budget::default();
+    base.document_node(&small, small.root(), 0).unwrap();
+    let near_limit = source(attrs(AttrValue::String(
+        "x".repeat((MAX_BYTES - base.bytes) / 6),
+    )));
+    assert!(document(&near_limit, None).is_ok());
+    assert!(document(&near_limit, Some(&projection)).is_err());
+    let ordinary = clipped_document(&small, None).unwrap();
+    let with_leaf = clipped_document(&small, Some(&projection)).unwrap();
+    assert_eq!(
+        with_leaf.budget.bytes,
+        ordinary.budget.bytes + descriptor.bytes
+    );
+    assert_eq!(
+        with_leaf.budget.values,
+        ordinary.budget.values + descriptor.values
+    );
+    assert_eq!(with_leaf.budget.nodes, ordinary.budget.nodes);
+}
+
 fn attrs(value: AttrValue) -> NodeAttrs {
     NodeAttrs::new([("opaque".into(), value)].into()).unwrap()
 }
@@ -45,19 +76,19 @@ fn clipped_source_reserves_roots_envelope_without_changing_legacy_threshold() {
     let small = source(NodeAttrs::empty());
     let mut original = Budget::default();
     original.document_node(&small, small.root(), 0).unwrap();
-    let clipped = clipped_document(&small).unwrap();
+    let clipped = clipped_document(&small, None).unwrap();
     assert_eq!(clipped.budget.nodes, original.nodes);
     assert_eq!(clipped.budget.values, original.values + 32);
     assert_eq!(clipped.budget.bytes, original.bytes + 1024);
 
     let near_limit = source(attrs(AttrValue::List(vec![AttrValue::Null; 24_990])));
-    assert_eq!(document(&near_limit), Ok(()));
-    assert!(clipped_document(&near_limit).is_err());
+    assert_eq!(document(&near_limit, None), Ok(()));
+    assert!(clipped_document(&near_limit, None).is_err());
 }
 
 #[test]
 fn zero_count_skips_invalid_depth_and_preserves_budget() {
-    let mut budget = clipped_document(&source(NodeAttrs::empty())).unwrap();
+    let mut budget = clipped_document(&source(NodeAttrs::empty()), None).unwrap();
     let before = counts(&budget);
     let too_deep = nested_attrs(MAX_DEPTH + 1);
     assert_eq!(budget.reserve_empty_paragraphs(&too_deep, 0), Ok(()));
@@ -68,7 +99,7 @@ fn zero_count_skips_invalid_depth_and_preserves_budget() {
 
 #[test]
 fn paragraph_attrs_use_exported_depth_four() {
-    let mut budget = clipped_document(&source(NodeAttrs::empty())).unwrap();
+    let mut budget = clipped_document(&source(NodeAttrs::empty()), None).unwrap();
     assert_eq!(
         budget.reserve_empty_paragraphs(&nested_attrs(MAX_DEPTH - 4), 1),
         Ok(())
@@ -96,7 +127,7 @@ fn reservation_multiplies_full_paragraph_skeleton_and_all_attrs() {
     let mut cost = Budget::default();
     cost.node(4).unwrap();
     cost.attrs(&attrs, 4).unwrap();
-    let mut budget = clipped_document(&source(NodeAttrs::empty())).unwrap();
+    let mut budget = clipped_document(&source(NodeAttrs::empty()), None).unwrap();
     let before = counts(&budget);
     budget.reserve_empty_paragraphs(&attrs, 7).unwrap();
     assert_eq!(
@@ -115,7 +146,7 @@ fn overlarge_counts_and_multiplication_overflow_fail_without_reserving() {
     let mut cost = Budget::default();
     cost.node(4).unwrap();
     cost.attrs(&attrs, 4).unwrap();
-    let mut budget = clipped_document(&source(NodeAttrs::empty())).unwrap();
+    let mut budget = clipped_document(&source(NodeAttrs::empty()), None).unwrap();
     let before = counts(&budget);
     let byte_overflow = usize::MAX / cost.bytes + 1;
     assert!(cost.values.checked_mul(byte_overflow).is_some());
@@ -151,7 +182,7 @@ fn repeated_paragraphs_respect_total_value_and_byte_limits() {
         let mut cost = Budget::default();
         cost.node(4).unwrap();
         cost.attrs(&attrs, 4).unwrap();
-        let mut budget = clipped_document(&source(NodeAttrs::empty())).unwrap();
+        let mut budget = clipped_document(&source(NodeAttrs::empty()), None).unwrap();
         let remaining_values = MAX_VALUES - budget.budget.values;
         let remaining_bytes = MAX_BYTES - budget.budget.bytes;
         let remaining_nodes = MAX_NODES - budget.budget.nodes;
@@ -167,7 +198,7 @@ fn repeated_paragraphs_respect_total_value_and_byte_limits() {
 
 #[test]
 fn empty_attrs_still_reserve_the_full_paragraph_skeleton() {
-    let mut budget = clipped_document(&source(NodeAttrs::empty())).unwrap();
+    let mut budget = clipped_document(&source(NodeAttrs::empty()), None).unwrap();
     let before = counts(&budget);
     budget
         .reserve_empty_paragraphs(&NodeAttrs::empty(), 3)

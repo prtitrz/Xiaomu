@@ -4,6 +4,9 @@ use std::sync::Arc;
 
 use xiaomu_core::document::NodeAttrs;
 
+mod leaf;
+pub use leaf::{ClipboardLeafKinds, ClipboardProjectionError};
+
 /// The platform action requesting a clipboard export.
 ///
 /// Cut must be rejected here when the host cannot safely remove the selected
@@ -17,7 +20,9 @@ pub enum ClipboardExportPurpose {
 }
 
 /// A known, reproducible plain-text projection over canonical fragments.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// This is `Clone`, not `Copy`; bounded leaf descriptors are shared immutably.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClipboardTextProjection {
     /// Full-fragment text-between semantics with LF block and leaf separators.
     ///
@@ -25,6 +30,11 @@ pub enum ClipboardTextProjection {
     /// HorizontalRule contribute LF; unknown custom block/atom semantics reject.
     /// Text bytes, including CRLF and tabs, are preserved exactly.
     TextBetweenLfV1,
+    /// The same LF algorithm with an explicit, bounded set of extension atoms.
+    ///
+    /// Only exact typed kind matches contribute LF. Rich payload and reading
+    /// coordinates are unchanged. Construct with [`Self::text_between_lf_with_atoms`].
+    TextBetweenLfWithAtomsV1(ClipboardLeafKinds),
 }
 
 /// The actual source fragment wrapper of a cell-range copy.
@@ -127,8 +137,9 @@ impl ClipboardExportSpec {
     }
 
     /// Selects a bounded, deterministic plain-text algorithm, not supplied text.
+    /// Replacing an owned descriptor makes this builder non-`const`.
     #[must_use]
-    pub const fn with_text_projection(mut self, projection: ClipboardTextProjection) -> Self {
+    pub fn with_text_projection(mut self, projection: ClipboardTextProjection) -> Self {
         self.text_projection = Some(projection);
         self
     }
@@ -137,9 +148,10 @@ impl ClipboardExportSpec {
         &self.cell_ranges
     }
 
-    /// Returns the independently selected plain-text algorithm.
+    /// Returns the independently selected algorithm, sharing any leaf descriptor.
+    /// This getter is no longer `const` because projections are `Clone`, not `Copy`.
     #[must_use]
-    pub const fn text_projection(&self) -> Option<ClipboardTextProjection> {
-        self.text_projection
+    pub fn text_projection(&self) -> Option<ClipboardTextProjection> {
+        self.text_projection.clone()
     }
 }

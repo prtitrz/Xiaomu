@@ -66,7 +66,7 @@ impl AtomKind {
 
 /// Canonical payload owned by an inline-atom node itself.
 ///
-/// Extension-specific structured payload belongs in the node's [`NodeAttrs`]
+/// Extension-specific structured payload belongs in the node's [`NodeAttrs`](crate::document::NodeAttrs)
 /// (`crate::document::NodeAttrs`). `fallback_text` is promoted to a typed
 /// field because clipboard, accessibility, and missing-renderer behavior all
 /// require the same host-neutral textual fallback. Marks are independent of
@@ -129,7 +129,7 @@ impl InlineAtomContent {
     }
 }
 
-/// One ordered reference to an inline-atom node from an [`InlineContent`]
+/// One ordered reference to an inline-atom node from an [`InlineContent`](crate::document::InlineContent)
 /// (`crate::document::InlineContent`).
 ///
 /// `text_offset` remains a UTF-8 byte coordinate in the surrounding text.
@@ -142,7 +142,7 @@ pub struct InlineAtomPlacement {
 }
 
 impl InlineAtomPlacement {
-    /// Creates a placement. The surrounding [`InlineContent`]
+    /// Creates a placement. The surrounding [`InlineContent`](crate::document::InlineContent)
     /// (`crate::document::InlineContent`) validates the offset against its
     /// normalized text when the placement is attached.
     #[must_use]

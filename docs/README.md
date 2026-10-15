@@ -42,3 +42,5 @@ CI 与原生交互验收是两类证据，不可互相替代。P4 后补的 Wind
 独立编辑器的普通历史快照同步：[committed snapshot import](snapshot-import.md)。
 
 固定的只读用户输入模式：[输入/剪贴板边界与独立宿主 policy](read-only-input.md)。
+
+显式有限 atom-kind LF 导出：[clipboard leaf projection 与 v15 协议](clipboard-leaf-projection.md)。

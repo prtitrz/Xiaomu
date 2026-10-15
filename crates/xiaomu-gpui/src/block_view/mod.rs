@@ -8,7 +8,7 @@
 //!
 //! While IME composition is active, all input-handler queries answer against
 //! a virtual projection (canonical prefix + preedit + suffix); see
-//! [`crate::input::composition`].
+//! `crate::input::composition`.
 
 #[cfg(test)]
 mod alignment_input_tests;
