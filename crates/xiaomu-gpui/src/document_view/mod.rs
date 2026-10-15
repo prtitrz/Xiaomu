@@ -1,15 +1,15 @@
 //! Multi-block document view: the block list container.
 //!
-//! Owns the shared [`DocumentSession`] handle and renders one
+//! Owns the shared [`DocumentSession`](xiaomu_runtime::session::DocumentSession) handle and renders one
 //! [`ParagraphView`] per inline-bearing block in document order inside a
 //! scrollable column. Keyboard navigation translates visual gestures through
 //! the most recent block layouts and applies the resulting Core positions as
 //! runtime [`EditIntent::SetSelection`]s. Mouse drag selection hit-tests
 //! against the per-block bounds published during paint and back-projects
 //! renderer display bytes into exact mixed-inline positions through
-//! [`DocumentSession::set_inline_selection`].
+//! [`DocumentSession::set_inline_selection`](xiaomu_runtime::session::DocumentSession::set_inline_selection).
 //!
-//! Kind-driven visual distinction lives in [`Self::render_block_tree`]:
+//! Kind-driven visual distinction lives in `DocumentView::render_block_tree`:
 //! headings scale with their level, quote descendants are indented behind a
 //! bar with muted text, list items indent per nesting depth and show a projected bullet or ordinal marker.
 

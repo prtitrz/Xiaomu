@@ -19,8 +19,8 @@ mod text_projection;
 mod wire;
 
 pub use export::{
-    ClipboardCellRangeRoot, ClipboardExportPurpose, ClipboardExportSpec, ClipboardSourceBoundary,
-    ClipboardTextProjection,
+    ClipboardCellRangeRoot, ClipboardExportPurpose, ClipboardExportSpec, ClipboardLeafKinds,
+    ClipboardProjectionError, ClipboardSourceBoundary, ClipboardTextProjection,
 };
 
 pub use fragment::{
@@ -44,6 +44,17 @@ pub(crate) fn export_selection(
     // Cut safety precedes all borrowed scans, cloning and platform side effects.
     if purpose == ClipboardExportPurpose::Cut && selection.active_cell_range().is_some() {
         return Err(crate::session::SessionError::UnsupportedTableOperation);
+    }
+    if purpose == ClipboardExportPurpose::Cut
+        && matches!(
+            spec.text_projection(),
+            Some(ClipboardTextProjection::TextBetweenLfWithAtomsV1(_))
+        )
+    {
+        return Err(crate::session::PolicyError::new(
+            "clipboard leaf projection Cut requires an explicit prepared Cut plan",
+        )
+        .into());
     }
     export_with_spec(document, selection, spec)
 }
@@ -72,16 +83,17 @@ fn export_with_spec(
 ) -> Result<Option<ClipboardSlice>, crate::session::SessionError> {
     use crate::session::{PolicyError, SessionError};
     use export::CellRangeExport;
+    let projection = spec.text_projection();
     let clipped_budget = if selection.active_cell_range().is_some()
         && matches!(spec.cell_ranges(), CellRangeExport::Clipped(_))
     {
         Some(
-            export_budget::clipped_document(document).map_err(|()| {
+            export_budget::clipped_document(document, projection.as_ref()).map_err(|()| {
                 PolicyError::new("clipboard export exceeds bounded projection budget")
             })?,
         )
     } else {
-        export_budget::document(document)
+        export_budget::document(document, projection.as_ref())
             .map_err(|()| PolicyError::new("clipboard export exceeds bounded projection budget"))?;
         None
     };
@@ -101,7 +113,7 @@ fn export_with_spec(
                 clipped_budget.ok_or(SessionError::SelectionInvalid)?,
             )?,
         };
-        return ClipboardSlice::from_export_roots(roots, boundary, spec.text_projection())
+        return ClipboardSlice::from_export_roots(roots, boundary, projection)
             .map(Some)
             .map_err(|()| {
                 PolicyError::new("clipboard export cannot preserve source projection").into()
@@ -116,7 +128,7 @@ fn export_with_spec(
         ClipboardSourceBoundary::Open
     };
     slice
-        .set_export(boundary, spec.text_projection())
+        .set_export(boundary, projection)
         .map_err(|()| PolicyError::new("clipboard export cannot preserve source projection"))?;
     Ok(Some(slice))
 }

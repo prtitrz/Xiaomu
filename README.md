@@ -117,6 +117,11 @@ without changing default editable behavior. Native preedit and clipboard/import
 side effects are guarded before they begin; host updates still require their
 independent session policy.
 
+Hosts can also opt into [bounded clipboard leaf projection](docs/clipboard-leaf-projection.md):
+exact extension atom kinds emit LF while rich payload and reading coordinates
+remain unchanged. Only that descriptor uses framed v15; default V1/v14 behavior
+is preserved. The contract documents the small `Clone`/`const` API migration.
+
 The main local gates are:
 
 ```bash

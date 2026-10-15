@@ -11,9 +11,10 @@ impl ClipboardSlice {
     }
 
     /// Returns the deterministic text algorithm, independently of provenance.
+    /// Clones share any immutable leaf descriptor. This getter is no longer `const`.
     #[must_use]
-    pub const fn text_projection(&self) -> Option<ClipboardTextProjection> {
-        self.text_projection
+    pub fn text_projection(&self) -> Option<ClipboardTextProjection> {
+        self.text_projection.clone()
     }
 
     /// Whether Copy must preserve the complete native structure and metadata.
@@ -47,7 +48,7 @@ impl ClipboardSlice {
         boundary: ClipboardSourceBoundary,
         projection: Option<ClipboardTextProjection>,
     ) -> std::result::Result<(), ()> {
-        crate::clipboard::export_budget::roots(&self.roots)?;
+        crate::clipboard::export_budget::roots(&self.roots, projection.as_ref())?;
         if self.closed != matches!(boundary, ClipboardSourceBoundary::WholeRoots) {
             return Err(());
         }
@@ -56,8 +57,8 @@ impl ClipboardSlice {
         {
             return Err(());
         }
-        if projection.is_some() {
-            self.plain_text = crate::clipboard::text_projection::project(&self.roots)?;
+        if let Some(projection) = &projection {
+            self.plain_text = crate::clipboard::text_projection::project(&self.roots, projection)?;
         }
         self.source_boundary = Some(boundary);
         self.text_projection = projection;
@@ -69,7 +70,7 @@ impl ClipboardSlice {
         boundary: ClipboardSourceBoundary,
         projection: Option<ClipboardTextProjection>,
     ) -> std::result::Result<Self, ()> {
-        crate::clipboard::export_budget::roots(&roots)?;
+        crate::clipboard::export_budget::roots(&roots, projection.as_ref())?;
         validate_roots(&roots).map_err(|_| ())?;
         if roots.is_empty() {
             return Err(());

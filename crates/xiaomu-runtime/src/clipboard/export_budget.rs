@@ -5,7 +5,7 @@ use xiaomu_core::document::{
     XiaomuDocument,
 };
 
-use super::{ClipboardNode, ClipboardNodeContent};
+use super::{ClipboardNode, ClipboardNodeContent, ClipboardTextProjection};
 
 #[cfg(test)]
 mod tests;
@@ -23,6 +23,16 @@ struct Budget {
 }
 
 impl Budget {
+    fn projection(&mut self, projection: Option<&ClipboardTextProjection>) -> Result<(), ()> {
+        if let Some(ClipboardTextProjection::TextBetweenLfWithAtomsV1(kinds)) = projection {
+            self.add(8, 128)?;
+            for kind in kinds.atom_kinds() {
+                self.text(kind.as_str())?;
+            }
+        }
+        Ok(())
+    }
+
     fn add(&mut self, values: usize, bytes: usize) -> Result<(), ()> {
         self.values = self.values.checked_add(values).ok_or(())?;
         self.bytes = self.bytes.checked_add(bytes).ok_or(())?;
@@ -211,8 +221,13 @@ impl Budget {
 /// The bounded read-only walk also bounds the existing cross-block selector's
 /// temporary index. Unselected content may make an opted-in export exceed this
 /// conservative limit; no partial/truncated projection is produced.
-pub(super) fn document(document: &XiaomuDocument) -> Result<(), ()> {
-    Budget::default().document_node(document, document.root(), 0)
+pub(super) fn document(
+    document: &XiaomuDocument,
+    projection: Option<&ClipboardTextProjection>,
+) -> Result<(), ()> {
+    let mut budget = Budget::default();
+    budget.projection(projection)?;
+    budget.document_node(document, document.root(), 0)
 }
 
 /// A borrowed source preflight retained while planning clipped cell contents.
@@ -255,16 +270,24 @@ impl ClippedBudget {
 
 /// Bounds source content and the roots envelope before any clipped capture.
 /// Legacy closed exports keep the original `document` threshold unchanged.
-pub(super) fn clipped_document(document: &XiaomuDocument) -> Result<ClippedBudget, ()> {
+pub(super) fn clipped_document(
+    document: &XiaomuDocument,
+    projection: Option<&ClipboardTextProjection>,
+) -> Result<ClippedBudget, ()> {
     let mut budget = Budget::default();
+    budget.projection(projection)?;
     budget.document_node(document, document.root(), 0)?;
     budget.add(32, 1024)?;
     Ok(ClippedBudget { budget })
 }
 
-pub(super) fn roots(roots: &[ClipboardNode]) -> Result<(), ()> {
+pub(super) fn roots(
+    roots: &[ClipboardNode],
+    projection: Option<&ClipboardTextProjection>,
+) -> Result<(), ()> {
     let mut budget = Budget::default();
     budget.add(32, 1024)?;
+    budget.projection(projection)?;
     for node in roots {
         budget.fragment(node, 1)?;
     }

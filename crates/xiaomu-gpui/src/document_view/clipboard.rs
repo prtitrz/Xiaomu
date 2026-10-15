@@ -248,5 +248,9 @@ mod export_tests;
 mod native_tests;
 
 #[cfg(test)]
+#[path = "clipboard_leaf_tests.rs"]
+mod leaf_tests;
+
+#[cfg(test)]
 #[path = "cell_carrier_paste_tests.rs"]
 mod cell_carrier_paste_tests;

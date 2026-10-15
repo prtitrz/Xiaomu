@@ -18,6 +18,8 @@ impl DocumentSession {
     /// A policy rejection leaves both canonical state and the caller's platform
     /// clipboard untouched. Call this before writing for Cut, not the Copy
     /// convenience method. Successful projection does not itself delete source.
+    /// Extension-atom LF projections reject Cut here; supported structural Cut
+    /// must use [`Self::prepare_cut`] so deletion is prevalidated before writing.
     pub fn clipboard_slice_for(
         &self,
         purpose: ClipboardExportPurpose,

@@ -1,5 +1,13 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-15 bounded extension: explicit finite extension-atom clipboard leaf
+projection composes with the existing export policy and geometry. Exact kinds
+map to LF, rich payload and reading coordinates remain unchanged, and only the
+new descriptor uses framed v15. Default V1/v14 and existing admission boundaries
+are retained; ordinary Cut rejects the new descriptor and supported structural
+Cut requires the existing prepared path. Native OS and downstream acceptance
+remain separate. See [contract and API migration](clipboard-leaf-projection.md).
+
 2026-10-15 bounded extension: `EditorInstance::with_read_only_input()` fixes a
 per-view input guard inherited by every future paragraph/range child. It blocks
 native preedit, mutation commands, clipboard/import side effects and mutation

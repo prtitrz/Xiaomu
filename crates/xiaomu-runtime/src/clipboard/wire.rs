@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 mod atoms;
+#[cfg(test)]
+mod leaf_projection_tests;
 mod legacy;
 mod marks;
 mod projected;

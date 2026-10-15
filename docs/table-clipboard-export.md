@@ -74,6 +74,11 @@ Image/HorizontalRule 作为 block leaf 产生 LF；HardBreak 产生 LF。
 文字本身的 CRLF、tab 和 Unicode 原样保留，不拼图片 URL/alt。
 未知 Custom/InlineAtom 的 schema 语义不能推测，整次投影拒绝。
 
+后继显式 [leaf projection](clipboard-leaf-projection.md) 可配置有限、精确的
+extension AtomKind allowlist，使匹配 atom 输出 LF，保留原 rich 载荷。
+原 `TextBetweenLfV1` 不变；新描述独立使用 framed v15，普通 Cut 拒绝并要求
+已有 PreparedCut 路径。没有任意 serializer 或宿主特定 kind。
+
 所有新投影先借用预扫预算，再克隆子树或扩展字符串；有界数量、嵌套深度、
 attrs/marks 和输出大小同时受控。不能为每个节点反复全篇验证。
 

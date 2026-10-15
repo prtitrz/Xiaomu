@@ -340,8 +340,9 @@ impl ClipboardBlock {
 ///
 /// `roots` preserves the minimal selected fragment tree. `blocks` is its
 /// inline-leaf projection in document order. `plain_text` joins those leaves
-/// with newline characters for interoperability with external applications;
-/// inline atoms contribute their `fallback_text` at the anchored position.
+/// with newline characters for interoperability with external applications.
+/// Historical exports use inline atoms' `fallback_text`; an explicit
+/// [`ClipboardTextProjection`] instead binds text to its validated algorithm.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClipboardSlice {
     plain_text: String,

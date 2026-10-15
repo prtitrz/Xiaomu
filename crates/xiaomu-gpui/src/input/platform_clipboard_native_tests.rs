@@ -6,22 +6,23 @@ use super::*;
 
 #[test]
 fn rejected_native_never_falls_back_to_pixels_or_absent_empty_plain_text() {
-    for text in [None, Some(""), Some("unsafe fallback")] {
-        for format in [gpui::ImageFormat::Png, gpui::ImageFormat::Jpeg] {
-            let decoded =
-                decode_metadata_checked(text.unwrap_or_default(), "xiaomu.clipboard.v14\n{");
-            assert!(matches!(decoded, ClipboardMetadataDecode::RejectedNative));
-            assert!(
-                decode_transport(
-                    text.map(str::to_owned),
-                    decoded,
-                    [gpui::ClipboardEntry::Image(gpui::Image::from_bytes(
-                        format,
-                        vec![1, 2, 3]
-                    ))],
-                )
-                .is_none()
-            );
+    for metadata in ["xiaomu.clipboard.v14\n{", "xiaomu.clipboard.v15\n{"] {
+        for text in [None, Some(""), Some("unsafe fallback")] {
+            for format in [gpui::ImageFormat::Png, gpui::ImageFormat::Jpeg] {
+                let decoded = decode_metadata_checked(text.unwrap_or_default(), metadata);
+                assert!(matches!(decoded, ClipboardMetadataDecode::RejectedNative));
+                assert!(
+                    decode_transport(
+                        text.map(str::to_owned),
+                        decoded,
+                        [gpui::ClipboardEntry::Image(gpui::Image::from_bytes(
+                            format,
+                            vec![1, 2, 3]
+                        ))],
+                    )
+                    .is_none()
+                );
+            }
         }
     }
 }

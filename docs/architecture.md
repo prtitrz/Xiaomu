@@ -478,6 +478,17 @@ colwidth变null而纯纵裁保留原数组。借用完整源、roots frame与重
 spec改Clone、内部Arc共享默认attrs；geometry builder替换整个模式，旧Closed
 准入与预算不变。CellRange仍v14/open1/1，Cut、默认Paste与Code降级门禁未扩大。
 
+可选 [clipboard leaf projection](clipboard-leaf-projection.md) 在同一 policy seam
+接受 1–32 个精确 extension AtomKind（每 key 至多 128 UTF-8 bytes），只将其
+平台文本映射为 LF。typed HardBreak 与未 opt-in 的 V1 行为不变，rich kind/
+attrs/fallback/marks、reading U+FFFC 和 UTF-16 坐标不变。不可变 descriptor
+随 spec/slice 传输，条件使用 framed v15；原 v14 编码保留。解码严格校验描述与
+版本，从原结构重算文本，逐字节绑定平台值；任何识别到的 frame 失败均拒绝
+文本/图片降级。描述预算在克隆前计入，旧 reader 按 family 前缀拒绝 v15。
+此协议只证明一致性，不证明来源真实性，不新增 paste/asset/edit 权限。
+新描述的普通 Cut 在写入前拒绝；结构 Cut 必须使用已预检的 PreparedCut。
+Projection 从 Copy 改 Clone，并共享有界数据；相关 const API 迁移见该契约。
+
 ```text
 DocumentSelection
 → ClipboardSlice

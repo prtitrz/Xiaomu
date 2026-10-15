@@ -190,6 +190,8 @@ pub trait SessionPolicy {
     /// error rejects Copy/Cut before touching the platform clipboard. Hosts
     /// must reject unsupported Cut purposes here, not in the later Delete.
     /// Projection-only opted-in CellRange Cut is always rejected by Runtime.
+    /// The extension-atom LF descriptor also rejects ordinary Cut; it requires
+    /// the explicit prepared-Cut route, even for a non-cell source.
     /// A host supplying a dedicated [`Self::prepare_cut`] plan can use the
     /// scoped session preparation API instead. The callback cannot supply
     /// arbitrary text or authorize a later fallible generic Delete.
