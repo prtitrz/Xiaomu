@@ -458,6 +458,19 @@ bounded export, deletion candidate, collapsed inline after-selection, admission
 and exact inverse/redo before GPUI writes once and consumes the exclusive guard.
 Default legacy Cut, projection provenance and ordinary marks semantics are unchanged.
 
+`SessionPolicy::prepare_text_cut` is a separate default-off, fallible opt-in.
+After the structural hook declines, Runtime can plan a nonempty inline-only
+range outside tables, preserving byte boundaries, atom ordinals, marks and
+unselected extension atoms. A full leaf scan rejects intervening atomic/non-inline unknown
+leaves, empty containers and opaque table subtrees; even same-cell text is
+currently refused. Once opted in, unsupported geometry is an error, never a
+fallback to write-then-Delete. A private validated-source proof opens only the
+internal prepared export entry; public `clipboard_slice_for(Cut)` guards remain
+unchanged. The existing scoped guard, final-candidate policy, exact inverse/redo
+and GPUI lossless-write-before-publish contract apply to these text plans too.
+Native OS clipboard ownership and downstream acceptance remain separate.
+
+
 
 Runtime clipboard 已从 P2 的纯文本 seam 升级为 frontend-neutral structured clipboard：
 

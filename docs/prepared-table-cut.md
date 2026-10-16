@@ -37,6 +37,38 @@ installs the exact candidate/history once,
 without another Core apply, policy callback or selection resolution. No IDs are
 predicted or reallocated after the external write.
 
+## Default-off generic text Cut
+
+`SessionPolicy::prepare_text_cut(context) -> Result<bool, PolicyError>` defaults
+to `Ok(false)` and is consulted only after the structural `prepare_cut` hook
+returns `None`. The host can refuse the source in this hook, and must also supply
+an explicit `clipboard_export_spec(context, Cut)`. `true` opts into the bounded
+Runtime text planner, not an arbitrary host transaction. Any later rejection is
+an error, never permission to fall back to legacy write-then-Delete.
+
+Supported sources are nonempty inline ranges, in either direction, within one
+block or across an inline-only sequence in the same non-table editing domain.
+The existing atom-aware planners preserve Unicode byte boundaries, marks,
+same-offset atom ordinals and unselected extension-atom payloads/identities.
+Candidate policy can require a protected atom to survive. The guard and its
+isolated history contract above are unchanged.
+
+Runtime first admits the whole document through the existing borrowed
+node/depth/value budget, including unselected content, before recursive geometry
+or owned edit planning. The planner requires that private admission proof.
+Runtime then scans actual tree leaves before admitting the source. Intervening
+images, horizontal rules, non-inline unknown leaves, empty containers and tables reject;
+inline endpoints alone are insufficient. Tables are opaque barriers, including
+when both endpoints are outside a table. All table-contained ranges, even
+within one cell, are deliberately unsupported in this initial contract. All,
+gap, node, Atomic and collapsed sources cannot use the text hook. Structural
+plans retain their earlier, separate priority and source validation.
+
+The internal text exporter requires the planner's private validated-source
+proof. Public projection-only Cut guards, including the LF-with-extension-atoms
+descriptor refusal, are not relaxed. Hosts should opt in for only their intended
+text source contexts; returning `false` retains that source's legacy route.
+
 ## GPUI sequence
 
 Before any Cut write, the view checks hidden endpoints and active composition.

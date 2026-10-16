@@ -42,6 +42,7 @@ mod policy;
 mod prepared_cut;
 #[cfg(test)]
 mod prepared_cut_tests;
+pub(crate) mod prepared_text_cut;
 mod resolve;
 mod selection;
 mod split;
