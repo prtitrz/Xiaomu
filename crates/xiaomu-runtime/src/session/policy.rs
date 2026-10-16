@@ -183,6 +183,19 @@ pub trait SessionPolicy {
         Ok(None)
     }
 
+    /// Opts this source into Runtime's generic, fully prepared text Cut.
+    ///
+    /// Defaults to `false`, preserving the legacy route. This is queried only
+    /// when `prepare_cut` supplies no structural plan. `true` requires an
+    /// explicit Cut export spec and a nonempty inline-only range outside tables;
+    /// unsupported geometry rejects rather than falling back to generic Delete.
+    /// Runtime preserves mixed-inline ordinals and unselected atoms. Candidate
+    /// validation may reject removal of protected extension atoms before any
+    /// clipboard write or live mutation. This callback may also reject a source.
+    fn prepare_text_cut(&self, _context: SessionContext<'_>) -> Result<bool, PolicyError> {
+        Ok(false)
+    }
+
     /// Selects explicit clipboard export rules before projection or writes.
     ///
     /// This is pure and read-only like other policy callbacks. `None` retains
@@ -228,6 +241,18 @@ impl DocumentSession {
     pub(super) fn prepare_cut_plan(&self) -> Result<Option<EditPlan>, PolicyError> {
         self.policy.as_ref().map_or(Ok(None), |policy| {
             policy.prepare_cut(SessionContext {
+                document: &self.document,
+                selection: self.selection,
+                original_selection: self.selection,
+                stored_marks: self.stored_marks.as_ref(),
+                input_rule_undo_available: self.input_rule_undo_available_at(self.selection),
+            })
+        })
+    }
+
+    pub(super) fn prepare_text_cut_enabled(&self) -> Result<bool, PolicyError> {
+        self.policy.as_ref().map_or(Ok(false), |policy| {
+            policy.prepare_text_cut(SessionContext {
                 document: &self.document,
                 selection: self.selection,
                 original_selection: self.selection,

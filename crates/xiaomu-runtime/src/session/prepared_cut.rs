@@ -1,9 +1,12 @@
-//! Scoped, single-use preparation for an explicitly opted-in structural Cut.
+//! Scoped, single-use preparation for an explicitly opted-in Cut.
 
 use super::commit::PreparedCommit;
 use super::plan::HistoryPolicy;
 use super::{DocumentSession, SessionError, SessionOutcome};
-use crate::clipboard::{ClipboardExportPurpose, ClipboardSlice, export_prepared_cut};
+use crate::clipboard::{
+    ClipboardExportPurpose, ClipboardSlice, export_prepared_cut, export_prepared_text_cut,
+    preflight_prepared_text_cut,
+};
 
 /// A fully preflighted Cut bound to its exclusively borrowed source session.
 ///
@@ -107,9 +110,9 @@ impl PreparedCut<'_> {
 }
 
 impl DocumentSession {
-    /// Prepares an opted-in CellRange or whole-node Cut without live side effects.
+    /// Prepares an opted-in structural or text Cut without live side effects.
     ///
-    /// `Ok(None)` means no dedicated policy plan; existing callers may retain
+    /// `Ok(None)` means neither structural nor text policy opted in; callers may retain
     /// their legacy Cut route. `Some` keeps this session mutably borrowed until
     /// publication or cancellation. Policy, projection budget, Core, final
     /// selection, candidate admission and exact inverse/redo are all evaluated
@@ -118,24 +121,37 @@ impl DocumentSession {
     /// The plan must end at a collapsed inline caret so Cut can clear stored marks.
     /// Projection-only opted-in CellRange Cut remains
     /// closed; the historical no-export-spec unit-cell path stays unchanged.
+    /// `SessionPolicy::prepare_text_cut` separately admits generic inline-only
+    /// ranges outside tables. Once admitted, unsupported sources fail closed.
     pub fn prepare_cut(&mut self) -> Result<Option<PreparedCut<'_>>, SessionError> {
         self.selection.validate(&self.document)?;
-        let plan = self.prepare_cut_plan()?;
-        let Some(mut plan) = plan else {
+        let structural_plan = self.prepare_cut_plan()?;
+        let (mut plan, slice) = if let Some(plan) = structural_plan {
+            if (self.selection.active_cell_range().is_none()
+                && self.selection.as_node_selection().is_none()
+                && self.selection.as_atomic_node().is_none())
+                || plan.transaction().steps().is_empty()
+            {
+                return Err(SessionError::UnsupportedTableOperation);
+            }
+            let spec = self
+                .clipboard_export_spec(ClipboardExportPurpose::Cut)?
+                .ok_or(SessionError::UnsupportedTableOperation)?;
+            let slice = export_prepared_cut(&self.document, self.selection, spec)?
+                .ok_or(SessionError::SelectionInvalid)?;
+            (plan, slice)
+        } else if self.prepare_text_cut_enabled()? {
+            let spec = self
+                .clipboard_export_spec(ClipboardExportPurpose::Cut)?
+                .ok_or(SessionError::UnsupportedTableOperation)?;
+            let budgeted = preflight_prepared_text_cut(&self.document, &spec)?;
+            let (source, plan) = super::prepared_text_cut::plan(budgeted, self.selection)?;
+            let slice =
+                export_prepared_text_cut(&source, spec)?.ok_or(SessionError::SelectionInvalid)?;
+            (plan, slice)
+        } else {
             return Ok(None);
         };
-        if (self.selection.active_cell_range().is_none()
-            && self.selection.as_node_selection().is_none()
-            && self.selection.as_atomic_node().is_none())
-            || plan.transaction().steps().is_empty()
-        {
-            return Err(SessionError::UnsupportedTableOperation);
-        }
-        let spec = self
-            .clipboard_export_spec(ClipboardExportPurpose::Cut)?
-            .ok_or(SessionError::UnsupportedTableOperation)?;
-        let slice = export_prepared_cut(&self.document, self.selection, spec)?
-            .ok_or(SessionError::SelectionInvalid)?;
         // A Cut is isolated, clears pending marks and cannot install an input
         // rule rollback token. All these changes occur only on publication.
         plan.input_rule_undo = None;

@@ -254,3 +254,7 @@ mod leaf_tests;
 #[cfg(test)]
 #[path = "cell_carrier_paste_tests.rs"]
 mod cell_carrier_paste_tests;
+
+#[cfg(test)]
+#[path = "clipboard_cut_text_tests.rs"]
+mod cut_text_tests;

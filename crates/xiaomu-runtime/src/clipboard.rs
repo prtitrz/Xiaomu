@@ -76,6 +76,39 @@ pub(crate) fn export_prepared_cut(
     export_with_spec(document, selection, spec)
 }
 
+/// Whole-document borrowed admission, before recursive geometry or owned plans.
+/// The private field prevents constructing a source without the depth/node/value
+/// budget, including for content outside the selected range.
+pub(crate) struct BudgetedTextCutSource<'a> {
+    document: &'a xiaomu_core::document::XiaomuDocument,
+}
+
+impl<'a> BudgetedTextCutSource<'a> {
+    pub(crate) fn document(&self) -> &'a xiaomu_core::document::XiaomuDocument {
+        self.document
+    }
+}
+
+pub(crate) fn preflight_prepared_text_cut<'a>(
+    document: &'a xiaomu_core::document::XiaomuDocument,
+    spec: &ClipboardExportSpec,
+) -> Result<BudgetedTextCutSource<'a>, crate::session::SessionError> {
+    let projection = spec.text_projection();
+    export_budget::document(document, projection.as_ref()).map_err(|()| {
+        crate::session::PolicyError::new("clipboard export exceeds bounded projection budget")
+    })?;
+    Ok(BudgetedTextCutSource { document })
+}
+
+/// Internal text Cut export requires the planner's validated source proof.
+pub(crate) fn export_prepared_text_cut(
+    source: &crate::session::prepared_text_cut::ValidatedTextCut<'_>,
+    spec: ClipboardExportSpec,
+) -> Result<Option<ClipboardSlice>, crate::session::SessionError> {
+    let (document, selection) = source.source();
+    export_with_spec(document, selection, spec)
+}
+
 fn export_with_spec(
     document: &xiaomu_core::document::XiaomuDocument,
     selection: crate::session::DocumentSelection,

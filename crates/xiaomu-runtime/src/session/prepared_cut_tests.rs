@@ -592,3 +592,4 @@ mod publish;
 mod timed;
 
 mod node;
+mod text;

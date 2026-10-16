@@ -48,8 +48,14 @@ source scanning, projection or platform writes. A host needing structural Cut
 must supply an explicit [prepared Cut](prepared-table-cut.md) plan. That route
 prevalidates the exact deletion candidate and lossless clipboard item before
 writing once and publishing the same candidate. Read-only input still permits
-Copy and blocks Cut before either policy or platform side effects. Historical
-V1/legacy ordinary Cut behavior is unchanged; its separate fallible Delete
+Copy and blocks Cut before either policy or platform side effects.
+
+The separate default-off `SessionPolicy::prepare_text_cut` hook also admits
+verified nonempty inline-only ranges outside tables through the same prepared
+guard. It does not open the public projection-only Cut endpoint; see the
+[prepared Cut contract](prepared-table-cut.md#default-off-generic-text-cut).
+
+Historical V1/legacy ordinary Cut behavior is unchanged; its separate fallible Delete
 route does not gain prepared-Cut atomicity.
 
 ## Conditional framed v15
