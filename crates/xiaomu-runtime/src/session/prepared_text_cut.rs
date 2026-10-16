@@ -1,18 +1,27 @@
 //! Fail-closed source admission for the opt-in generic text Cut planner.
 
-use xiaomu_core::document::{NodeContent, NodeId, NodeKind, XiaomuDocument};
+use xiaomu_core::document::{NodeAttrs, NodeContent, NodeId, NodeKind, XiaomuDocument};
+use xiaomu_core::transaction::TransactionStep;
 
 use super::intent::PlannedAction;
-use super::{DocumentPosition, DocumentSelection, EditPlan, PolicyError, SessionError};
+use super::{
+    DocumentPosition, DocumentSelection, EditPlan, PolicyError, SelectionUpdate, SessionError,
+};
 
 #[cfg(test)]
 thread_local! {
     static PLAN_ENTRIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static ALL_PLAN_ENTRIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
 pub(super) fn plan_entries() -> usize {
     PLAN_ENTRIES.get()
+}
+
+#[cfg(test)]
+pub(super) fn all_plan_entries() -> usize {
+    ALL_PLAN_ENTRIES.get()
 }
 
 /// Proof that projection and generic deletion cover the same inline leaves.
@@ -29,20 +38,64 @@ impl<'a> ValidatedTextCut<'a> {
 }
 
 pub(super) fn plan<'a>(
-    source: crate::clipboard::BudgetedTextCutSource<'a>,
+    mut source: crate::clipboard::BudgetedTextCutSource<'a>,
     selection: DocumentSelection,
+    all_paragraph_attrs: impl FnOnce() -> Result<Option<&'a NodeAttrs>, PolicyError>,
 ) -> Result<(ValidatedTextCut<'a>, EditPlan), SessionError> {
     #[cfg(test)]
     PLAN_ENTRIES.set(PLAN_ENTRIES.get() + 1);
     let document = source.document();
     let rejected = || {
-        PolicyError::new("prepared text Cut requires a nonempty inline-only range outside tables")
+        PolicyError::new(
+            "prepared text Cut requires an inline-only range or exact text-only All outside tables",
+        )
     };
     if selection.is_collapsed()
         || selection.active_cell_range().is_some()
         || selection.as_node_selection().is_some()
     {
         return Err(rejected().into());
+    }
+    if selection.is_all(document) {
+        // All is structural, not a normalized full inline range. Check every
+        // container and leaf before building a transaction, and keep the
+        // original source for closed clipboard provenance and history.
+        if !all_text_tree(document, document.root()) {
+            return Err(rejected().into());
+        }
+        let default_attrs = NodeAttrs::empty();
+        let attrs = all_paragraph_attrs()?.unwrap_or(&default_attrs);
+        // The host lends its defaults. Account for them with the already
+        // admitted source before any deep clone or candidate allocation.
+        source.reserve_all_paragraph(attrs)?;
+        #[cfg(test)]
+        ALL_PLAN_ENTRIES.set(ALL_PLAN_ENTRIES.get() + 1);
+        let children = document
+            .node(document.root())
+            .and_then(|node| node.content().as_children())
+            .ok_or(SessionError::SelectionInvalid)?;
+        let mut transaction =
+            super::structure::user_transaction().with_step(TransactionStep::InsertNode {
+                parent: document.root(),
+                index: 0,
+                kind: NodeKind::Paragraph,
+                attrs: attrs.clone(),
+                content: NodeContent::empty_inline(),
+            });
+        for child in children {
+            transaction.push_step(TransactionStep::RemoveNode { node: *child });
+        }
+        return Ok((
+            ValidatedTextCut {
+                document,
+                selection,
+            },
+            EditPlan::new(
+                transaction,
+                SelectionUpdate::CaretAtLastInsertedOffset { offset: 0 },
+                None,
+            ),
+        ));
     }
     let (DocumentPosition::Inline(head), DocumentPosition::Inline(tail)) =
         selection.ordered(document)?
@@ -91,6 +144,32 @@ pub(super) fn plan<'a>(
         },
         plan,
     ))
+}
+
+// Only the budgeted entry above calls this recursive, allocation-free scan.
+// Empty inline blocks are real selected structure; empty containers are
+// barriers. Unknown block semantics cannot opt in just by carrying text.
+fn all_text_tree(document: &XiaomuDocument, id: NodeId) -> bool {
+    let Some(node) = document.node(id) else {
+        return false;
+    };
+    match (node.kind(), node.content()) {
+        (
+            NodeKind::Paragraph | NodeKind::Heading(_) | NodeKind::CodeBlock,
+            NodeContent::Inline(_),
+        ) => true,
+        (
+            NodeKind::Document
+            | NodeKind::Quote
+            | NodeKind::BulletList
+            | NodeKind::OrderedList
+            | NodeKind::ListItem
+            | NodeKind::TaskList
+            | NodeKind::TaskItem,
+            NodeContent::Children(children),
+        ) => !children.is_empty() && children.iter().all(|id| all_text_tree(document, *id)),
+        _ => false,
+    }
 }
 
 fn collect_leaves(

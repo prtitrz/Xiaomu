@@ -225,9 +225,31 @@ pub(super) fn document(
     document: &XiaomuDocument,
     projection: Option<&ClipboardTextProjection>,
 ) -> Result<(), ()> {
+    text_cut_document(document, projection).map(|_| ())
+}
+
+/// Retains borrowed source accounting for one optional All replacement node.
+pub(super) struct TextCutBudget {
+    budget: Budget,
+}
+
+impl TextCutBudget {
+    pub(super) fn reserve_paragraph(&mut self, attrs: &NodeAttrs) -> Result<(), ()> {
+        // The replacement is one root child. Reserve its complete payload on
+        // top of the original source, without subtracting selected content.
+        self.budget.node(1)?;
+        self.budget.attrs(attrs, 1)
+    }
+}
+
+pub(super) fn text_cut_document(
+    document: &XiaomuDocument,
+    projection: Option<&ClipboardTextProjection>,
+) -> Result<TextCutBudget, ()> {
     let mut budget = Budget::default();
     budget.projection(projection)?;
-    budget.document_node(document, document.root(), 0)
+    budget.document_node(document, document.root(), 0)?;
+    Ok(TextCutBudget { budget })
 }
 
 /// A borrowed source preflight retained while planning clipped cell contents.

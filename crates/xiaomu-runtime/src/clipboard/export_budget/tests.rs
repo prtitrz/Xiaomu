@@ -2,6 +2,75 @@ use super::*;
 use xiaomu_core::document::{InlineContent, NodeStoreBuilder};
 
 #[test]
+fn text_cut_replacement_reserves_exact_node_value_and_byte_boundaries() {
+    let mut admitted = TextCutBudget {
+        budget: Budget {
+            nodes: MAX_NODES - 1,
+            values: MAX_VALUES - 16,
+            bytes: MAX_BYTES - 512,
+        },
+    };
+    admitted.reserve_paragraph(&NodeAttrs::empty()).unwrap();
+    assert_eq!(
+        (
+            admitted.budget.nodes,
+            admitted.budget.values,
+            admitted.budget.bytes
+        ),
+        (MAX_NODES, MAX_VALUES, MAX_BYTES)
+    );
+    for fault in 0..3 {
+        let mut budget = TextCutBudget {
+            budget: Budget {
+                nodes: if fault == 0 { MAX_NODES } else { 0 },
+                values: if fault == 1 { MAX_VALUES - 15 } else { 0 },
+                bytes: if fault == 2 { MAX_BYTES - 511 } else { 0 },
+            },
+        };
+        assert!(budget.reserve_paragraph(&NodeAttrs::empty()).is_err());
+    }
+}
+
+#[test]
+fn text_cut_replacement_attrs_use_root_child_depth_and_preserve_source_cost() {
+    let original = source(NodeAttrs::empty());
+    let mut admitted = text_cut_document(&original, None).unwrap();
+    let before = (
+        admitted.budget.nodes,
+        admitted.budget.values,
+        admitted.budget.bytes,
+    );
+    let mut value = AttrValue::Null;
+    for _ in 0..31 {
+        value = AttrValue::List(vec![value]);
+    }
+    let replacement_attrs = attrs(value.clone());
+    let mut cost = Budget::default();
+    cost.node(1).unwrap();
+    cost.attrs(&replacement_attrs, 1).unwrap();
+    admitted.reserve_paragraph(&replacement_attrs).unwrap();
+    assert_eq!(
+        (
+            admitted.budget.nodes,
+            admitted.budget.values,
+            admitted.budget.bytes
+        ),
+        (
+            before.0 + cost.nodes,
+            before.1 + cost.values,
+            before.2 + cost.bytes
+        )
+    );
+    let too_deep = attrs(AttrValue::List(vec![value]));
+    assert!(
+        text_cut_document(&original, None)
+            .unwrap()
+            .reserve_paragraph(&too_deep)
+            .is_err()
+    );
+}
+
+#[test]
 fn leaf_descriptor_cost_is_reserved_before_source_or_fragment_expansion() {
     let projection = ClipboardTextProjection::text_between_lf_with_atoms((0..32).map(|index| {
         xiaomu_core::document::AtomKind::new(format!("{index:02}{}", "\u{1}".repeat(126))).unwrap()

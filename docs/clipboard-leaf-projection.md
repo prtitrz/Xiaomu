@@ -51,8 +51,10 @@ writing once and publishing the same candidate. Read-only input still permits
 Copy and blocks Cut before either policy or platform side effects.
 
 The separate default-off `SessionPolicy::prepare_text_cut` hook also admits
-verified nonempty inline-only ranges outside tables through the same prepared
-guard. It does not open the public projection-only Cut endpoint; see the
+verified nonempty inline-only ranges and exact text-only All outside tables
+through the same prepared guard. All keeps closed root provenance and replaces
+the roots with a default empty paragraph. It does not open the public
+projection-only Cut endpoint; see the
 [prepared Cut contract](prepared-table-cut.md#default-off-generic-text-cut).
 
 Historical V1/legacy ordinary Cut behavior is unchanged; its separate fallible Delete
