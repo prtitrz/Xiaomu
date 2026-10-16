@@ -1,5 +1,15 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-16 bounded extension: the default-off prepared text-Cut hook also admits
+exact text-only All after full borrowed source admission. Closed root export and
+original All history are retained; the candidate replaces admitted roots with
+one default empty paragraph while preserving root identity/attributes. An
+All-only borrowed-defaults policy hook is bounded with the source before cloning;
+its absence keeps empty paragraph attributes. Ordinary
+gaps, protected-atom candidate refusals, table/atomic/empty-container barriers,
+legacy Delete and default Select All remain unchanged. See the
+[prepared Cut contract](prepared-table-cut.md#default-off-generic-text-cut).
+
 2026-10-15 bounded extension: explicit finite extension-atom clipboard leaf
 projection composes with the existing export policy and geometry. Exact kinds
 map to LF, rich payload and reading coordinates remain unchanged, and only the

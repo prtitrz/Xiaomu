@@ -81,11 +81,24 @@ pub(crate) fn export_prepared_cut(
 /// budget, including for content outside the selected range.
 pub(crate) struct BudgetedTextCutSource<'a> {
     document: &'a xiaomu_core::document::XiaomuDocument,
+    budget: export_budget::TextCutBudget,
 }
 
 impl<'a> BudgetedTextCutSource<'a> {
     pub(crate) fn document(&self) -> &'a xiaomu_core::document::XiaomuDocument {
         self.document
+    }
+
+    pub(crate) fn reserve_all_paragraph(
+        &mut self,
+        attrs: &xiaomu_core::document::NodeAttrs,
+    ) -> Result<(), crate::session::SessionError> {
+        self.budget.reserve_paragraph(attrs).map_err(|()| {
+            crate::session::PolicyError::new(
+                "prepared All paragraph exceeds bounded projection budget",
+            )
+            .into()
+        })
     }
 }
 
@@ -94,10 +107,10 @@ pub(crate) fn preflight_prepared_text_cut<'a>(
     spec: &ClipboardExportSpec,
 ) -> Result<BudgetedTextCutSource<'a>, crate::session::SessionError> {
     let projection = spec.text_projection();
-    export_budget::document(document, projection.as_ref()).map_err(|()| {
+    let budget = export_budget::text_cut_document(document, projection.as_ref()).map_err(|()| {
         crate::session::PolicyError::new("clipboard export exceeds bounded projection budget")
     })?;
-    Ok(BudgetedTextCutSource { document })
+    Ok(BudgetedTextCutSource { document, budget })
 }
 
 /// Internal text Cut export requires the planner's validated source proof.

@@ -3,7 +3,7 @@
 use std::fmt;
 
 use crate::clipboard::{ClipboardExportPurpose, ClipboardExportSpec};
-use xiaomu_core::document::{MarkSet, XiaomuDocument};
+use xiaomu_core::document::{MarkSet, NodeAttrs, XiaomuDocument};
 
 use super::{
     DocumentSelection, DocumentSession, EditIntent, EditPlan, HistoryTimestamp, SessionError,
@@ -187,13 +187,39 @@ pub trait SessionPolicy {
     ///
     /// Defaults to `false`, preserving the legacy route. This is queried only
     /// when `prepare_cut` supplies no structural plan. `true` requires an
-    /// explicit Cut export spec and a nonempty inline-only range outside tables;
+    /// explicit Cut export spec and either a nonempty inline-only range or exact
+    /// text-only All outside tables. All retains closed source provenance and
+    /// replaces its roots with one empty default paragraph and an inline caret;
+    /// the document root identity and attributes remain unchanged. A selected
+    /// empty paragraph is still structure; an empty root is not a Cut source.
+    /// Unknown block kinds and empty containers are not admitted for All;
     /// unsupported geometry rejects rather than falling back to generic Delete.
+    /// [`Self::text_cut_all_paragraph_attrs`] can lend its replacement defaults.
     /// Runtime preserves mixed-inline ordinals and unselected atoms. Candidate
     /// validation may reject removal of protected extension atoms before any
     /// clipboard write or live mutation. This callback may also reject a source.
     fn prepare_text_cut(&self, _context: SessionContext<'_>) -> Result<bool, PolicyError> {
         Ok(false)
+    }
+
+    /// Lends default paragraph attributes for an admitted exact-All text Cut.
+    ///
+    /// `None` uses empty attributes. This is queried only after the text hook
+    /// opts in, complete borrowed source budgeting succeeds, and exact All's
+    /// known text-block tree is admitted. Inline ranges, unsupported All block
+    /// geometry and structural Cut plans never call it. Atom projection may
+    /// still reject later. Returned attributes are budgeted
+    /// together with the source before cloning or candidate allocation; the
+    /// final candidate still passes ordinary policy validation before writing.
+    ///
+    /// Only the new empty paragraph uses these attributes. Source clipboard
+    /// roots, the document root and history provenance are unchanged. An error
+    /// refuses Cut without live side effects or legacy fallback.
+    fn text_cut_all_paragraph_attrs(
+        &self,
+        _context: SessionContext<'_>,
+    ) -> Result<Option<&NodeAttrs>, PolicyError> {
+        Ok(None)
     }
 
     /// Selects explicit clipboard export rules before projection or writes.
@@ -253,6 +279,18 @@ impl DocumentSession {
     pub(super) fn prepare_text_cut_enabled(&self) -> Result<bool, PolicyError> {
         self.policy.as_ref().map_or(Ok(false), |policy| {
             policy.prepare_text_cut(SessionContext {
+                document: &self.document,
+                selection: self.selection,
+                original_selection: self.selection,
+                stored_marks: self.stored_marks.as_ref(),
+                input_rule_undo_available: self.input_rule_undo_available_at(self.selection),
+            })
+        })
+    }
+
+    pub(super) fn text_cut_all_paragraph_attrs(&self) -> Result<Option<&NodeAttrs>, PolicyError> {
+        self.policy.as_ref().map_or(Ok(None), |policy| {
+            policy.text_cut_all_paragraph_attrs(SessionContext {
                 document: &self.document,
                 selection: self.selection,
                 original_selection: self.selection,

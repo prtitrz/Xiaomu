@@ -460,7 +460,7 @@ Default legacy Cut, projection provenance and ordinary marks semantics are uncha
 
 `SessionPolicy::prepare_text_cut` is a separate default-off, fallible opt-in.
 After the structural hook declines, Runtime can plan a nonempty inline-only
-range outside tables, preserving byte boundaries, atom ordinals, marks and
+range or exact text-only All outside tables, preserving byte boundaries, atom ordinals, marks and
 unselected extension atoms. A full leaf scan rejects intervening atomic/non-inline unknown
 leaves, empty containers and opaque table subtrees; even same-cell text is
 currently refused. Once opted in, unsupported geometry is an error, never a
@@ -468,6 +468,15 @@ fallback to write-then-Delete. A private validated-source proof opens only the
 internal prepared export entry; public `clipboard_slice_for(Cut)` guards remain
 unchanged. The existing scoped guard, final-candidate policy, exact inverse/redo
 and GPUI lossless-write-before-publish contract apply to these text plans too.
+Exact All preserves closed complete-root export and original history selection;
+after bounded whole-tree admission of known text blocks and nonempty quote/list
+containers, it replaces the roots with one canonical empty paragraph and an
+inline caret, preserving the document root identity/attributes. An optional
+All-only `text_cut_all_paragraph_attrs` policy hook lends exact replacement
+defaults; the accumulated source/replacement budget precedes cloning, and
+`None` retains empty attributes. Ordinary full
+inline ranges keep their open provenance and surviving block shells. Empty
+paragraph All remains selected structure; empty-root All rejects as collapsed.
 Native OS clipboard ownership and downstream acceptance remain separate.
 
 

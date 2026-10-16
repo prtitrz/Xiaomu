@@ -47,7 +47,8 @@ Runtime text planner, not an arbitrary host transaction. Any later rejection is
 an error, never permission to fall back to legacy write-then-Delete.
 
 Supported sources are nonempty inline ranges, in either direction, within one
-block or across an inline-only sequence in the same non-table editing domain.
+block or across an inline-only sequence in the same non-table editing domain,
+and exact text-only `DocumentSelection::all` root ranges (either orientation).
 The existing atom-aware planners preserve Unicode byte boundaries, marks,
 same-offset atom ordinals and unselected extension-atom payloads/identities.
 Candidate policy can require a protected atom to survive. The guard and its
@@ -60,9 +61,45 @@ Runtime then scans actual tree leaves before admitting the source. Intervening
 images, horizontal rules, non-inline unknown leaves, empty containers and tables reject;
 inline endpoints alone are insufficient. Tables are opaque barriers, including
 when both endpoints are outside a table. All table-contained ranges, even
-within one cell, are deliberately unsupported in this initial contract. All,
+within one cell, are deliberately unsupported in this contract. Ordinary
 gap, node, Atomic and collapsed sources cannot use the text hook. Structural
 plans retain their earlier, separate priority and source validation.
+
+Exact All has a separate structural contract within this hook. Its entire tree
+must contain only paragraph/heading/code inline leaves beneath document,
+quote, ordinary-list or task-list containers; unknown block kinds, tables,
+atomic blocks and empty containers reject. Empty inline paragraphs and atom-only
+inline content (including consecutive HardBreaks) are allowed. The explicit
+export spec still determines which extension atoms can be projected losslessly.
+The unchanged All source exports every complete root with closed `WholeRoots`
+0/0 provenance, preserving wrappers, attributes, marks and inline atoms. It is
+never normalized to a full inline range, whose open fragment and block-shell
+deletion semantics remain different. Candidate policy can still reject deletion
+of any protected inline atom before clipboard publication.
+
+The new All planner uses existing Core InsertNode/RemoveNode transactions to
+replace the selected roots with one newly allocated empty Paragraph, keeping
+the document root identity and attributes. Its final caret
+is at that paragraph's start. This is the text-Cut hook's default paragraph
+contract, not a change to generic Delete. Attributes default to empty;
+`SessionPolicy::text_cut_all_paragraph_attrs(context) -> Result<Option<&NodeAttrs>, PolicyError>`
+may lend the host's exact paragraph defaults. The hook is queried only for
+admitted exact All, after full borrowed source budgeting and known-tree geometry
+checks. Inline ranges, declined text opt-ins and structural plans do not call it.
+Runtime adds the complete replacement paragraph and borrowed attributes to the
+source's node/value/byte/depth budget before cloning or owned planning. Hook
+errors, budget failures and final candidate refusals preserve all live state;
+there is no fallback. This is independent of clipboard cell-fill attributes and
+does not change source projection or root attributes. Undo restores
+the original roots, identities and exact All selection; Redo restores the same
+replacement identity and caret. Stored marks clear on publication and follow
+the existing history semantics, which do not restore pending marks on Undo.
+
+All over a single empty paragraph still selects closed structural content: it
+writes empty plain text plus that paragraph's metadata and replaces the paragraph
+in one isolated undo unit. A document root with no children has a collapsed All
+and rejects without writing or changing history. This distinction follows
+whole-node clipboard provenance rather than testing only whether text is empty.
 
 The internal text exporter requires the planner's private validated-source
 proof. Public projection-only Cut guards, including the LF-with-extension-atoms

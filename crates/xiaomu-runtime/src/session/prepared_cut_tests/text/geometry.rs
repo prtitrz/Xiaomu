@@ -2,7 +2,7 @@
 use super::*;
 use xiaomu_core::selection::NodeGap;
 
-fn assert_rejected(document: &XiaomuDocument, range: DocumentSelection) {
+pub(super) fn assert_rejected(document: &XiaomuDocument, range: DocumentSelection) {
     let mut s = session(document, range, None);
     sentinels(&mut s);
     let events = listen(&mut s);
@@ -97,12 +97,11 @@ fn tables_are_barriers_including_outside_endpoints_and_same_cell() {
 }
 
 #[test]
-fn all_gap_collapsed_and_node_sources_do_not_fall_back() {
+fn gap_collapsed_and_node_sources_do_not_fall_back() {
     let mut builder = NodeStoreBuilder::new();
     let id = paragraph(&mut builder, "abc");
     let document = finish(builder, vec![id]);
     for range in [
-        DocumentSelection::all(&document),
         DocumentSelection::node(&document, id).unwrap(),
         DocumentSelection::collapsed(DocumentPosition::Inline(point(&document, id, 1, 0))),
         DocumentSelection::new(NodeGap::new(document.root(), 0), point(&document, id, 2, 0)),
@@ -176,6 +175,12 @@ fn structural_cut_plan_has_priority_over_text_hook() {
         }
         fn prepare_text_cut(&self, _: SessionContext<'_>) -> Result<bool, PolicyError> {
             panic!("structural plan must win without consulting text hook")
+        }
+        fn text_cut_all_paragraph_attrs(
+            &self,
+            _: SessionContext<'_>,
+        ) -> Result<Option<&NodeAttrs>, PolicyError> {
+            panic!("structural plan must not consult All paragraph defaults")
         }
         fn clipboard_export_spec(
             &self,

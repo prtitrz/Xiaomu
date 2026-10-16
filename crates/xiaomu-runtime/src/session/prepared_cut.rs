@@ -122,7 +122,9 @@ impl DocumentSession {
     /// Projection-only opted-in CellRange Cut remains
     /// closed; the historical no-export-spec unit-cell path stays unchanged.
     /// `SessionPolicy::prepare_text_cut` separately admits generic inline-only
-    /// ranges outside tables. Once admitted, unsupported sources fail closed.
+    /// ranges and exact text-only All outside tables. All exports closed roots
+    /// and replaces them with one default empty paragraph, keeping the document
+    /// root. Once admitted, unsupported sources fail closed.
     pub fn prepare_cut(&mut self) -> Result<Option<PreparedCut<'_>>, SessionError> {
         self.selection.validate(&self.document)?;
         let structural_plan = self.prepare_cut_plan()?;
@@ -145,7 +147,9 @@ impl DocumentSession {
                 .clipboard_export_spec(ClipboardExportPurpose::Cut)?
                 .ok_or(SessionError::UnsupportedTableOperation)?;
             let budgeted = preflight_prepared_text_cut(&self.document, &spec)?;
-            let (source, plan) = super::prepared_text_cut::plan(budgeted, self.selection)?;
+            let (source, plan) = super::prepared_text_cut::plan(budgeted, self.selection, || {
+                self.text_cut_all_paragraph_attrs()
+            })?;
             let slice =
                 export_prepared_text_cut(&source, spec)?.ok_or(SessionError::SelectionInvalid)?;
             (plan, slice)

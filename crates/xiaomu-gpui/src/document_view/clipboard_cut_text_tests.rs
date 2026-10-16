@@ -1,6 +1,9 @@
 //! Synthetic prepared text Cut through GPUI's real coordinator and stock writer.
 //! Writer observations count calls, not OS clipboard ownership acknowledgments.
 
+#[path = "clipboard_cut_text_tests/all.rs"]
+mod all;
+
 use crate::block_view::{ClipboardCut, SharedSession};
 use crate::document_view::DocumentView;
 use crate::editor::{EditorHooks, EditorInstance, bind_default_editor_keys};
@@ -32,6 +35,7 @@ struct Calls {
     candidates: Vec<usize>,
     publications: Vec<usize>,
     selections: usize,
+    sources: Vec<DocumentSelection>,
 }
 
 struct Policy {
@@ -42,8 +46,9 @@ struct Policy {
     original: InlineContent,
 }
 impl SessionPolicy for Policy {
-    fn prepare_text_cut(&self, _: SessionContext<'_>) -> Result<bool, PolicyError> {
+    fn prepare_text_cut(&self, context: SessionContext<'_>) -> Result<bool, PolicyError> {
         self.calls.borrow_mut().gates += 1;
+        self.calls.borrow_mut().sources.push(context.selection());
         if !self.gate.get() {
             return Err(PolicyError::new("synthetic source permission expired"));
         }
@@ -51,11 +56,12 @@ impl SessionPolicy for Policy {
     }
     fn clipboard_export_spec(
         &self,
-        _: SessionContext<'_>,
+        context: SessionContext<'_>,
         purpose: ClipboardExportPurpose,
     ) -> Result<Option<ClipboardExportSpec>, PolicyError> {
         assert_eq!(purpose, ClipboardExportPurpose::Cut);
         self.calls.borrow_mut().export_specs += 1;
+        self.calls.borrow_mut().sources.push(context.selection());
         Ok(Some(
             ClipboardExportSpec::new().with_text_projection(
                 ClipboardTextProjection::text_between_lf_with_atoms([AtomKind::new(
