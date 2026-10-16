@@ -9,6 +9,7 @@ use crate::{
     editor::{EditorHooks, EditorInstance, bind_default_editor_keys},
     editor_commands::{
         CodePasteSource, CommandRoute, EditorCommand, EditorCommandContext, EditorCommandRouter,
+        ImagePasteAdmission,
     },
 };
 use gpui::{AppContext as _, TestAppContext, WindowHandle};
@@ -75,8 +76,21 @@ struct Router {
     decision: Decision,
     seen: RefCell<Vec<(String, CodePasteSource)>>,
     ordinary: Cell<usize>,
+    admissions: Cell<usize>,
+    allow_images: Cell<bool>,
 }
 impl EditorCommandRouter for Router {
+    fn admit_image_paste(
+        &self,
+        _: EditorCommandContext<'_>,
+    ) -> Result<ImagePasteAdmission, PolicyError> {
+        self.admissions.set(self.admissions.get() + 1);
+        Ok(if self.allow_images.get() {
+            ImagePasteAdmission::Allow
+        } else {
+            ImagePasteAdmission::Default
+        })
+    }
     fn route(
         &self,
         _: EditorCommandContext<'_>,
@@ -164,6 +178,8 @@ fn mount(kind: NodeKind, decision: Option<Decision>, cx: &mut TestAppContext) ->
         decision: decision.unwrap_or(Decision::Default),
         seen: RefCell::new(Vec::new()),
         ordinary: Cell::new(0),
+        admissions: Cell::new(0),
+        allow_images: Cell::new(false),
     });
     let host = Rc::new(Host(Cell::new(0)));
     let counts = Rc::new(Cell::new((0, 0)));
@@ -325,4 +341,26 @@ fn mixed_clipboard_keeps_paragraph_image_first_and_empty_code_text_unrouted(
             }
         }
     }
+}
+
+#[gpui::test]
+fn image_admission_follows_consumed_code_text_and_preserves_image_first_elsewhere(
+    cx: &mut TestAppContext,
+) {
+    for decision in [Decision::Raw, Decision::Reject] {
+        let code = mount(NodeKind::CodeBlock, Some(decision), cx);
+        code.router.allow_images.set(true);
+        paste(&code, Some("raw\r\ntext"), gpui::ImageFormat::Png, cx);
+        assert_eq!(code.router.seen.borrow().len(), 1);
+        assert_eq!(code.router.admissions.get(), 0);
+        assert_eq!(code.host.0.get(), 0);
+    }
+    let paragraph = mount(NodeKind::Paragraph, Some(Decision::Raw), cx);
+    paragraph.router.allow_images.set(true);
+    paste(&paragraph, Some("not pasted"), gpui::ImageFormat::Png, cx);
+    assert!(paragraph.router.seen.borrow().is_empty());
+    assert_eq!(paragraph.router.ordinary.get(), 0);
+    assert_eq!(paragraph.router.admissions.get(), 1);
+    assert_eq!(paragraph.host.0.get(), 1);
+    assert_eq!(text(&paragraph), "");
 }

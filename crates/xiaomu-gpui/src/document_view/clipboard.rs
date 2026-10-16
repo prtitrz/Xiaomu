@@ -2,7 +2,9 @@
 
 use super::{DocumentView, EditorRejectionReason, EditorRejectionStage};
 use crate::block_view::{ClipboardCopy, ClipboardCut, ClipboardPaste};
-use crate::editor_commands::{CodePasteSource, EditorCommand};
+use crate::editor_commands::{
+    CodePasteSource, EditorCommand, EditorCommandContext, ImagePasteAdmission,
+};
 use crate::input::platform_clipboard::{
     PlatformClipboard, PlatformClipboardContent, prepare_lossless_slice,
 };
@@ -171,16 +173,60 @@ impl DocumentView {
                 {
                     return;
                 }
+                let admission = {
+                    let session = self.session.borrow();
+                    self.command_router.as_ref().map_or(
+                        Ok(ImagePasteAdmission::Default),
+                        |router| {
+                            router.admit_image_paste(EditorCommandContext::from_session(&session))
+                        },
+                    )
+                };
+                let admission = match admission {
+                    Ok(admission) => admission,
+                    Err(_) => {
+                        // Release the callback's borrow before deferred feedback.
+                        self.emit_rejection(
+                            EditorRejectionStage::CommandRouting,
+                            EditorRejectionReason::Policy,
+                            cx,
+                        );
+                        return;
+                    }
+                };
                 let selection = self.session.borrow().selection();
-                if code_block
-                    || !selection.is_collapsed()
-                    || !matches!(selection.focus(), super::DocumentPosition::Inline(_))
+                if admission == ImagePasteAdmission::Default
+                    && (code_block
+                        || !selection.is_collapsed()
+                        || !matches!(selection.focus(), super::DocumentPosition::Inline(_)))
                 {
                     eprintln!(
                         "xiaomu: image paste requires a collapsed text caret outside code blocks"
                     );
                     return;
                 }
+                // Only opt-in transport adds pre-import guards and a local
+                // source stamp. Default retains its historical side-effect order.
+                let source = if admission == ImagePasteAdmission::Allow {
+                    if self.read_only_input
+                        || self.selection_has_hidden_table_endpoint()
+                        || self.focused_child_composing(window, cx)
+                    {
+                        return;
+                    }
+                    let session = self.session.borrow();
+                    if session.selection().validate(session.document()).is_err() {
+                        return;
+                    }
+                    Some((
+                        session.identity(),
+                        session.document().revision(),
+                        session.selection(),
+                        session.stored_marks().cloned(),
+                    ))
+                } else {
+                    None
+                };
                 let Some(service) = &self.asset_service else {
                     eprintln!("xiaomu: image paste requires a host asset service");
                     return;
@@ -192,6 +238,34 @@ impl DocumentView {
                             xiaomu_core::document::ImageSource::AssetRef(_)
                         ) =>
                     {
+                        if let Some((identity, revision, selection, marks)) = source {
+                            // Verify mutable access too: an importer retaining an
+                            // immutable borrow must not cause apply_intent to panic.
+                            let Ok(session) = self.session.try_borrow_mut() else {
+                                return;
+                            };
+                            if session.identity() != identity {
+                                return;
+                            }
+                            let stale = session.document().revision() != revision
+                                || session.selection() != selection
+                                || session.stored_marks() != marks.as_ref();
+                            drop(session);
+                            if stale {
+                                self.emit_rejection(
+                                    EditorRejectionStage::ClipboardPaste,
+                                    EditorRejectionReason::InvalidSelection,
+                                    cx,
+                                );
+                                return;
+                            }
+                            if self.read_only_input
+                                || self.selection_has_hidden_table_endpoint()
+                                || self.focused_child_composing(window, cx)
+                            {
+                                return;
+                            }
+                        }
                         self.apply_intent(EditIntent::InsertImage { image }, window, cx);
                     }
                     Ok(_) => eprintln!("xiaomu: image import must return a host asset reference"),
@@ -258,3 +332,7 @@ mod cell_carrier_paste_tests;
 #[cfg(test)]
 #[path = "clipboard_cut_text_tests.rs"]
 mod cut_text_tests;
+
+#[cfg(test)]
+#[path = "clipboard_image_admission_tests.rs"]
+mod image_admission_tests;

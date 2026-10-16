@@ -114,7 +114,8 @@ impl<'a> EditorCommandContext<'a> {
         self.document
     }
 
-    /// Returns both original endpoints, including direction and affinity.
+    /// Returns the full original selection, including direction and affinity,
+    /// node identity, All gaps, active cell range and parked endpoints.
     #[must_use]
     pub const fn selection(self) -> DocumentSelection {
         self.selection
@@ -141,6 +142,18 @@ pub enum CommandRoute {
     Intent(EditIntent),
 }
 
+/// Admission of the original image-paste source before asset import.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImagePasteAdmission {
+    /// Preserve the legacy collapsed-inline, non-code image transport.
+    Default,
+    /// Admit this exact selection to import and ordinary `InsertImage` policy.
+    ///
+    /// This does not supply a planner or bypass view guards, asset validation,
+    /// session policy or final candidate validation. No selection is replaced.
+    Allow,
+}
+
 /// Optional per-view routing for explicit editor gestures and clipboard sources.
 ///
 /// Callbacks must be pure, read-only and non-reentrant. Do not borrow or mutate
@@ -152,6 +165,26 @@ pub enum CommandRoute {
 /// Install with [`EditorInstance::with_command_router`](crate::editor::EditorInstance::with_command_router)
 /// or [`DocumentView::set_command_router`](crate::document_view::DocumentView::set_command_router).
 pub trait EditorCommandRouter {
+    /// Admits the original image-paste selection before any asset import.
+    ///
+    /// Called only for image transport, after validated structured clipboard
+    /// priority and any consumed code-target text route. The context retains
+    /// the complete original selection and typing marks; no image bytes or
+    /// host resource identifiers are exposed. Errors consume paste with no
+    /// import or fallback. Existing routers retain the legacy default.
+    ///
+    /// Like all router callbacks this is pure, read-only and non-reentrant.
+    /// `Allow` requires the host to provide any non-default selection planner
+    /// through session policy. The synchronous importer is called without a
+    /// session borrow; if identity, revision, selection or stored marks change,
+    /// insertion is cancelled without rolling back importer side effects.
+    fn admit_image_paste(
+        &self,
+        _context: EditorCommandContext<'_>,
+    ) -> Result<ImagePasteAdmission, PolicyError> {
+        Ok(ImagePasteAdmission::Default)
+    }
+
     /// Optionally selects an atomic block after its native pointer gesture.
     ///
     /// Receives the original selection and a currently validated atomic node.

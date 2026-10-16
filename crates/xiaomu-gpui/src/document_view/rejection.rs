@@ -22,7 +22,7 @@ pub enum EditorRejectionStage {
     ClipboardCopy,
     /// Cut could not project or losslessly transport the selection.
     ClipboardCut,
-    /// Recognized native clipboard metadata was rejected before paste.
+    /// Native clipboard metadata or an opted-in image source was rejected.
     ClipboardPaste,
     /// An opted-in native font-size view refused a transient composition.
     TextSizePreedit,
@@ -104,7 +104,9 @@ impl EditorRejectionReason {
 ///
 /// Emission occurs after the rejected session call has returned and its borrow
 /// has been released. Session rollback is complete before a subscriber can read
-/// the view's session. Emission itself changes no document, selection, marks,
+/// the view's session. Stale image-source rejection cancels only the pending
+/// insertion; importer side effects are not rolled back. Emission itself changes
+/// no document, selection, marks,
 /// history, layout epoch or document/selection listener state. GPUI delivers
 /// events through its normal event queue, not as synchronous session listeners;
 /// the event's local document revision is captured when emitted, allowing hosts
@@ -113,7 +115,8 @@ impl EditorRejectionReason {
 ///
 /// Coverage includes failed `apply_edit_intent` and
 /// `apply_edit_intent_with_selection` calls, host edit command routing, Copy/Cut
-/// projection or lossless transport, rejected native Paste metadata, and failed
+/// projection or lossless transport, rejected native Paste metadata or stale
+/// opted-in image sources, and failed
 /// `ParagraphView` typing, explicit replacement and IME commit session calls.
 /// Native input failures use `NativeInput`, or the existing `TextSizeInput` for
 /// font-size-capable input views. Paragraph and document-range input children
@@ -125,7 +128,7 @@ impl EditorRejectionReason {
 /// Copy text fallback, cancelled composition and composition/presentation guards
 /// do not emit, except opted-in font-size admission failures
 /// (`TextSizePreedit` / `TextSizeLayout`). Direct session calls,
-/// selection/navigation/checkbox actions, image import, history, persistence and
+/// selection/navigation/checkbox actions, image import errors, history, persistence and
 /// the explicitly returned errors from `apply_edit_transaction` are not covered.
 /// This is not a universal engine error stream or a save-status event.
 ///

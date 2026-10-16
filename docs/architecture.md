@@ -261,6 +261,8 @@ JoinNodes          → 删除追加文本 + RestoreSubtree
 
 可选 `with_list_marker_provider` / `set_list_marker_provider` 每次渲染读取真实 list/item/index/depth 与当前 attrs，仅向原 GPUI 文本绘制提供视觉标签。默认标签与固定宽度不变；自定义标签列可扩宽，不向正文插入序号、不改变位置或 selection。setter 后已挂载视图须按通常 GPUI 约定通知重绘。
 
+图片 transport 可独立覆盖默认方法 `admit_image_paste`，返回 `Default` 或 `Allow`。Default 保持旧 collapsed-inline/non-code 路径；Allow 只准入完整原选区，不提供替代 selection 或 planner，仍经过同步 AssetService、原 InsertImage policy 和 final candidate validation。Allow 在 import 前检查 view guards，并跨同步 callout 比对 session identity、revision、完整 selection 与 stored marks；过期时取消后续插入，不回滚 importer 副作用。具体顺序、反馈和资源边界见 [image source admission](image-paste-admission.md)。
+
 代码块宿主可独立覆盖默认方法 `route_enter`、`route_code_paste`、`route_code_slice` 和 `route_arrow_down`。Enter 来源在 block-kind 映射前区分普通、Shift 与显式绑定的 Ctrl/Cmd；未绑定新增 primary action 的旧宿主不变，Default 向外传播。Code 文本在 CR/LF 规范化前交给 hook，混合图片+非空文字可由宿主选择文字；默认仍保持图片优先及代码块图片拒绝。已验证结构片段通过独立 slice hook 提供完整树，Default 继续保留旧 open 平文行为与 closed fail-closed，不偷偷展开结构。普通平台文字保持独立 raw 来源。Down hook 只在非 Shift、无 composition 时运行，成功只改经过验证的 selection，不增加文档 history。所有 callback 仍为纯只读，失败/NoChange 不污染会话。
 
 `CodeBlockPresentation` 是可选、每实例的前端配置，不改变 `EditorHooks` 或 canonical attrs。代码块使用宿主字体与颜色、.88 倍正文字号、1.55 倍正文行高（对应 CSS pre 最小行框）、14/16px 内边距、8px 圆角与 1px 边框；列表 marker 留在包装外。layout/paint/caret/IME 共享同一有效样式和布局缓存；setter 清除该实例相关几何缓存。未配置宿主保持原样。虚拟 GPUI 测试不证明真实字体像素与浏览器一致，语法高亮计算尚未接入该配置。
