@@ -178,7 +178,9 @@ impl DocumentSession {
             };
         }
 
-        if !self.selection.is_collapsed()
+        // Empty-root All is collapsed but still structural: formatting is a
+        // no-op, never a pending mark change requiring an inline caret.
+        if (self.selection.is_all(&self.document) || !self.selection.is_collapsed())
             && matches!(
                 intent,
                 EditIntent::ToggleMark { .. }
