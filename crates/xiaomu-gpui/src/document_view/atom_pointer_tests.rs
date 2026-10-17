@@ -4,6 +4,8 @@
 mod geometry_tests;
 #[path = "atom_pointer_lifecycle_tests.rs"]
 mod lifecycle_tests;
+#[path = "atom_pointer_sibling_tests.rs"]
+mod sibling_tests;
 
 use std::{cell::RefCell, rc::Rc};
 

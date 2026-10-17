@@ -37,6 +37,9 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.begin_atom_pointer_down(event, false, window, cx) {
+            return;
+        }
         self.cell_drag_anchor = None;
         self.is_dragging = true;
         if let Some(hit) = self.hit_test(event.position, cx) {
