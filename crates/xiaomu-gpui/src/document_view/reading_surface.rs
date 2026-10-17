@@ -22,7 +22,7 @@ impl IntoElement for ReadingSurface {
 }
 impl Element for ReadingSurface {
     type RequestLayoutState = ();
-    type PrepaintState = ();
+    type PrepaintState = Vec<AnyElement>;
     fn id(&self) -> Option<ElementId> {
         None
     }
@@ -46,8 +46,9 @@ impl Element for ReadingSurface {
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
-    ) {
+    ) -> Self::PrepaintState {
         self.content.prepaint(window, cx);
+        super::atom_keyboard::prepaint_targets(&self.view, window, cx)
     }
     fn paint(
         &mut self,
@@ -55,7 +56,7 @@ impl Element for ReadingSurface {
         _: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _: &mut (),
-        _: &mut (),
+        targets: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -66,7 +67,11 @@ impl Element for ReadingSurface {
             cx,
         );
         self.content.paint(window, cx);
+        for target in targets {
+            target.paint(window, cx);
+        }
         self.view.update(cx, |view, cx| {
+            view.atom_keyboard.borrow_mut().finish_frame(window);
             view.record_atom_pointer_frame();
             view.finish_reading_frame(window, cx);
         });

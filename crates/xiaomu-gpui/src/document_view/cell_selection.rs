@@ -79,6 +79,7 @@ impl DocumentView {
                 this.forward_input_rejection(&input, event, cx);
             });
             view.update(cx, |view, _| {
+                view.atom_keyboard = Some(self.atom_keyboard.clone());
                 view.rejection_feedback = Some(feedback);
                 view.attach_scroll_handle(self.scroll_handle.clone());
                 view.attach_table_capability(self.table_capability.clone());

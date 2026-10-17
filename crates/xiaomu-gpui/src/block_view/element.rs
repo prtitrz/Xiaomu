@@ -364,6 +364,7 @@ impl Element for ParagraphElement {
         };
 
         let reading = view.reading_highlight_quads(&layout, bounds, window.content_mask().bounds);
+        super::atom_keyboard::record_targets(&self.view, &layout, bounds, window, cx);
 
         PrepaintState {
             layout: Some(layout),

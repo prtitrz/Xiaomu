@@ -170,6 +170,18 @@ impl ParagraphView {
 
     /// Chip decorations follow the same splice used for text layout.
     pub(super) fn layout_atom_ranges(&self) -> Vec<Range<usize>> {
+        self.layout_atom_spans()
+            .into_iter()
+            .map(|(_, range)| range)
+            .collect()
+    }
+
+    pub(super) fn layout_atom_spans(
+        &self,
+    ) -> Vec<(
+        crate::inline_atom_display::InlineAtomDisplaySpan,
+        Range<usize>,
+    )> {
         let Some(projection) = self.atom_display_projection() else {
             return Vec::new();
         };
@@ -183,15 +195,16 @@ impl ParagraphView {
             .filter_map(|atom| {
                 let range = atom.display_range().clone();
                 let Some((base, state)) = &splice else {
-                    return Some(range);
+                    return Some((atom.clone(), range));
                 };
                 if range.end <= base.start {
-                    Some(range)
+                    Some((atom.clone(), range))
                 } else if range.start >= base.end {
-                    Some(
+                    Some((
+                        atom.clone(),
                         range.start - base.len() + state.preedit().len()
                             ..range.end - base.len() + state.preedit().len(),
-                    )
+                    ))
                 } else {
                     None
                 }
