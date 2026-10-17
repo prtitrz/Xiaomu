@@ -59,6 +59,8 @@ impl DocumentView {
                 .on_action(cx.listener(Self::toggle_code))
                 .on_action(cx.listener(Self::toggle_underline))
                 .on_action(cx.listener(Self::toggle_strike))
+                .capture_any_mouse_down(cx.listener(Self::capture_atom_pointer_down))
+                .capture_any_mouse_up(cx.listener(Self::capture_atom_pointer_up))
                 .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
                 .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
                 .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))

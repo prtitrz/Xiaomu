@@ -1,5 +1,14 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-17 bounded extension in progress: default-off completed inline-atom
+pointer activation preserves selection/focus on captured down and delivers
+release-time modifiers only after matching, current painted-chip release.
+Legacy capability behavior remains default. The 18 focused mounted regressions,
+1,800 workspace/all-targets tests and strict Clippy pass. Standalone Taffy tests
+are blocked by missing offline `document-features`; native acceptance remains
+separate.
+See the host capability contract in [architecture](architecture.md#p44c-host-capability-事实).
+
 2026-10-16 bounded extension: the default-off prepared text-Cut hook also admits
 exact text-only All after full borrowed source admission. Closed root export and
 original All history are retained; the candidate replaces admitted roots with

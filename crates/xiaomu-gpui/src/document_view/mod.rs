@@ -27,6 +27,9 @@ mod reading_geometry;
 mod reading_scroll;
 mod reading_surface;
 pub use reading::{ReadingRange, ReadingRevealStatus, ReadingViewError, ReadingViewSnapshot};
+mod atom_pointer;
+#[cfg(test)]
+mod atom_pointer_tests;
 pub(crate) mod cache_key;
 pub(crate) mod cell_selection;
 mod clipboard;
@@ -140,6 +143,8 @@ pub struct DocumentView {
     /// the deterministic fallback display.
     atom_renderers: Rc<InlineAtomRendererRegistry>,
     atom_capability: Option<SharedAtomCapability>,
+    atom_pointer: Option<atom_pointer::AtomPointerGesture>,
+    atom_pointer_frame: Option<atom_pointer::AtomPointerFrame>,
     /// Host-owned asset resolver for image blocks; absent means image
     /// placeholders stay neutral until a host attaches.
     asset_service: Option<Rc<dyn AssetService>>,
@@ -180,6 +185,8 @@ impl DocumentView {
             persistence: None,
             atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
             atom_capability: None,
+            atom_pointer: None,
+            atom_pointer_frame: None,
             asset_service: None,
             image_loads: Rc::new(ImageLoadCache::default()),
             image_sizing: Default::default(),
@@ -287,6 +294,8 @@ impl DocumentView {
     /// (display and read as `fallback_text`), so partial registration can
     /// never drop atomic content.
     pub fn set_atom_renderers(&mut self, renderers: Rc<InlineAtomRendererRegistry>) {
+        self.atom_pointer = None;
+        self.atom_pointer_frame = None;
         self.atom_renderers = renderers;
     }
 
@@ -298,6 +307,7 @@ impl DocumentView {
 
     /// Installs the host adapter that receives atom activations.
     pub fn set_atom_capability(&mut self, capability: SharedAtomCapability) {
+        self.atom_pointer = None;
         self.atom_capability = Some(capability);
     }
 
