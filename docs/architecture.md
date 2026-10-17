@@ -846,14 +846,20 @@ Opt-in presses consume default focus transfer and caret placement; only a left
 release over the same painted atom placement delivers the callback, with release
 modifiers. Eligibility queries may receive a clamped candidate: returning true
 consumes that press without either a legacy or completed activation. Existing
+visible-chip capture runs before caret placement; clamped candidates are only
+queried in the document bubble handler after sibling pointer handlers decline
+the event. Image, rule and checkbox children therefore retain pointer ownership
+even when the nearest text hit clamps to a neighboring chip. Mounted regressions
+cover both atomic/node selection and checkbox mutation/Undo, with exact painted
+clamped-hit preconditions. Existing
 display projection and visible table bounds remain the only
 chip hit-test. Leaving the chip/surface, losing focus or window activation,
 replacing the capability, or changing session, revision, selection or render
 epoch cancels the gesture. A painted-frame stamp rejects stale layout/content
 combinations. This introduces no host business types, Core/Runtime changes, or
 IME commit/wait protocol. Mounted coverage does not establish native OS IME
-acceptance. The 18 focused pointer regressions and full workspace/all-targets
-suite (1,800 tests), strict workspace/all-targets Clippy, format, source-size,
+acceptance. The 21 focused pointer regressions and full workspace/all-targets
+suite (1,803 tests), strict workspace/all-targets Clippy, format, source-size,
 dependency-boundary and vendor provenance guards pass. The pinned Taffy
 integration (4 tests) and standalone XIM tests (8) pass; standalone Taffy tests
 remain blocked by the unavailable offline `document-features` dev dependency.

@@ -38,6 +38,8 @@ pub trait InlineAtomHostCapability {
     /// The resolved candidate may be clamped outside its visible bounds;
     /// returning `true` consumes that press without any activation or legacy
     /// callback. Only a visible chip can complete a captured click.
+    /// Clamped candidates are queried only after child pointer handlers decline
+    /// the press, so nearby images, atomic blocks and controls keep ownership.
     fn capture_pointer_click(&self, _action: &AtomAction, _modifiers: Modifiers) -> bool {
         false
     }

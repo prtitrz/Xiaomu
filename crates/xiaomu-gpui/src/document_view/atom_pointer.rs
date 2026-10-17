@@ -104,17 +104,32 @@ impl DocumentView {
         cx: &mut Context<Self>,
     ) {
         self.atom_pointer = None;
+        self.begin_atom_pointer_down(event, true, window, cx);
+    }
+
+    /// Only a visible chip owns capture. Clamped text hits wait for bubble so
+    /// sibling images, rules and controls can handle their own press first.
+    pub(super) fn begin_atom_pointer_down(
+        &mut self,
+        event: &MouseDownEvent,
+        capture_phase: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if event.button != MouseButton::Left {
-            return;
+            return false;
         }
         let Some(capability) = self.atom_capability.clone() else {
-            return;
+            return false;
         };
         let Some(hit) = self.hit_test(event.position, cx) else {
-            return;
+            return false;
         };
+        if hit.inside_visible_bounds != capture_phase {
+            return false;
+        }
         let Some(chip) = hit.chip else {
-            return;
+            return false;
         };
         let session = self.session.borrow();
         let mut gesture = AtomPointerGesture {
@@ -130,7 +145,7 @@ impl DocumentView {
         };
         drop(session);
         if !capability.capture_pointer_click(&gesture.action(), event.modifiers) {
-            return;
+            return false;
         }
         // A host eligibility query may itself invalidate the original snapshot.
         // Consume that press, but never activate a replacement target.
@@ -152,6 +167,7 @@ impl DocumentView {
         self.cell_drag_anchor = None;
         window.prevent_default();
         cx.stop_propagation();
+        true
     }
 
     pub(super) fn capture_atom_pointer_up(

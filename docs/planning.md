@@ -1,10 +1,18 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-17 inline-atom pointer correction: visible chips retain early capture;
+clamped text candidates wait for document bubbling so sibling images, rules and
+checkboxes keep their native pointer handling. The original image-selection
+integration failure and two generic baseline failures are retained as red
+evidence; the phase split passes all 21 focused pointer tests and 1,803 full
+workspace/all-target tests plus strict Clippy. Native OS acceptance remains
+separate.
+
 2026-10-17 bounded extension in progress: default-off completed inline-atom
 pointer activation preserves selection/focus on captured down and delivers
 release-time modifiers only after matching, current painted-chip release.
-Legacy capability behavior remains default. The 18 focused mounted regressions,
-1,800 workspace/all-targets tests and strict Clippy pass. Standalone Taffy tests
+Legacy capability behavior remains default. The 21 focused mounted regressions,
+1,803 workspace/all-targets tests and strict Clippy pass. Standalone Taffy tests
 are blocked by missing offline `document-features`; native acceptance remains
 separate.
 See the host capability contract in [architecture](architecture.md#p44c-host-capability-事实).
