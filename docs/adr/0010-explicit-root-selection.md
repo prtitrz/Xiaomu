@@ -24,7 +24,10 @@ before modifying selection, stored marks or history grouping. The new
 
 GPUI's optional `EditorCommandRouter::select_all` defaults to None. Existing
 routers and default Ctrl+A keep their previous behavior. Opt-in hosts must plan
-root-range edits through SessionPolicy; unsupported generic edits fail closed.
+root-range structural edits through SessionPolicy; unsupported generic edits fail closed.
+A subsequent generic Runtime extension supports ToggleMark / SetMark / RemoveMark
+over All inline descendants without replacing the structural selection; final
+host candidate validation still governs admission (see [architecture](../architecture.md)).
 The native range proxy provides visible preedit/candidate bounds and normal
 composition cancel/commit/unmark ordering, with no additional IME waiting.
 Left/Right collapse to the real edge, including atomic blocks and final inline

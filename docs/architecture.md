@@ -283,7 +283,21 @@ JoinNodes          → 删除追加文本 + RestoreSubtree
 
 `EditPlan::with_stored_marks` 可指定成功事务后的 typing marks，供 split 到空块等无法从 canonical run 继承的场景使用。最终 selection 必须是 collapsed inline caret；合法性与 candidate 在同一发布前阶段检查，通过后 marks 与 document / selection 一起安装。失败不能先发布文档再报错。
 
-通用 `EditIntent::SetMark { mark }` / `RemoveMark { kind }` 与 ToggleMark 分离：前者按 semantic kind 替换完整 mark（包括 Link 全部 attrs），后者删除该 kind。Missing 是持久值，不是 patch 信号；若宿主只改某个 link 字段，须先读原属性并构造完整新值。Collapsed inline caret 操作 StoredMarks / 真实周围 run 继承，删除最后一个 mark 留 Some(empty) 防重继承；range 仍要求单节点 text selection，提交一次 AddMark / RemoveMark 事务及 isolated Undo。有效值已相同或目标 kind 已缺失时完全 no-op，保留 revision、listener、pending marks 和 typing group；Code 不获得额外默认排斥规则，宿主通过 policy 定义自己的行为。
+通用 `EditIntent::SetMark { mark }` / `RemoveMark { kind }` 与 ToggleMark 分离：前者按 semantic kind 替换完整 mark（包括 Link 全部 attrs），后者删除该 kind。Missing 是持久值，不是 patch 信号；若宿主只改某个 link 字段，须先读原属性并构造完整新值。Collapsed inline caret 操作 StoredMarks / 真实周围 run 继承，删除最后一个 mark 留 Some(empty) 防重继承；range 覆盖单节点或跨块 mixed-inline text/atom 选区，提交一次事务及 isolated Undo。有效值已相同或目标 kind 已缺失时完全 no-op，保留 revision、listener、pending marks 和 typing group；Code 不获得额外默认排斥规则，宿主通过 policy 定义自己的行为。
+
+Generic `ToggleMark` / `SetMark` / `RemoveMark` also accept explicit structural
+`DocumentSelection::all(document)` in either direction. The planner shares the
+cell-range descendant traversal and global text/atom toggle decision, visiting
+all inline leaves (including nested lists/tables and zero-byte atom-only leaves)
+once. Atomic blocks and empty containers are preserved. It keeps
+`SelectionUpdate::MapExisting`, exact All endpoints, and one isolated Undo unit;
+no temporary text selection or alternate source selection is introduced.
+Empty-root, empty-paragraph, and atomic-only All are no-ops, with no pending-mark,
+revision, listener, or history changes. Partial/nested gap ranges and whole-node
+selections gain no new mark route. Final-candidate host validation still applies
+atomically; protected atom marks and schema-specific Code exclusions remain host
+policy decisions, not generic omissions or global hardcoded rules. Regression
+coverage lives in `xiaomu-runtime/tests/all_selection_marks.rs`.
 
 平台显式 replacement range 通过 `apply_intent_with_selection` 把目标 selection 与 intent 合为一个原子动作，不先调用 selection setter。Preflight 只读查看目标；不同目标按既有输入规则重新继承 marks，成功仅通知最终结果，Undo 恢复整个回调前的 selection；拒绝或 policy NoChange 不泄露临时选区、marks / grouping 清理或通知。Composition 状态机不因该入口改变。
 

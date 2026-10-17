@@ -15,14 +15,18 @@ use super::{
 ///
 /// Text ranges and atom marks share the toggle decision, but retain their
 /// independent canonical values. Same-byte atom ordinals delimit half-open
-/// selections precisely; literal LF remains ordinary text. Structural gaps,
-/// atomic-block endpoints and rectangular cell selections fail closed.
+/// selections precisely; literal LF remains ordinary text. Explicit All visits
+/// every inline descendant, preserving structural selection identity. Other
+/// structural gaps, atomic-block endpoints and cell selections fail closed.
 pub(super) fn plan_range_mark(
     document: &XiaomuDocument,
     selection: DocumentSelection,
     intent: &EditIntent,
 ) -> Result<PlannedAction, SessionError> {
     selection.validate(document)?;
+    if selection.is_all(document) {
+        return plan_subtree_marks(document, vec![document.root()], intent);
+    }
     if selection.is_collapsed() || selection.active_cell_range().is_some() {
         return Err(SessionError::SelectionInvalid);
     }
@@ -61,7 +65,16 @@ pub(super) fn plan_cell_range_mark(
     range: CellRange,
     intent: &EditIntent,
 ) -> Result<PlannedAction, SessionError> {
-    let mut pending = range.unique_origins(document)?;
+    plan_subtree_marks(document, range.unique_origins(document)?, intent)
+}
+
+// Roots must be disjoint: All supplies the document root, while CellRange
+// supplies unique cell origins. Each inline leaf and its atoms is visited once.
+fn plan_subtree_marks(
+    document: &XiaomuDocument,
+    mut pending: Vec<NodeId>,
+    intent: &EditIntent,
+) -> Result<PlannedAction, SessionError> {
     pending.reverse();
     let mut spans = Vec::new();
     while let Some(id) = pending.pop() {
