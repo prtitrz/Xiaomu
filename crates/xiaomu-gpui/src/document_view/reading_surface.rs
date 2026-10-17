@@ -53,14 +53,22 @@ impl Element for ReadingSurface {
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _: &mut (),
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
     ) {
+        super::atom_pointer::observe_pointer_motion(
+            &self.view,
+            bounds.intersect(&window.content_mask().bounds),
+            window,
+            cx,
+        );
         self.content.paint(window, cx);
-        self.view
-            .update(cx, |view, cx| view.finish_reading_frame(window, cx));
+        self.view.update(cx, |view, cx| {
+            view.record_atom_pointer_frame();
+            view.finish_reading_frame(window, cx);
+        });
     }
 }

@@ -6,7 +6,7 @@
 
 use std::rc::Rc;
 
-use gpui::SharedString;
+use gpui::{Modifiers, SharedString};
 use xiaomu_core::document::{AtomKind, NodeAttrs, NodeId};
 
 /// One host-visible atom activation.
@@ -29,6 +29,27 @@ pub struct AtomAction {
 pub trait InlineAtomHostCapability {
     /// Delivers one atom activation to the host.
     fn atom_action(&self, action: AtomAction);
+
+    /// Opts this pointer press into selection-preserving click handling.
+    ///
+    /// Called before caret placement or default focus transfer. Returning
+    /// `false` preserves legacy mouse-down activation and Shift selection.
+    /// This eligibility query must not perform the activation itself.
+    /// The resolved candidate may be clamped outside its visible bounds;
+    /// returning `true` consumes that press without any activation or legacy
+    /// callback. Only a visible chip can complete a captured click.
+    fn capture_pointer_click(&self, _action: &AtomAction, _modifiers: Modifiers) -> bool {
+        false
+    }
+
+    /// Delivers a captured click after release over the same unchanged chip.
+    ///
+    /// Modifiers are sampled at release, just as for a completed pointer click.
+    /// Leaving the chip, replacing its capability or changing the document,
+    /// session or selection cancels the gesture without moving the caret.
+    fn atom_pointer_click(&self, action: AtomAction, _modifiers: Modifiers) {
+        self.atom_action(action);
+    }
 }
 
 /// Shared handle used by the embedding seams.

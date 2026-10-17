@@ -12,10 +12,12 @@ use xiaomu_core::selection::{CursorAffinity, InlinePoint, TextPoint};
 
 /// The atom chip a pointer click landed inside, with the canonical snapshot
 /// the host capability receives.
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ChipHit {
     pub node: NodeId,
     pub kind: AtomKind,
     pub attrs: NodeAttrs,
+    pub placement: (NodeId, usize, usize),
 }
 
 /// One resolved pointer hit: the caret gap plus the chip, if any, that
@@ -23,6 +25,7 @@ pub(crate) struct ChipHit {
 pub(crate) struct MouseHit {
     pub point: InlinePoint,
     pub chip: Option<ChipHit>,
+    pub inside_visible_bounds: bool,
 }
 
 impl DocumentView {
@@ -108,6 +111,9 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.update_atom_pointer(event, window, cx) {
+            return;
+        }
         if let Some(anchor) = self.cell_drag_anchor {
             if let Some(cell) = self.cell_at_position(event.position) {
                 self.install_cell_range(anchor, cell, window, cx);
@@ -123,6 +129,7 @@ impl DocumentView {
     }
 
     pub(crate) fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+        self.atom_pointer = None;
         self.is_dragging = false;
         self.cell_drag_anchor = None;
     }
@@ -137,7 +144,7 @@ impl DocumentView {
     /// click side, everything else maps through exact display boundaries.
     /// Plain blocks keep the canonical byte path. A click that landed strictly
     /// inside a renderer span also reports the chip for host activation.
-    fn hit_test(&self, position: Point<Pixels>, cx: &App) -> Option<MouseHit> {
+    pub(super) fn hit_test(&self, position: Point<Pixels>, cx: &App) -> Option<MouseHit> {
         // Parent cells publish before their descendants, so the last
         // containing cell is the innermost one for a nested table hit.
         let hit_cell = self.cell_at_position(position);
@@ -180,7 +187,8 @@ impl DocumentView {
                 nearest = Some((*node, distance));
             }
         }
-        let (node, _) = nearest?;
+        let (node, distance) = nearest?;
+        let inside_visible_bounds = distance == (Pixels::ZERO, Pixels::ZERO);
 
         let child = self
             .children
@@ -201,9 +209,17 @@ impl DocumentView {
             let chip = projection
                 .atom_at_display_offset(raw)
                 .filter(|span| !span.is_hard_break())
-                .map(|span| span.atom())
-                .and_then(|atom| self.chip_for(atom));
-            return Some(MouseHit { point, chip });
+                .and_then(|span| {
+                    self.chip_for(
+                        span.atom(),
+                        (node, span.text_offset().as_usize(), span.atom_index()),
+                    )
+                });
+            return Some(MouseHit {
+                point,
+                chip,
+                inside_visible_bounds,
+            });
         }
 
         let session = self.session.borrow();
@@ -221,11 +237,12 @@ impl DocumentView {
         Some(MouseHit {
             point: InlinePoint::from(TextPoint::new(node, offset, affinity)),
             chip: None,
+            inside_visible_bounds,
         })
     }
 
     /// Builds the host-facing canonical snapshot for one atom node.
-    fn chip_for(&self, atom: NodeId) -> Option<ChipHit> {
+    fn chip_for(&self, atom: NodeId, placement: (NodeId, usize, usize)) -> Option<ChipHit> {
         let session = self.session.borrow();
         let node = session.document().node(atom)?;
         let NodeKind::InlineAtom(kind) = node.kind() else {
@@ -235,6 +252,7 @@ impl DocumentView {
             node: atom,
             kind: kind.clone(),
             attrs: node.attrs().clone(),
+            placement,
         })
     }
 }

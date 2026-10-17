@@ -838,6 +838,26 @@ P4A 收口 gate（`crates/xiaomu-runtime/tests/p4a_integration_gate.rs` + `crate
 
 宿主激活 seam（`crates/xiaomu-gpui/src/atom_capability.rs`）：`InlineAtomHostCapability::atom_action(AtomAction)`，`AtomAction` 只携带 `NodeId + AtomKind + action key + attrs 快照`，不含任何宿主业务类型，Core / Runtime 保持 atom-neutral。plain pointer click 落在 chip 内部时，`DocumentView` 先放置 caret 再经 `atom_action` 发出 `ATOM_ACTION_CLICK`；composition 期间的点击不产生激活。capability 与 renderer registry 同为 per-editor 值：`EditorHooks.atom_capability` → `EditorInstance` → `build_view` 注入，`DocumentView::set_atom_capability` 可在 build 后替换；多 editor 测试验证点击 A 的 chip 只激活 A 的 recorder、且 caret 落在 A 的块内。宿主侧自行解释 attrs（harness demo 从 `handle` attr 渲染 `@xiaomu`）。
 
+Optional completed inline-atom pointer activation extends the existing per-editor
+capability with defaulted `capture_pointer_click(&AtomAction, Modifiers)` and
+`atom_pointer_click(AtomAction, Modifiers)`. The default declines capture and
+retains the legacy caret-first mouse-down callback, including Shift selection.
+Opt-in presses consume default focus transfer and caret placement; only a left
+release over the same painted atom placement delivers the callback, with release
+modifiers. Eligibility queries may receive a clamped candidate: returning true
+consumes that press without either a legacy or completed activation. Existing
+display projection and visible table bounds remain the only
+chip hit-test. Leaving the chip/surface, losing focus or window activation,
+replacing the capability, or changing session, revision, selection or render
+epoch cancels the gesture. A painted-frame stamp rejects stale layout/content
+combinations. This introduces no host business types, Core/Runtime changes, or
+IME commit/wait protocol. Mounted coverage does not establish native OS IME
+acceptance. The 18 focused pointer regressions and full workspace/all-targets
+suite (1,800 tests), strict workspace/all-targets Clippy, format, source-size,
+dependency-boundary and vendor provenance guards pass. The pinned Taffy
+integration (4 tests) and standalone XIM tests (8) pass; standalone Taffy tests
+remain blocked by the unavailable offline `document-features` dev dependency.
+
 ## P4.6-P4.8 Atomic Block / Image 事实
 
 GPUI inline 点击及键盘选择成功时也恢复 selection focus 所属输入的 native focus，包含 `NoChange`；相同 caret 的重点击不增加选区、历史或 caret-scroll 请求。成功 pointer placement 抑制 scroll surface 的默认获焦，避免段落旁 padding 点击在命中 inline caret 后又失去输入焦点；拒绝的选择保持原有行为。此逻辑只在显式交互的 GPUI 私有 helper 内，Runtime 被动同步不获焦。`inline_focus_tests` 覆盖空/非空双编辑器真实 pointer、同选区 Shift 点击、Undo、只读策略与非法选择；虚拟测试不替代宿主原生 IME 验收。
