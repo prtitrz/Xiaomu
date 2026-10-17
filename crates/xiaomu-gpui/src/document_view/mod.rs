@@ -103,6 +103,8 @@ use crate::atom_capability::SharedAtomCapability;
 use crate::block_view::{BlockBoundsRegistry, ParagraphView, SharedSession};
 use crate::image_block::{ImageLoadCache, ImageLoadState, SharedImageLoadCache, sync_image_loads};
 use crate::inline_atom::InlineAtomRendererRegistry;
+
+pub(crate) mod atom_keyboard;
 use visual_navigation::NavStep;
 
 /// A multi-block editor view over one shared session.
@@ -142,6 +144,8 @@ pub struct DocumentView {
     /// Host-registered inline-atom renderers; kinds without an entry keep
     /// the deterministic fallback display.
     atom_renderers: Rc<InlineAtomRendererRegistry>,
+    pub(crate) atom_keyboard: atom_keyboard::SharedAtomKeyboard,
+    atom_keyboard_subscription: Option<gpui::Subscription>,
     atom_capability: Option<SharedAtomCapability>,
     atom_pointer: Option<atom_pointer::AtomPointerGesture>,
     atom_pointer_frame: Option<atom_pointer::AtomPointerFrame>,
@@ -184,6 +188,8 @@ impl DocumentView {
             desired_x: None,
             persistence: None,
             atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
+            atom_keyboard: Default::default(),
+            atom_keyboard_subscription: None,
             atom_capability: None,
             atom_pointer: None,
             atom_pointer_frame: None,
@@ -294,6 +300,7 @@ impl DocumentView {
     /// (display and read as `fallback_text`), so partial registration can
     /// never drop atomic content.
     pub fn set_atom_renderers(&mut self, renderers: Rc<InlineAtomRendererRegistry>) {
+        self.atom_keyboard.borrow_mut().invalidate();
         self.atom_pointer = None;
         self.atom_pointer_frame = None;
         self.atom_renderers = renderers;
@@ -303,12 +310,6 @@ impl DocumentView {
     #[must_use]
     pub fn atom_renderers(&self) -> &InlineAtomRendererRegistry {
         &self.atom_renderers
-    }
-
-    /// Installs the host adapter that receives atom activations.
-    pub fn set_atom_capability(&mut self, capability: SharedAtomCapability) {
-        self.atom_pointer = None;
-        self.atom_capability = Some(capability);
     }
 
     /// Returns the shared session this view renders.
@@ -334,6 +335,7 @@ impl DocumentView {
                 .iter()
                 .find(|(_, view)| view.read(cx).focus_handle(cx).is_focused(window))
                 .map(|(node, _)| *node)
+                .or_else(|| self.keyboard_focus_owner(window))
         } else {
             None
         };
@@ -479,6 +481,9 @@ impl DocumentView {
     }
 
     fn apply_intent(&mut self, intent: EditIntent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.atom_keyboard.borrow().owns_focus(window) {
+            return;
+        }
         self.apply_edit_intent(intent, window, cx);
     }
 
@@ -631,6 +636,7 @@ impl DocumentView {
 
 impl Render for DocumentView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.begin_atom_keyboard_frame(cx);
         self.begin_reading_frame();
         self.validate_column_resize(cx);
         // A host policy may commit into another node/All/cell range. Capture

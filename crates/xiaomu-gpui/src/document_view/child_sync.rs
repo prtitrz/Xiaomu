@@ -63,6 +63,7 @@ impl DocumentView {
                 view.attach_reading_state(self.reading.clone());
                 view.attach_scroll_handle(scroll_handle);
                 view.attach_atom_renderers(atom_renderers);
+                view.atom_keyboard = Some(self.atom_keyboard.clone());
                 view.attach_table_capability(self.table_capability.clone());
                 view.set_code_block_presentation(self.code_block_presentation.clone());
                 view.set_block_alignment(alignment);

@@ -59,6 +59,8 @@ use crate::history_clock::SharedHistoryClock;
 use crate::inline_atom::InlineAtomRendererRegistry;
 use crate::input::composition::CompositionState;
 use crate::table_capability::SharedTableCapability;
+
+mod atom_keyboard;
 use layout::BlockTextLayout;
 
 pub use element::ParagraphElement;
@@ -183,6 +185,7 @@ pub struct ParagraphView {
     /// ordinary edit/focus scrolling, including callbacks retaining old views.
     passive_scroll_epoch: Rc<Cell<u64>>,
     pub(super) atom_renderers: Rc<InlineAtomRendererRegistry>,
+    pub(crate) atom_keyboard: Option<crate::document_view::atom_keyboard::SharedAtomKeyboard>,
     table_capability: Option<SharedTableCapability>,
     code_block_presentation: Option<CodeBlockPresentation>,
     block_alignment: Option<crate::block_alignment::BlockAlignment>,
@@ -268,6 +271,7 @@ impl ParagraphView {
             passive_scroll_epoch: Rc::new(Cell::new(0)),
             atom_renderers: Rc::new(InlineAtomRendererRegistry::new()),
             table_capability: None,
+            atom_keyboard: None,
             code_block_presentation: None,
             block_alignment: Default::default(),
             text_size_capability: None,

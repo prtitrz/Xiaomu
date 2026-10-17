@@ -30,6 +30,26 @@ pub trait InlineAtomHostCapability {
     /// Delivers one atom activation to the host.
     fn atom_action(&self, action: AtomAction);
 
+    /// Opts this atom into independent frontend keyboard focus.
+    ///
+    /// Default-off. This presentation query must not activate or mutate the
+    /// document. A focused chip preserves the canonical document selection;
+    /// it is not a text caret or an atomic-block selection.
+    /// Only currently measured, visible chips participate in window traversal.
+    /// Off-screen/fully clipped chips are excluded; this does not provide
+    /// document-wide reference traversal or automatic scrolling.
+    fn keyboard_focusable(&self, _action: &AtomAction) -> bool {
+        false
+    }
+
+    /// Activates a currently focused, painted chip on Enter or Space keydown.
+    ///
+    /// Receives current canonical data and keydown modifiers. No pointer
+    /// gesture is synthesized. The default shares the legacy action callback.
+    fn atom_keyboard_activate(&self, action: AtomAction, _modifiers: Modifiers) {
+        self.atom_action(action);
+    }
+
     /// Opts this pointer press into selection-preserving click handling.
     ///
     /// Called before caret placement or default focus transfer. Returning

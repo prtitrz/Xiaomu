@@ -49,7 +49,7 @@ fn table(builder: &mut NodeStoreBuilder, cells: [NodeId; 2]) -> NodeId {
         .unwrap()
 }
 
-fn geometry_fixture(hard_break: bool) -> (Fixture, Option<(NodeId, NodeId)>) {
+pub(super) fn geometry_fixture(hard_break: bool) -> (Fixture, Option<(NodeId, NodeId)>) {
     let mut builder = NodeStoreBuilder::new();
     let atom = builder
         .insert(

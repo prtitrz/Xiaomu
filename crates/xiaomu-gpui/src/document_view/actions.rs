@@ -435,7 +435,10 @@ impl DocumentView {
     }
 
     pub(crate) fn undo_entry(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
-        if self.read_only_input || self.focused_child_composing(window, cx) {
+        if self.atom_keyboard.borrow().owns_focus(window)
+            || self.read_only_input
+            || self.focused_child_composing(window, cx)
+        {
             return;
         }
         let outcome = self.session.borrow_mut().undo();
@@ -443,7 +446,10 @@ impl DocumentView {
     }
 
     pub(crate) fn redo_entry(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
-        if self.read_only_input || self.focused_child_composing(window, cx) {
+        if self.atom_keyboard.borrow().owns_focus(window)
+            || self.read_only_input
+            || self.focused_child_composing(window, cx)
+        {
             return;
         }
         let outcome = self.session.borrow_mut().redo();

@@ -864,6 +864,26 @@ dependency-boundary and vendor provenance guards pass. The pinned Taffy
 integration (4 tests) and standalone XIM tests (8) pass; standalone Taffy tests
 remain blocked by the unavailable offline `document-features` dev dependency.
 
+Optional inline-atom keyboard focus uses default-off
+`keyboard_focusable(&AtomAction)` and `atom_keyboard_activate(AtomAction, Modifiers)`
+on the same per-editor capability. Logical chip focus is independent of canonical
+selection. Visible measured placements receive native window Tab/Shift-Tab stops
+in paint order, outside the paragraph/document editing dispatch ancestry, with a
+painted focus outline. Traversal enters and exits through surrounding controls;
+it does not form an editor-local loop. Only an actually focused, current chip
+activates on Enter/Space, passing keydown modifiers. Session/revision/placement,
+capability, frame and table admission are checked again after eligibility queries.
+Consumed events cannot advance twice across multiple editor instances.
+
+Ordinary caret Enter/Space and paragraph/table Tab retain their editing behavior.
+A focused chip rejects new text/paste/edit input into the retained caret, while
+existing native composition finalization keeps its established callback ordering;
+there is no forced commit, cancellation or waiting policy. Only currently painted,
+visible chips participate: off-screen automatic scrolling and document-wide link
+traversal are not provided. Mounted tests cover window traversal, instance
+isolation, stale/hidden targets, input routing and composition finalization; they
+do not establish platform accessibility integration or native OS IME acceptance.
+
 ## P4.6-P4.8 Atomic Block / Image 事实
 
 GPUI inline 点击及键盘选择成功时也恢复 selection focus 所属输入的 native focus，包含 `NoChange`；相同 caret 的重点击不增加选区、历史或 caret-scroll 请求。成功 pointer placement 抑制 scroll surface 的默认获焦，避免段落旁 padding 点击在命中 inline caret 后又失去输入焦点；拒绝的选择保持原有行为。此逻辑只在显式交互的 GPUI 私有 helper 内，Runtime 被动同步不获焦。`inline_focus_tests` 覆盖空/非空双编辑器真实 pointer、同选区 Shift 点击、Undo、只读策略与非法选择；虚拟测试不替代宿主原生 IME 验收。

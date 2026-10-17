@@ -1,5 +1,16 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-17 bounded keyboard extension: default-off inline-atom focus uses real
+window Tab/Shift-Tab traversal and Enter/Space activation with current modifiers,
+independently of canonical selection. Only visible measured chips participate;
+off-screen auto-scroll and platform accessibility integration remain outside this
+slice. Ordinary caret/table editing and existing native composition finalization
+are preserved. All 1,803 previous suite-qualified test identities and 13 new
+keyboard cases pass (1,816 total), along with strict workspace/all-target Clippy,
+format, source/dependency and vendor provenance guards. Native platform acceptance
+remains separate. See the capability contract in
+[architecture](architecture.md#p44c-host-capability-事实).
+
 2026-10-17 inline-atom pointer correction: visible chips retain early capture;
 clamped text candidates wait for document bubbling so sibling images, rules and
 checkboxes keep their native pointer handling. The original image-selection

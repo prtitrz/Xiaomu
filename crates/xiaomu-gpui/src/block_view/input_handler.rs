@@ -116,7 +116,7 @@ impl EntityInputHandler for ParagraphView {
         &mut self,
         replacement_range: Option<Range<usize>>,
         text: &str,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.read_only_input {
@@ -141,6 +141,11 @@ impl EntityInputHandler for ParagraphView {
             return;
         }
 
+        // Existing native composition finalization above retains its original
+        // ordering. Only a new ordinary insertion is blocked by link focus.
+        if self.chip_owns_input(window) {
+            return;
+        }
         let selection =
             if let Some(range_utf16) = replacement_range.filter(|_| !self.is_range_input()) {
                 // Preserve a platform echo's seam ordinal instead of converting
@@ -166,11 +171,14 @@ impl EntityInputHandler for ParagraphView {
         range_utf16: Option<Range<usize>>,
         new_text: &str,
         new_selected_range: Option<Range<usize>>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         // Begin or continue composition; the preedit never touches the
         // canonical document.
+        if self.chip_owns_input(window) && self.composition.is_none() {
+            return;
+        }
         self.mark_text(range_utf16, new_text, new_selected_range, cx);
     }
 

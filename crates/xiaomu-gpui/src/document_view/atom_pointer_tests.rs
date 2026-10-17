@@ -2,6 +2,8 @@
 
 #[path = "atom_pointer_geometry_tests.rs"]
 mod geometry_tests;
+#[path = "atom_keyboard_tests.rs"]
+mod keyboard_tests;
 #[path = "atom_pointer_lifecycle_tests.rs"]
 mod lifecycle_tests;
 #[path = "atom_pointer_sibling_tests.rs"]
@@ -36,12 +38,21 @@ use crate::{
 #[derive(Default)]
 struct Host {
     capture: bool,
+    keyboard: bool,
+    keys: RefCell<Vec<(AtomAction, Modifiers)>>,
     probes: RefCell<Vec<(AtomAction, Modifiers)>>,
     clicks: RefCell<Vec<(AtomAction, Modifiers)>>,
     legacy: RefCell<Vec<AtomAction>>,
 }
 
 impl InlineAtomHostCapability for Host {
+    fn keyboard_focusable(&self, _: &AtomAction) -> bool {
+        self.keyboard
+    }
+
+    fn atom_keyboard_activate(&self, action: AtomAction, modifiers: Modifiers) {
+        self.keys.borrow_mut().push((action, modifiers));
+    }
     fn atom_action(&self, action: AtomAction) {
         self.legacy.borrow_mut().push(action);
     }
@@ -72,8 +83,12 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
+    fixture_with_atom_order(false)
+}
+
+fn fixture_with_atom_order(reverse: bool) -> Fixture {
     let mut builder = NodeStoreBuilder::new();
-    let atoms = std::array::from_fn(|_| {
+    let mut atoms = std::array::from_fn(|_| {
         builder
             .insert(
                 NodeKind::InlineAtom(AtomKind::new("reference").unwrap()),
@@ -83,6 +98,9 @@ fn fixture() -> Fixture {
             )
             .unwrap()
     });
+    if reverse {
+        atoms.reverse();
+    }
     let paragraph = builder
         .insert(
             NodeKind::Paragraph,
