@@ -153,6 +153,25 @@ pub enum IntentDisposition {
 /// rather than recursively dispatching another intent or repairing listeners.
 /// The session can roll back its own state, not a callback's external effects.
 pub trait SessionPolicy {
+    /// Optionally appends one bounded transaction to a prepared local edit.
+    ///
+    /// Called once after the original plan's selection resolves, before final
+    /// document validation, combined inverse/redo preparation or publication. The
+    /// extra transaction is part of the original undo unit and cannot replace
+    /// its history, marks or origin. Errors reject the entire operation.
+    /// Callback panics and external callback side effects are not transactional.
+    /// Construction, Undo/Redo, external-origin plans, selection-only edits and
+    /// unchanged canonical candidates do not call this hook. Default behavior
+    /// is unchanged. Implementations obey the same purity rules as validation.
+    /// Any attached input-rule reversal is validated against the amended
+    /// candidate; its later invocation is a forward edit subject to this hook.
+    fn finalize_edit(
+        &self,
+        _context: super::FinalizeEditContext<'_>,
+    ) -> Result<Option<super::EditFinalization>, PolicyError> {
+        Ok(None)
+    }
+
     /// Chooses fixed mark consumption for default nonempty inline text input.
     ///
     /// Independent from history options. Host plans and other commands retain
@@ -476,9 +495,12 @@ impl DocumentSession {
         let marks = self.stored_marks.clone();
         let grouping = self.history.grouping_state();
         let history_selection_before = self.history_selection_before;
+        let finalization_selection_before = self.finalization_selection_before;
+        self.finalization_selection_before.get_or_insert(selection);
         let input_rule_undo = self.input_rule_undo.clone();
         let result = operation(self);
         self.history_selection_before = history_selection_before;
+        self.finalization_selection_before = finalization_selection_before;
         if result.is_err() {
             self.selection = selection;
             self.stored_marks = marks;

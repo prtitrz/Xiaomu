@@ -2,6 +2,33 @@
 
 本文档只记录仓库中**已经真实成立**的架构事实。未来规划放在 `planning.md`；重要且长期的设计理由放在 `adr/`。
 
+## Atomic edit finalization
+
+`SessionPolicy::finalize_edit` is an optional, pure, once-per-candidate host
+extension. Runtime supplies immutable before/candidate snapshots, the original
+selection and the already resolved candidate selection. A host may return one
+bounded `EditFinalization` transaction with optional exact final selection;
+otherwise Runtime maps the resolved selection through its change map. The host
+owns all schema-specific normalization. Runtime defines no trailing-block rule.
+
+Default intent, host plan, raw transaction, staged command and prepared Cut
+share this boundary before final policy validation and publication. The
+amendment inverse precedes the original inverse, and identity-stable Redo is
+derived from that combined inverse. The original history grouping, marks and
+change origin remain intact. Cut preparation completes this work before the
+caller writes the platform clipboard. Rejection leaves the session unchanged.
+
+Construction, selection-only operations, ordinary Undo/Redo, external-origin
+plans and exactly unchanged canonical stores do not invoke the hook. Hosts may
+perform stronger schema-level semantic equality checks and return `None`.
+`None` adds no transaction; it does not cancel the original commit. In particular,
+the documented raw/apply-plan empty-transaction history behavior is unchanged,
+as are intent no-ops and existing pending-mark history-traversal semantics.
+Finalization never recursively invokes itself. Owned descriptions share the
+existing bounded transaction admission (64 steps, 256 payload nodes, 64 KiB,
+attribute depth 32), while ordinary Core validation and resource checks remain
+mandatory. These are payload limits, not a bound on arbitrary host callback work.
+
 ## Workspace 边界
 
 当前 workspace 由五个 library crate 和一个 example harness 组成：
