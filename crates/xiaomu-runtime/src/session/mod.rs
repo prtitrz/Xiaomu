@@ -21,6 +21,7 @@ mod commit;
 mod cross_block;
 mod cross_block_atom;
 mod dispatch;
+mod finalization;
 mod history;
 mod history_options;
 #[cfg(test)]
@@ -57,6 +58,7 @@ mod table_geometry_tests;
 mod task_checked;
 mod text_input_marks;
 
+pub use finalization::{EditFinalization, FinalizeEditContext};
 pub use history::HistoryStack;
 pub use history_options::{
     EmptyHistoryBehavior, HistoryOptions, HistorySelectionMode, SelectionOnlyGrouping,
@@ -97,6 +99,9 @@ pub struct DocumentSession {
     // An atomic platform replacement plans at a tentative selection but
     // Undo must restore the selection from before the whole operation.
     history_selection_before: Option<DocumentSelection>,
+    // Finalization sees the outer operation's selection even if navigation
+    // tentatively converges a cell range before planning a document edit.
+    finalization_selection_before: Option<DocumentSelection>,
     // At most one bounded, session-local token. Rollback shares ownership;
     // no canonical metadata or document/history snapshot is retained.
     input_rule_undo: Option<std::rc::Rc<input_rule_undo::InputRuleUndoToken>>,
@@ -124,6 +129,7 @@ impl DocumentSession {
             listeners: Vec::new(),
             policy: None,
             history_selection_before: None,
+            finalization_selection_before: None,
             input_rule_undo: None,
         })
     }

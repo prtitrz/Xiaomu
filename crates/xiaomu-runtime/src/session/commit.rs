@@ -51,12 +51,20 @@ impl DocumentSession {
             .transaction()
             .apply_with_changes(&self.document)
             .map_err(SessionError::Core)?;
-        let after_selection = resolve_selection(
+        let mut after_selection = resolve_selection(
             &plan,
             applied.changes(),
             before_selection,
             &self.document,
             applied.document(),
+        )?;
+        let mut undo = applied.inverse().clone();
+        let mut candidate = applied.into_document();
+        self.finalize_candidate(
+            &mut candidate,
+            &mut after_selection,
+            &mut undo,
+            plan.change_origin(),
         )?;
         let stored_marks_after = plan.stored_marks_after().cloned();
         if stored_marks_after.is_some()
@@ -64,24 +72,23 @@ impl DocumentSession {
         {
             return Err(SessionError::SelectionInvalid);
         }
-        self.validate_candidate(applied.document())?;
-        let undo = applied.inverse().clone();
+        self.validate_candidate(&candidate)?;
         // Redo must reproduce the post-commit identities, not mint new ones.
         // `inverse(inverse(T))` restores allocated NodeIds (SplitNode tail)
         // via RestoreSubtree; replaying the original SplitNode would not.
         let redo = undo
-            .apply_with_changes(applied.document())
+            .apply_with_changes(&candidate)
             .map_err(SessionError::Core)?
             .inverse()
             .clone();
 
         let input_rule_undo = plan
             .take_input_rule_undo()
-            .map(|spec| self.prepare_input_rule_undo(spec, applied.document(), after_selection))
+            .map(|spec| self.prepare_input_rule_undo(spec, &candidate, after_selection))
             .transpose()?;
 
         Ok(PreparedCommit {
-            document: applied.into_document(),
+            document: candidate,
             selection: after_selection,
             history: HistoryEntry {
                 redo,
@@ -180,14 +187,7 @@ impl DocumentSession {
                 undo.push_step(step.clone());
             }
         }
-        // Redo must reproduce the post-command identities (see `commit`).
-        let redo = undo
-            .apply_with_changes(&current)
-            .map_err(SessionError::Core)?
-            .inverse()
-            .clone();
-
-        let after_selection = match staged.selection_update {
+        let mut after_selection = match staged.selection_update {
             SelectionUpdate::Exact { selection } => {
                 selection.validate(&current)?;
                 selection
@@ -210,7 +210,19 @@ impl DocumentSession {
             _ => return Err(SessionError::SelectionInvalid),
         };
 
+        self.finalize_candidate(
+            &mut current,
+            &mut after_selection,
+            &mut undo,
+            DocumentChangeOrigin::Local,
+        )?;
         self.validate_candidate(&current)?;
+        // Include the amendment in the inverse before deriving identity-stable redo.
+        let redo = undo
+            .apply_with_changes(&current)
+            .map_err(SessionError::Core)?
+            .inverse()
+            .clone();
         self.history.record(
             HistoryEntry {
                 redo,

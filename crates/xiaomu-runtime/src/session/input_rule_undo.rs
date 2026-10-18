@@ -406,7 +406,10 @@ impl Budget {
     }
 }
 
-fn account(transaction: &Transaction, marks: Option<&MarkSet>) -> Result<(), SessionError> {
+pub(super) fn account(
+    transaction: &Transaction,
+    marks: Option<&MarkSet>,
+) -> Result<(), SessionError> {
     if transaction.steps().len() > MAX_STEPS {
         return Err(refused());
     }
