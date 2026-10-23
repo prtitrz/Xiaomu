@@ -122,4 +122,4 @@ P5.6 Integration Gate / Closeout  CLOSED
 
 从原批次增量整合回归：逐行 gap 的正向 bias 断言、非法目标与事务中间形状、反向部分矩形清空与精确 undo；复杂 Unicode/同缝 atoms/富内容/嵌套表的 fresh IDs 与连续历史；不同行高三列双行点击与原生双编辑器隔离。现有 table/row/cell attrs、fixture、选区和 wire 回归继续保留。
 
-本批独立的本地测试、PR 与三平台 CI 证据见 [P5.6 追加验证记录](p5.6-integration-gate.md)。此次没有重新执行 Windows 人工输入法验收；不能把新 CI 结果扩写为新的实机记录。
+本批 [PR #121](https://github.com/prtitrz/Xiaomu/pull/121) 的代码提交 `3dc008a` 已通过 [三平台 CI / policy / CI Success](https://github.com/prtitrz/Xiaomu/actions/runs/39952116821)：本地 macOS 与远端 macOS/Windows 各 1,856 项，Ubuntu 1,862 项，均无失败或忽略。Taffy 独立套件在 Ubuntu 另通过 89 项单元测试与 5 项文档测试；本地该套件因下载 SSL/超时未运行。独立证据及文档提交的最终 head 检查入口见 [P5.6 追加验证记录](p5.6-integration-gate.md)。此次没有重新执行 Windows 人工输入法验收；不能把新 CI 结果扩写为新的实机记录。
