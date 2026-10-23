@@ -491,3 +491,122 @@ fn cell_handle_drag_creates_a_rectangle_without_text_selection(cx: &mut TestAppC
     assert_eq!((range.anchor(), range.focus()), (left, right));
     assert!(session.borrow().text_selection().is_none());
 }
+
+#[gpui::test]
+fn table_editors_isolate_rectangles_focus_and_history(cx: &mut TestAppContext) {
+    let a = fixture();
+    let b = fixture();
+    let a_selection = caret_at(&a.document, a.a1, 0);
+    let b_selection = caret_at(&b.document, b.b1, 0);
+    let b_store = b.document.store().clone();
+    let (window_a, session_a) = open_with(a.document, a_selection, cx);
+    let (window_b, session_b) = open_with(b.document, b_selection, cx);
+    window_a
+        .update(cx, |view, window, cx| {
+            window.activate_window();
+            view.focus_selection(window, cx);
+        })
+        .unwrap();
+    cx.simulate_keystrokes(window_a.into(), "ctrl-shift-space shift-right");
+    assert!(session_a.borrow().selection().active_cell_range().is_some());
+    cx.simulate_keystrokes(window_a.into(), "backspace");
+    assert_eq!(session_a.borrow().history_depths(), (1, 0));
+    assert_eq!(session_b.borrow().selection(), b_selection);
+    assert_eq!(session_b.borrow().document().store(), &b_store);
+    assert_eq!(session_b.borrow().history_depths(), (0, 0));
+    window_b
+        .update(cx, |view, window, cx| {
+            window.activate_window();
+            view.focus_selection(window, cx);
+        })
+        .unwrap();
+    cx.simulate_input(window_b.into(), "乙");
+    assert_eq!(session_b.borrow().history_depths(), (1, 0));
+    assert_eq!(
+        session_a
+            .borrow()
+            .clipboard_slice()
+            .unwrap()
+            .unwrap()
+            .plain_text(),
+        "\t"
+    );
+    cx.simulate_keystrokes(window_b.into(), "ctrl-z");
+    assert_eq!(session_b.borrow().document().store(), &b_store);
+    assert_eq!(session_a.borrow().history_depths(), (1, 0));
+}
+
+#[gpui::test]
+fn multiline_three_column_grid_keeps_padding_clicks_in_each_cell(cx: &mut TestAppContext) {
+    let mut b = NodeStoreBuilder::new();
+    let first = paragraph(&mut b, "before");
+    let mut rows = Vec::new();
+    let mut texts = Vec::new();
+    for _ in 0..2 {
+        let mut cells = Vec::new();
+        for c in 0..3 {
+            // Unequal logical-line heights expose y-only hit testing and
+            // clicks in the short cell's lower padding region.
+            let text = if c == 0 {
+                "中文\n👩‍💻\né"
+            } else {
+                "short"
+            };
+            let p = paragraph(&mut b, text);
+            texts.push(p);
+            cells.push(
+                b.insert(
+                    NodeKind::TableCell,
+                    NodeAttrs::empty(),
+                    NodeContent::children([p]),
+                )
+                .unwrap(),
+            );
+        }
+        rows.push(
+            b.insert(
+                NodeKind::TableRow,
+                NodeAttrs::empty(),
+                NodeContent::children(cells),
+            )
+            .unwrap(),
+        );
+    }
+    let table = b
+        .insert(
+            NodeKind::Table,
+            NodeAttrs::empty(),
+            NodeContent::children(rows),
+        )
+        .unwrap();
+    let root = b
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([first, table]),
+        )
+        .unwrap();
+    let doc = XiaomuDocument::new(root, b.finish()).unwrap();
+    let selection = caret_at(&doc, first, 0);
+    let (window, session) = open_with(doc, selection, cx);
+    let width = window
+        .update(cx, |_, window, _| f32::from(window.viewport_size().width))
+        .unwrap();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    for row in 0..2 {
+        for column in 0..3 {
+            for y in [75.0, 130.0] {
+                let point = Point::new(
+                    px(17.0 + (width - 34.0) * (column as f32 + 0.5) / 3.0),
+                    px(y + row as f32 * 93.0),
+                );
+                visual.simulate_click(point, Modifiers::default());
+                assert_eq!(
+                    inline_focus(&session).0,
+                    texts[row * 3 + column],
+                    "point {point:?}"
+                );
+            }
+        }
+    }
+}
