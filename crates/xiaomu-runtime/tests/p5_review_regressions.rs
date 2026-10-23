@@ -354,6 +354,8 @@ fn column_gap_mapping_round_trips_for_both_biases_and_every_boundary() {
                     else {
                         panic!("insertion cannot delete an existing gap");
                     };
+                    let shifted = index > insertion || (index == insertion && bias == MapBias::End);
+                    assert_eq!(mapped, NodeGap::new(*row, index + usize::from(shifted)));
                     assert_eq!(
                         undone.changes().map_node_gap(mapped, bias),
                         MappedPosition::Mapped(gap)
@@ -362,4 +364,75 @@ fn column_gap_mapping_round_trips_for_both_biases_and_every_boundary() {
             }
         }
     }
+}
+
+#[test]
+fn table_edits_reject_wrong_target_and_invalid_intermediate_shape_atomically() {
+    use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
+    let f = fixture();
+    for target in [
+        f.document.root(),
+        f.cells_a[0],
+        f.texts_a[0],
+        f.document.parent_of(f.cells_a[0]).unwrap(),
+    ] {
+        for step in [
+            TransactionStep::InsertTableRow {
+                table: target,
+                index: 0,
+            },
+            TransactionStep::InsertTableColumn {
+                table: target,
+                index: 0,
+            },
+        ] {
+            assert!(
+                Transaction::new(TransactionOrigin::UserInput)
+                    .with_step(step)
+                    .apply(&f.document)
+                    .is_err()
+            );
+        }
+    }
+    for step in [
+        TransactionStep::InsertTableRow {
+            table: f.table_a,
+            index: 0,
+        },
+        TransactionStep::InsertTableColumn {
+            table: f.table_a,
+            index: 0,
+        },
+    ] {
+        assert!(
+            Transaction::new(TransactionOrigin::UserInput)
+                .with_step(TransactionStep::RemoveNode { node: f.cells_a[0] })
+                .with_step(step)
+                .apply(&f.document)
+                .is_err()
+        );
+    }
+    assert_eq!(children_of(&f.document, f.table_a).len(), 2);
+}
+
+#[test]
+fn reversed_partial_rectangle_backspace_preserves_neighbors_and_selection_on_undo() {
+    let f = fixture();
+    let mut session = session_at(&f.document, f.texts_a[3], 0);
+    session
+        .set_cell_range_selection(f.cells_a[3], f.cells_a[1])
+        .unwrap();
+    let before = session.selection();
+    session.apply_intent(&EditIntent::Backspace).unwrap();
+    assert_eq!(text_of(&session, f.texts_a[0]), "a1");
+    assert_eq!(text_of(&session, f.texts_a[2]), "a2");
+    assert_eq!(
+        session.clipboard_slice().unwrap().unwrap().plain_text(),
+        "\n"
+    );
+    session.undo().unwrap();
+    assert_eq!(session.document().store(), f.document.store());
+    assert_eq!(session.selection(), before);
+    session.redo().unwrap();
+    assert_eq!(session.history_depths(), (1, 0));
 }

@@ -114,3 +114,12 @@ P5.6 Integration Gate / Closeout  CLOSED
 - [x] 三平台 CI + Windows 实机 Gate 全绿（自动化与原生操作分别取证）
 
 上述 Gate 已闭合，**P5 = CLOSED**。下一步为 P6 Performance：先建立长文档/复杂表格/多 editor 的可重复 benchmark 与 profile 基线，再依据实测瓶颈安排缓存优化和 virtualization；不将此处 closeout 误记为 P6 已开始。
+
+
+## 2026-10-23 旧分支审计的主线整合
+
+本次本地审计最初基于 `f0746e7`，未包含已合并的 PR #85/#86 及之后提交，因而错误地把 P5.6 和 Windows 人工 Gate 视为待办。更新远端确认主线 `9b270f8` 后，保留上面的 P5 CLOSED 状态与逐版本原生验收证据，不回退当前协议、键鼠入口或表格属性策略。原始批次已保存为 `269cc40`；[归档审计](../../archive/2026-10-23-local-snapshot-audit.md) 明确记录其过期基线。
+
+从原批次增量整合回归：逐行 gap 的正向 bias 断言、非法目标与事务中间形状、反向部分矩形清空与精确 undo；复杂 Unicode/同缝 atoms/富内容/嵌套表的 fresh IDs 与连续历史；不同行高三列双行点击与原生双编辑器隔离。现有 table/row/cell attrs、fixture、选区和 wire 回归继续保留。
+
+本批独立的本地测试、PR 与三平台 CI 证据见 [P5.6 追加验证记录](p5.6-integration-gate.md)。此次没有重新执行 Windows 人工输入法验收；不能把新 CI 结果扩写为新的实机记录。

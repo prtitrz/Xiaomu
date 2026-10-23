@@ -1304,7 +1304,7 @@ row / column operations
 cell selection
 ```
 
-Gate：表格中英文连续编辑 + undo/redo、所有行列位置映射、富 cell clipboard 无损、用户可操作的矩形选区与视觉列导航、fixture round-trip、多 editor 隔离、三平台 CI、独立 Windows 原生 IME 验收。上述项已闭合，证据和原生验收范围见 `docs/phases/p5-table/progress.md`。
+Gate：表格中英文连续编辑 + undo/redo、所有行列位置映射、富 cell clipboard 无损、用户可操作的矩形选区与视觉列导航、fixture round-trip、多 editor 隔离、三平台 CI、独立 Windows 原生 IME 验收。上述项已闭合，证据和原生验收范围见 [P5 progress](phases/p5-table/progress.md)。2026-10-23 从旧本地分支整合的补充回归及三平台复验单独记录于 [P5.6 追加验证](phases/p5-table/p5.6-integration-gate.md)，不改变阶段状态或扩写历史人工验收范围。
 
 ### P6 — Performance / Long Document
 
