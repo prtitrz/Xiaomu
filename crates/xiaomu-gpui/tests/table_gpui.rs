@@ -360,3 +360,339 @@ fn enter_splits_within_a_cell_and_click_enters_one(cx: &mut TestAppContext) {
         "the click lands in the first cell's text, got {node:?}"
     );
 }
+
+fn cell(document: &XiaomuDocument, text: NodeId) -> NodeId {
+    document.parent_of(text).unwrap()
+}
+
+fn pointer_points(
+    window: gpui::WindowHandle<DocumentView>,
+    cx: &mut TestAppContext,
+) -> [Point<gpui::Pixels>; 2] {
+    let width = window
+        .update(cx, |_, window, _| f32::from(window.viewport_size().width))
+        .unwrap();
+    [
+        Point::new(px(48.0), px(75.0)),
+        Point::new(px(width * 0.75), px(75.0)),
+    ]
+}
+
+#[gpui::test]
+fn clicks_in_both_columns_and_padding_choose_the_containing_cell(cx: &mut TestAppContext) {
+    let f = fixture();
+    let selection = caret_at(&f.document, f.first, 0);
+    let (window, session) = open_with(f.document, selection, cx);
+    let points = pointer_points(window, cx);
+    let width = window
+        .update(cx, |_, window, _| f32::from(window.viewport_size().width))
+        .unwrap();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    for (point, node) in [
+        (points[1], f.b1),
+        (points[0], f.a1),
+        (Point::new(px(width / 2.0 + 2.0), px(59.0)), f.b1),
+        (Point::new(px(width - 20.0), px(88.0)), f.b1),
+    ] {
+        visual.simulate_click(point, Modifiers::default());
+        assert_eq!(
+            inline_focus(&session).0,
+            node,
+            "incorrect cell at {point:?}"
+        );
+        session
+            .borrow()
+            .selection()
+            .validate(session.borrow().document())
+            .unwrap();
+    }
+}
+
+#[gpui::test]
+fn pointer_range_cut_paste_undo_redo_and_typing_use_native_dispatch(cx: &mut TestAppContext) {
+    let f = fixture();
+    let cells = [cell(&f.document, f.a1), cell(&f.document, f.b1)];
+    let selection = caret_at(&f.document, f.first, 0);
+    let (window, session) = open_with(f.document, selection, cx);
+    let [left, right] = pointer_points(window, cx);
+    {
+        let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.simulate_click(
+            left,
+            Modifiers {
+                alt: true,
+                ..Default::default()
+            },
+        );
+        let range = session.borrow().selection().active_cell_range().unwrap();
+        assert_eq!((range.anchor(), range.focus()), (cells[0], cells[0]));
+        visual.simulate_click(
+            right,
+            Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+        );
+    }
+    let range = session.borrow().selection().active_cell_range().unwrap();
+    assert_eq!((range.anchor(), range.focus()), (cells[0], cells[1]));
+    cx.simulate_keystrokes(window.into(), "ctrl-x");
+    assert_eq!(
+        session
+            .borrow()
+            .clipboard_slice()
+            .unwrap()
+            .unwrap()
+            .plain_text(),
+        "\t"
+    );
+    assert_eq!(session.borrow().history_depths(), (1, 0));
+    cx.simulate_keystrokes(window.into(), "ctrl-v");
+    assert_eq!(
+        session
+            .borrow()
+            .clipboard_slice()
+            .unwrap()
+            .unwrap()
+            .plain_text(),
+        "a1\tb1"
+    );
+    assert_eq!(session.borrow().history_depths(), (2, 0));
+    cx.simulate_keystrokes(window.into(), "ctrl-z");
+    assert_eq!(
+        session
+            .borrow()
+            .clipboard_slice()
+            .unwrap()
+            .unwrap()
+            .plain_text(),
+        "\t"
+    );
+    cx.simulate_keystrokes(window.into(), "ctrl-z");
+    assert_eq!(
+        session
+            .borrow()
+            .clipboard_slice()
+            .unwrap()
+            .unwrap()
+            .plain_text(),
+        "a1\tb1"
+    );
+    cx.simulate_keystrokes(window.into(), "ctrl-shift-z");
+    assert_eq!(
+        session
+            .borrow()
+            .clipboard_slice()
+            .unwrap()
+            .unwrap()
+            .plain_text(),
+        "\t"
+    );
+    cx.simulate_input(window.into(), "中👩‍💻");
+    assert!(session.borrow().selection().active_cell_range().is_none());
+    let focus = inline_focus(&session).0;
+    assert_eq!(session.borrow().document().parent_of(focus), Some(cells[0]));
+    let inline = session
+        .borrow()
+        .document()
+        .node(focus)
+        .unwrap()
+        .content()
+        .as_inline()
+        .unwrap()
+        .clone();
+    assert_eq!(
+        inline
+            .runs()
+            .iter()
+            .map(|r| r.text().as_str())
+            .collect::<String>(),
+        "中👩‍💻"
+    );
+}
+
+#[gpui::test]
+fn drag_and_keyboard_extend_rectangles_in_both_dimensions(cx: &mut TestAppContext) {
+    use xiaomu_core::transaction::{Transaction, TransactionOrigin, TransactionStep};
+    let mut f = fixture();
+    f.document = Transaction::new(TransactionOrigin::UserInput)
+        .with_step(TransactionStep::InsertTableRow {
+            table: f.table,
+            index: 1,
+        })
+        .apply(&f.document)
+        .unwrap();
+    let first_cell = cell(&f.document, f.a1);
+    let last_row = f
+        .document
+        .node(f.table)
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap()[1];
+    let last_cell = f
+        .document
+        .node(last_row)
+        .unwrap()
+        .content()
+        .as_children()
+        .unwrap()[1];
+    let selection = caret_at(&f.document, f.a1, 0);
+    let (window, session) = open_with(f.document, selection, cx);
+    let [left, right] = pointer_points(window, cx);
+    let bottom_right = Point::new(right.x, px(112.0));
+    {
+        let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.simulate_mouse_down(left, gpui::MouseButton::Left, Modifiers::default());
+        visual.simulate_mouse_move(bottom_right, gpui::MouseButton::Left, Modifiers::default());
+        visual.simulate_mouse_up(bottom_right, gpui::MouseButton::Left, Modifiers::default());
+    }
+    let range = session.borrow().selection().active_cell_range().unwrap();
+    assert_eq!((range.anchor(), range.focus()), (first_cell, last_cell));
+    for key in [
+        "alt-shift-left",
+        "alt-shift-up",
+        "alt-shift-right",
+        "alt-shift-down",
+    ] {
+        cx.simulate_keystrokes(window.into(), key);
+    }
+    assert_eq!(
+        session.borrow().selection().active_cell_range(),
+        Some(range)
+    );
+    assert_eq!(session.borrow().history_depths(), (0, 0));
+    let projection = window
+        .update(cx, |view, window, cx| {
+            view.accessibility_projection(window, cx).unwrap()
+        })
+        .unwrap();
+    use xiaomu_gpui::accessibility::AccessibilityRole;
+    let table = &projection.root().children()[1];
+    assert_eq!(table.role(), &AccessibilityRole::Table);
+    assert_eq!(table.children()[0].role(), &AccessibilityRole::TableRow);
+    assert_eq!(
+        table.children()[0].children()[0].role(),
+        &AccessibilityRole::TableCell
+    );
+    assert_eq!(projection.selection().active_cell_range(), Some(range));
+}
+
+#[gpui::test]
+fn table_editors_isolate_rectangles_focus_and_history(cx: &mut TestAppContext) {
+    let a = fixture();
+    let b = fixture();
+    let a_selection = caret_at(&a.document, a.a1, 0);
+    let b_selection = caret_at(&b.document, b.b1, 0);
+    let b_store = b.document.store().clone();
+    let (window_a, session_a) = open_with(a.document, a_selection, cx);
+    let (window_b, session_b) = open_with(b.document, b_selection, cx);
+    window_a
+        .update(cx, |view, window, cx| {
+            window.activate_window();
+            view.focus_selection(window, cx);
+        })
+        .unwrap();
+    cx.simulate_keystrokes(window_a.into(), "alt-shift-right");
+    assert!(session_a.borrow().selection().active_cell_range().is_some());
+    cx.simulate_keystrokes(window_a.into(), "backspace");
+    assert_eq!(session_a.borrow().history_depths(), (1, 0));
+    assert_eq!(session_b.borrow().selection(), b_selection);
+    assert_eq!(session_b.borrow().document().store(), &b_store);
+    assert_eq!(session_b.borrow().history_depths(), (0, 0));
+    window_b
+        .update(cx, |view, window, cx| {
+            window.activate_window();
+            view.focus_selection(window, cx);
+        })
+        .unwrap();
+    cx.simulate_input(window_b.into(), "乙");
+    assert_eq!(session_b.borrow().history_depths(), (1, 0));
+    assert_eq!(
+        session_a
+            .borrow()
+            .clipboard_slice()
+            .unwrap()
+            .unwrap()
+            .plain_text(),
+        "\t"
+    );
+    cx.simulate_keystrokes(window_b.into(), "ctrl-z");
+    assert_eq!(session_b.borrow().document().store(), &b_store);
+    assert_eq!(session_a.borrow().history_depths(), (1, 0));
+}
+
+#[gpui::test]
+fn multiline_three_column_grid_keeps_padding_clicks_in_each_cell(cx: &mut TestAppContext) {
+    let mut b = NodeStoreBuilder::new();
+    let first = paragraph(&mut b, "before");
+    let mut rows = Vec::new();
+    let mut texts = Vec::new();
+    for _ in 0..2 {
+        let mut cells = Vec::new();
+        for c in 0..3 {
+            // Unequal logical-line heights expose y-only hit testing and
+            // clicks in the short cell's lower padding region.
+            let text = if c == 0 {
+                "中文\n👩‍💻\né"
+            } else {
+                "short"
+            };
+            let p = paragraph(&mut b, text);
+            texts.push(p);
+            cells.push(
+                b.insert(
+                    NodeKind::TableCell,
+                    NodeAttrs::empty(),
+                    NodeContent::children([p]),
+                )
+                .unwrap(),
+            );
+        }
+        rows.push(
+            b.insert(
+                NodeKind::TableRow,
+                NodeAttrs::empty(),
+                NodeContent::children(cells),
+            )
+            .unwrap(),
+        );
+    }
+    let table = b
+        .insert(
+            NodeKind::Table,
+            NodeAttrs::empty(),
+            NodeContent::children(rows),
+        )
+        .unwrap();
+    let root = b
+        .insert(
+            NodeKind::Document,
+            NodeAttrs::empty(),
+            NodeContent::children([first, table]),
+        )
+        .unwrap();
+    let doc = XiaomuDocument::new(root, b.finish()).unwrap();
+    let selection = caret_at(&doc, first, 0);
+    let (window, session) = open_with(doc, selection, cx);
+    let width = window
+        .update(cx, |_, window, _| f32::from(window.viewport_size().width))
+        .unwrap();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    for row in 0..2 {
+        for column in 0..3 {
+            for y in [75.0, 130.0] {
+                let point = Point::new(
+                    px(17.0 + (width - 34.0) * (column as f32 + 0.5) / 3.0),
+                    px(y + row as f32 * 93.0),
+                );
+                visual.simulate_click(point, Modifiers::default());
+                assert_eq!(
+                    inline_focus(&session).0,
+                    texts[row * 3 + column],
+                    "point {point:?}"
+                );
+            }
+        }
+    }
+}

@@ -14,6 +14,7 @@
 mod atom_edit;
 mod atomic_block;
 mod caret;
+mod cell_range;
 mod cross_block;
 mod cross_block_atom;
 mod history;
@@ -22,6 +23,7 @@ mod intent;
 mod listener;
 mod outcome;
 mod paste;
+mod paste_fragment;
 pub(crate) mod paste_hierarchy;
 mod paste_table;
 mod resolve;
@@ -136,8 +138,11 @@ impl DocumentSession {
     /// collapsed mark toggle updates Runtime StoredMarks without a Core
     /// transaction.
     pub fn apply_intent(&mut self, intent: &EditIntent) -> Result<SessionOutcome, SessionError> {
-        // A rectangular cell range is a selection-only form: any intent
-        // other than a structured paste or a table row/column operation
+        if let Some(result) = self.apply_table_intent(intent) {
+            return result;
+        }
+        // Table clear and structural commands were handled above. Remaining
+        // intents other than a structured paste or table row/column operation
         // converges it onto a real caret in the anchor cell before planning
         // (P5.5). Table operations map the rectangle through instead.
         if self.selection.active_cell_range().is_some()
@@ -184,42 +189,6 @@ impl DocumentSession {
         }
         if let EditIntent::MoveToPreviousCell = intent {
             return self.move_to_previous_cell();
-        }
-
-        // Table row/column operations are addressed by table + index and do
-        // not require an inline focus; they are structural history
-        // boundaries like the other structural commands.
-        if matches!(
-            intent,
-            EditIntent::InsertTableRow { .. }
-                | EditIntent::InsertTableColumn { .. }
-                | EditIntent::DeleteTableRow { .. }
-                | EditIntent::DeleteTableColumn { .. }
-        ) {
-            self.history.break_group();
-            self.clear_stored_marks();
-        }
-        let table_action = match intent {
-            EditIntent::InsertTableRow { table, index } => {
-                Some(self.plan_insert_table_row(*table, *index))
-            }
-            EditIntent::InsertTableColumn { table, index } => {
-                Some(self.plan_insert_table_column(*table, *index))
-            }
-            EditIntent::DeleteTableRow { table, index } => {
-                Some(self.plan_delete_table_row(*table, *index))
-            }
-            EditIntent::DeleteTableColumn { table, index } => {
-                Some(self.plan_delete_table_column(*table, *index))
-            }
-            _ => None,
-        };
-        if let Some(action) = table_action {
-            return match action? {
-                PlannedAction::NoChange => Ok(SessionOutcome::NoChange),
-                PlannedAction::Commit(plan) => self.commit(plan),
-                PlannedAction::CommitStaged(staged) => self.commit_staged(staged),
-            };
         }
 
         // Backspace/Delete on a collapsed atomic node selection removes the

@@ -536,19 +536,25 @@ fn insert_table_column_step_adds_one_cell_per_row() {
     assert_eq!(row_cells[0], first, "cells keep their identities");
     assert_eq!(row2_cells[0], third);
 
-    // The step map reports the first row's inserted cell as the caret
-    // target.
-    let inserted = applied
+    // Every affected row emits its own map, in document order.
+    let inserted_cells: Vec<_> = applied
         .changes()
         .steps()
         .iter()
-        .rev()
-        .find_map(|step| match step {
-            StepMap::NodeInserted { inserted, .. } => Some(*inserted),
+        .filter_map(|step| match step {
+            StepMap::NodeInserted {
+                parent,
+                index,
+                inserted,
+            } => Some((*parent, *index, *inserted)),
             _ => None,
         })
-        .expect("one inserted node");
-    assert_eq!(snapshot.parent_of(inserted).unwrap(), row);
+        .collect();
+    assert_eq!(
+        inserted_cells,
+        vec![(row, 1, row_cells[1]), (row2, 1, row2_cells[1])]
+    );
+    let inserted = inserted_cells[0].2;
 
     // The inverse removes one cell per row and validates.
     let inverse = applied.inverse().clone();

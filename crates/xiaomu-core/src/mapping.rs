@@ -375,7 +375,9 @@ impl ChangeMap {
 
     /// Returns per-step mapping data in application order.
     ///
-    /// Attribute, kind, and mark steps never move positions and produce no entries.
+    /// Attribute, kind, and mark steps produce no entries. A structural
+    /// step can produce several entries, such as one insertion per row of
+    /// an inserted table column; entries remain in application order.
     #[must_use]
     pub fn steps(&self) -> &[StepMap] {
         &self.steps

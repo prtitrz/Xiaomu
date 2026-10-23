@@ -4,7 +4,9 @@
 
 晓木是一个面向 Rust 原生应用的结构化富文本 / Block Editor engine。项目将文档语义、编辑事务、运行时编排与具体 UI 框架分层，首个原生前端基于 GPUI。
 
-> Status: early architecture / bootstrap stage.
+> Status: active development. P0–P4 implementation delivered; P5.1–P5.5 implemented, P5.6 integration closeout in progress. Windows manual validation and final three-platform CI remain open. P6/P7 are planned.
+>
+> Current acceptance record: [P5 progress](docs/phases/p5-table/progress.md) and [P5.6 integration gate](docs/phases/p5-table/p5.6-integration-gate.md).
 
 ## Goals
 
@@ -77,7 +79,7 @@ docs/
 
 ## Roadmap
 
-The first hard gates are Unicode/IME correctness, transaction semantics, position mapping, multi-block editing and history. Tables, richer extensions and performance work follow only after those foundations are stable.
+The engine includes structured blocks, inline atoms, images, a Markdown baseline codec and tables. P5.6 closes table correctness and integration before P6 performance work. P7 will stabilize the embedding API, extension services and releases.
 
 See [docs/planning.md](docs/planning.md).
 

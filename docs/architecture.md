@@ -29,7 +29,9 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前阶段事实：P0 Core contract、P1 native single-block input、P2 document tree / structural edit 与 P3 cross-block selection / history 已完成；P4 已启动，P4.1 mixed-inline coordinate contract 与 P4.2 canonical inline atom value / transaction 层（含 atom-aware `ReplaceInlineText` replacement contract）已建立。P3 已覆盖 visual-line geometry / soft-wrap、visual navigation / selection、cross-block editing / structured clipboard、history grouping / StoredMarks / IME、canonical LF HardBreak / CodeBlock multi-line、accessibility projection seam、realistic host integration、Unicode/CJK/emoji/combining/BiDi closeout matrix 与 Windows 最终实机 Gate。P4.1 新增 `InlinePoint(node_id, text_offset, atom_index, affinity)`，保持 `TextOffset` 的 UTF-8 byte contract，不使用 sentinel / fake byte，并在 canonical atom placement 尚未建立时对非零 ordinal fail closed。Core 已具备 `SplitNode / JoinNodes / SetNodeKind` 等结构 step、P4.2 的 `InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom / ReplaceInlineText` atom-aware step，并继续用 `ReplaceText` 承载 canonical LF；Runtime session 已升级为跨 block `DocumentSelection`，编排 split / join / list Enter / wrap / lift / indent / outdent，并承担 cross-block Delete、detached clipboard projection、structured paste、local history grouping 与 semantic line-break command；GPUI 使用 crates.io 精确 pin 的 `gpui = "=0.2.2"`，通过 `DocumentView` 与 `BlockTextLayout` 提供 multi-block 渲染、soft-wrap / multi-logical-line geometry、visual-line navigation、selection 投影、鼠标 hit-test、IME composition、scroll-to-caret、list marker 与 CodeBlock multi-line input；可复用 `EditorInstance` 持有独立 session/history/StoredMarks/listener/persistence，并支持完整 `DocumentSelection` restore 与 native focus routing。P4.4 已闭合：GPUI 对 mixed-inline 建立 canonical↔display 双投影（编辑走 canonical，布局/绘制/hit-test 走 display），`InlineAtomRendererRegistry` + `InlineAtomHostCapability` 提供宿主 renderer 与激活 seam，harness fixture v3 支持 inline atom round-trip；P4.5 integration gate 已在真实 fixture 上对齐 runtime 与 GPUI 两层语义并修复 `atoms_inside_span` 与视觉导航 chip 缝步进两处不一致。宿主 persistence 通过 `DocumentPersistence` seam 进出 canonical snapshot，harness fixture 只保存它明确支持的语义，未支持的 node kind 必须 fail closed。
+当前阶段事实（2026-10-23）：P0–P3 已关闭；P4 的 atom、media、扩展 capability 与 Markdown baseline 已交付。P5.1–P5.5 的表格模型、cell 编辑、行列操作、选区及 clipboard 已实现；P5.6 正在集成收尾，本地正确性与回归证据见 [P5.6 Gate](phases/p5-table/p5.6-integration-gate.md)。Windows 人工验收和最终修订的三平台 CI 尚未补齐，P5 不能标为 CLOSED。P4 历史 Windows CI 曾被误记为实机 Gate，已更正；通用 `BlockRendererRegistry` 与 `LinkOpenService` 明确延期至 P7。
+
+Core 持有 canonical 树、UTF-8 + atom ordinal 坐标、事务、映射与 inverse；Runtime `DocumentSession` 持有文档选区、编辑编排、clipboard、history 和 stored marks；GPUI（精确 pin `=0.2.2`）持有 native input / layout / paint / hit-test / focus。`EditorInstance` 隔离每个 editor 的 session 与宿主服务。持久化通过 `DocumentPersistence` 进出 canonical snapshot；harness fixture 是测试私有格式，不是生产 codec 承诺。
 
 ## Core 边界
 
@@ -262,7 +264,7 @@ DocumentChangeListener
 
 `DocumentSelection` 是 Runtime 的 document-level selection，两端可落在不同 inline block；公开读取点始终针对当前 snapshot 校验。排序使用 snapshot tree order，并保留 anchor / focus 方向。
 
-P4.1 曾以 ordinal-0 兼容 seam 提供 `DocumentPosition::from_inline_point`、`DocumentPosition::as_inline_point` 与 `DocumentSelection::from_inline_points`。P4.3 完成 Runtime 存储迁移：`DocumentPosition` 的 text endpoint 升级为 `Inline(InlinePoint)`，caret 可落在同一 boundary 的任意 canonical gap；ordinal 合法性由 `DocumentSelection::validate` 对 snapshot 校验（节点存在、UTF-8 boundary、ordinal `0..=N`）；selection mapping 对 inline endpoint 消费 `ChangeMap::map_inline_point`，document-order 排序计入 `atom_index`；Runtime `move_caret` 以 one-caret-unit 步进（atom ordinal 优先、text scalar 其次）。planner 仍以 text-only 路径为主，seam 上的 mutation 在 P4.3 后续切片切到 `ReplaceInlineText`。
+P4.1 曾以 ordinal-0 兼容 seam 提供 `DocumentPosition::from_inline_point`、`DocumentPosition::as_inline_point` 与 `DocumentSelection::from_inline_points`。P4.3 完成 Runtime 存储迁移：`DocumentPosition` 的 text endpoint 升级为 `Inline(InlinePoint)`，caret 可落在同一 boundary 的任意 canonical gap；ordinal 合法性由 `DocumentSelection::validate` 对 snapshot 校验（节点存在、UTF-8 boundary、ordinal `0..=N`）；selection mapping 对 inline endpoint 消费 `ChangeMap::map_inline_point`，document-order 排序计入 `atom_index`；Runtime `move_caret` 以 one-caret-unit 步进（atom ordinal 优先、text scalar 其次）。P4.3 已将 atom seam mutation 切到 `ReplaceInlineText`，纯文本兼容路径继续可用。
 
 当前 `EditIntent` 覆盖：
 
@@ -497,7 +499,7 @@ IME composition 的 preedit 保持 frontend-local，不推进 document revision�
 
 `DocumentView` 持有共享 session，并按文档序为 inline-bearing block 挂载 `ParagraphView`。焦点跟随 `DocumentSelection` focus node 路由。
 
-P4.1 新增 `DocumentView::inline_focus_point` 与 `DocumentView::inline_selection_points`，将现有 Runtime selection/focus 投影为 `InlinePoint`。当前纯文本路径仍得到 ordinal 0；后续 atom placement 出现后，上层 GPUI API 不需要再次更名或另建平行 position 类型。
+P4.1 新增 `DocumentView::inline_focus_point` 与 `DocumentView::inline_selection_points`，将现有 Runtime selection/focus 投影为 `InlinePoint`。纯文本路径得到 ordinal 0；当前 mixed-inline 路径已保留 atom ordinal，不另建平行 position 类型。
 
 Left / Right 保持 Unicode scalar navigation，并在 soft-wrap 共享 logical offset 上先通过 `CursorAffinity` 跨越上一视觉行末尾 / 下一视觉行开头两个 caret state。Home / End 解析当前 visual row 首尾。Up / Down 读取最近一次 `BlockTextLayout` 的 wrapped geometry；`desired_x` 只保存在 `DocumentView` frontend transient state，连续纵向移动保持视觉列，越过 block 边界时在相邻 inline block 的首 / 末 visual row 上按同一 x 求最近合法 Core offset。Shift 版本只改变 selection focus，anchor 继续由 Runtime document selection 持有。
 
@@ -647,24 +649,28 @@ harness fixture 格式升级 **v4**：`hr\n` / `img\n` 原子行 + 既有 attrs 
 
 ## P4 Closeout
 
-P4.9 通过后，P4A 与 P4B 的全部 Gate（见 `docs/phases/p4-structured-content-extension/progress.md`）在 2026-09-05 闭合，本切片 PR 的三平台 CI（Ubuntu / macOS / Windows、fmt、Clippy、workspace all-targets、source-size、dependency-boundary、policy、汇总 `CI Success`）全绿，Windows job 即最终实机 Gate。**P4 = CLOSED**，下一阶段为 P5 Table。
+P4.9 后历史进度在 2026-09-05 标记 P4 CLOSED，记录了三平台自动化 CI 通过。2026-10-23 审计更正：Windows job 只证明自动化测试通过，不能充当人工 IME Gate；P4 功能交付不变，人工证据由 P5.6 补验收。延期能力与状态见 [P4 progress](phases/p4-structured-content-extension/progress.md)。
 
 ## P5.1-P5.2 Table 模型与 Cell 编辑事实
 
-表格是普通树节点（`NodeKind::Table / TableRow / TableCell`），canonical 不变量（行数 ≥1、列数一致、cell 非空）由 `validate_tree` 持有，违规为 `Error::InvalidTableStructure`；`allows_child` 禁止 TableRow 进入 Document/Quote/ListItem/TableCell、禁止 cell 直接携带 InlineAtom。嵌套表格构造不能经 `InsertNode` staging 表达（stage 事务逐一独立验证，行无 cell / cell 无段的中间态天然非法），因此 Core 拥有语义步骤：`InsertTable { parent, index, rows, columns }` 一次成型整表构造、`InsertTableRow { table }` 追加一行（列数取自表首行，step map 报告新行首 cell 的 paragraph 作为 caret 目标）；inverse 分别删除整子树 / 整行，degenerate 输入 fail closed。实现位于 `crates/xiaomu-core/src/transaction/apply/table.rs`。Runtime seam `EditIntent::InsertTable` 在聚焦块后插入整表（单 isolated history entry，caret 原地保留）。
+表格是普通树节点（`NodeKind::Table / TableRow / TableCell`），canonical 不变量（行数 ≥1、列数一致、cell 非空）由 `validate_tree` 持有，违规为 `Error::InvalidTableStructure`；`allows_child` 禁止 TableRow 进入 Document/Quote/ListItem/TableCell、禁止 cell 直接携带 InlineAtom。嵌套表格构造不能经 `InsertNode` staging 表达（stage 事务逐一独立验证，行无 cell / cell 无段的中间态天然非法），因此 Core 拥有语义步骤：`InsertTable { parent, index, rows, columns }` 一次成型整表构造、`InsertTableRow { table, index }` 插入一行（列数取自表首行，step map 报告新行首 cell 的 paragraph 作为 caret 目标）；inverse 分别删除整子树 / 整行，degenerate 输入 fail closed。实现位于 `crates/xiaomu-core/src/transaction/apply/table.rs`。Runtime seam `EditIntent::InsertTable` 在聚焦块后插入整表（单 isolated history entry，caret 原地保留）。
 
 Cell 编辑（P5.2）复用既有 intent，无表格特例事务：Tab/Shift+Tab 走 `EditIntent::MoveToNextCell / MoveToPreviousCell`（`session/table.rs`），caret-only 导航——无事务、无 history；Atomic 焦点（cell 内 HR/Image）同样导航，Gap 焦点不导航。表内最后一个 cell 上 Tab 触发 `InsertTableRow` 并把 caret 落在新行首 cell，redo 经 `inverse(undo)` 恢复同一批 node id。cell 内 Enter/Backspace/Delete/typing/IME 全部走既有 parent-generic 路径：Backspace 在 cell 首段起点是有意 no-op（不跨 cell / 跨行 join），Enter 在 cell 内段落 split 留在原 cell，typing 在 cell 内照常 coalesce，IME commit 保持 isolated entry + stored marks 语义。测试：`crates/xiaomu-core/tests/table_model.rs`、`crates/xiaomu-runtime/tests/p5_cell_editing.rs`。
 
-行列操作（P5.3）：插入继续走 Core 语义步骤——`InsertTableRow { table, index }`（P5.2 的追加步骤推广为带索引）与 `InsertTableColumn { table, index }`（每行 index 处插入一个空 cell，step map 报告首行新 cell），因为单一新行/单行多 cell 都会让表在命令中途非法，validated staging 无法表达。删除不用新步骤：`DeleteTableRow` 是单步 `RemoveNode`，`DeleteTableColumn` 是单事务内每行一个 `RemoveNode`——事务只有最终快照验证，中间态 ragged 无妨，均匀性不变量（含最后一行/列删除 fail closed）仍由 Core validation 持有。Runtime 侧 planner 先行校验（表身份、index 范围、最后一行/列 `InvalidTableStructure`）；被删子树内的 caret/selection（含 Gap/Atomic 焦点）收敛到 `CaretAtGap`（行缝/本行 cell 缝），其余 `MapExisting` 穿透；删除的 undo 以 `RestoreSubtree` 恢复同一批 node id（含 inline atom 身份）。测试：`crates/xiaomu-runtime/tests/p5_row_column_ops.rs`。
+行列操作（P5.3）：插入继续走 Core 语义步骤——`InsertTableRow { table, index }`（P5.2 的追加步骤推广为带索引）与 `InsertTableColumn { table, index }`（每行 index 处插入一个空 cell，每个受影响行分别产生 `NodeInserted` step map，完整映射该行的 `NodeGap`；映射列表不再与事务步骤一一对应），因为单一新行/单行多 cell 都会让表在命令中途非法，validated staging 无法表达。删除不用新步骤：`DeleteTableRow` 是单步 `RemoveNode`，`DeleteTableColumn` 是单事务内每行一个 `RemoveNode`——事务只有最终快照验证，中间态 ragged 无妨，均匀性不变量（含最后一行/列删除 fail closed）仍由 Core validation 持有。Runtime 侧 planner 先行校验（表身份、index 范围、最后一行/列 `InvalidTableStructure`）；被删子树内的 caret/selection（含 Gap/Atomic 焦点）收敛到 `CaretAtGap`（行缝/本行 cell 缝），其余 `MapExisting` 穿透；删除的 undo 以 `RestoreSubtree` 恢复同一批 node id（含 inline atom 身份）。测试：`crates/xiaomu-runtime/tests/p5_row_column_ops.rs`。
 
-Cell 选区与 clipboard（P5.5）：`DocumentSelection` 以第三字段 `cell_range: Option<CellRange>` 携带矩形 cell 选区（保持 `Copy`，既有构造器与全部调用点零改动）。端点存 cell 身份而非行列索引，所以行/列插入不移动矩形、只有端点子树被删才收缩；两端皆亡或停靠 caret 被删时收敛到 `NodeRemoved` 的删除缝。矩形与 text selection 不混存：`set_cell_range_selection` 验证同表后把 text 端点停靠在 anchor cell 行缝，内容 intent 经 `collapse_cell_range` 收敛到 anchor cell 首块起点，表结构 op 与 structured paste 保留矩形。Clipboard wire v5 仅对携带 table 的载荷升级信封版本（`ClipboardNodeContent::Table { rows }`，行包 wrapper 在 wire 上省略），v4 reader 对未知 tag/版本静默回退 plain text；plain-text fallback 为 TSV（cell 内 block 边界扁平化为空格）。Paste 矩阵：匹配尺寸的 range 替换、1×1 进 focused cell、普通文本上插入兄弟表（`InsertTable` 语义步骤 + 逐 cell staged 填充 + seed 段删除），其余 fail closed（`ClipboardTableUnsupported`）；`commit_staged` 为此新增 `MapExisting` 折叠（逐 stage `map_through`，cell range 同一折叠路径）。GFM table 不入 baseline codec，Table 导出保持 `UnsupportedNodeKind` fail closed。测试：`crates/xiaomu-runtime/tests/p5_cell_range_clipboard.rs`（13 tests）+ codec `table_nodes_export_fail_closed`。
+## P5.5-P5.6 Selection / Clipboard / Integration 事实
 
-## 仓库级约束
+`DocumentSelection` 以 `cell_range: Option<CellRange>` 保存同表矩形选区，端点保存 cell 身份。插入行列时端点继续指向原 cell，停靠 gap 经 Core 映射；删除端点时收缩或收敛到删除缝。矩形激活时文本端点停靠在 anchor cell 行缝，不与普通文本选区混存。
 
-架构通过以下机制持续执行：
+矩形上的 Delete / Backspace / Cut 在单事务中将每格内容替换为一个空 Paragraph，保留 table/row/cell 身份及属性，保留矩形；一个 isolated history entry 的 undo 精确恢复所有原节点与选区。普通 typing 等内容 intent 先收敛到 anchor cell 的首个可编辑文本块；表结构操作映射矩形。历史撤销/重做后 GPUI 同步 child view 并恢复 native focus，防止被移除段落造成后续击键失效。
 
-- `tools/check_dependency_boundaries.py` 检查 crate dependency direction；
-- `tools/check_source_size.py` 执行 source-file size guardrail；
-- CI 执行 Rust formatting、Clippy 和 tests；
-- `cargo-deny` 检查 dependency source / license policy；
-- `engineering-rules.md` 约束实现与文档同步。
+Clipboard 当前表格写 **wire v6**：`ClipboardNodeContent::Table { rows, row_attrs }` 保存 table/row/cell 属性，并递归捕获 quote/list/code/atom/image/HR/嵌套表格。读取兼容 v5 缺省空 row attrs；v4 不得携带 table，普通非表片段继续写 v4。未知版本/非法结构/与纯文本 body 不一致的 metadata fail soft。TSV 按 cell 分列、table row 分行，cell 内 block 边界、CRLF/CR/LF/tab（含 atom fallback 与 CodeBlock）扁平化为空格；结构化载荷保留原文。Image 的 ExternalUrl 参与 fallback，opaque asset identity 不伪造 URL。
+
+Paste 矩阵：同尺寸矩形替换只覆盖内容、保留目标 table/row/cell attrs；1×1 进入 focused cell 时在其直属 block 后插入内容；cell 外插入新兄弟表时保留源 table/row/cell attrs。`paste_fragment` 递归分配 fresh IDs，用 `InsertTable` 构造合法空表，再填充 cell、移除 seed；所有 stages 经校验，合为一个历史单元。尺寸不符、mixed roots 和不支持落点 fail closed。语义契约见 [ADR 0006](adr/0006-table-clipboard-contract.md)。Markdown baseline 继续明确拒绝 Table 导出。
+
+GPUI 保存每个 cell 的窗口 bounds，先定位最内层包含点击点的 cell，再从其子树按二维距离选择文本块；cell padding 和不同行高不串列。原生入口：Alt+单击选单格、跨格拖选、Shift+单击扩选、Alt+Shift+方向键按行列扩选。选择操作不创建 history；composition 活跃时不移动选区。frontend-neutral accessibility projection 提供 Table/TableRow/TableCell roles；平台 screen-reader adapter 仍是后续工作。
+
+Harness 保存含表文档为 fixture **v5**，无表文档仍为 v4，读取 v2/v3/v4/v5；旧版本含表帧、错误尺寸、空 cell、非法嵌套/帧结束均拒绝。demo table 包含 CJK/emoji/combining/BiDi、marked atom、quote 与结构属性，原有 media/list 内容保留。生产 save/load、重新打开、兼容样例与结构保真均有回归覆盖。
+
+回归入口：Core `table_model.rs`、Runtime `p56_audit_regressions.rs` / `p56_rich_table_integration.rs`、GPUI `table_gpui.rs`、harness `store/tests.rs`。阶段验收与平台待办见 [P5 progress](phases/p5-table/progress.md)。

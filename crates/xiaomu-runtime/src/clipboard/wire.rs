@@ -17,7 +17,7 @@ use xiaomu_core::text::TextBuffer;
 
 use super::fragment::{
     ClipboardAtom, ClipboardInline, ClipboardNode, ClipboardNodeContent, ClipboardSlice,
-    validate_roots,
+    legacy_table_plain_text, validate_roots,
 };
 
 const FORMAT: &str = "xiaomu.clipboard";
@@ -27,10 +27,12 @@ const FORMAT: &str = "xiaomu.clipboard";
 // the fragment text. v4 adds whole atomic blocks (HorizontalRule, Image, ...)
 // captured as kind + attrs with no editable interior. v5 adds rectangular
 // table selections (`ClipboardNodeContent::Table`); only slices that actually
-// carry a table bump the envelope, so v4 readers fail soft to plain text on
-// exactly the payloads they cannot represent.
+// carry a table bump the envelope. v6 preserves row-wrapper attributes and
+// normalizes in-cell TSV separators. v5 remains readable; older readers fall
+// back to plain text when they cannot represent a newer table payload.
 const VERSION: u32 = 4;
-const VERSION_TABLE: u32 = 5;
+const VERSION_TABLE_LEGACY: u32 = 5;
+const VERSION_TABLE: u32 = 6;
 
 /// Failure to encode a Xiaomu structured clipboard slice.
 ///
@@ -45,7 +47,7 @@ pub struct ClipboardMetadataError {
 impl ClipboardMetadataError {
     const fn unsupported() -> Self {
         Self {
-            message: "clipboard slice contains a value unsupported by metadata v2",
+            message: "clipboard slice contains a value unsupported by clipboard metadata",
         }
     }
 
@@ -74,7 +76,7 @@ impl std::error::Error for ClipboardMetadataError {}
 ///
 /// The plain-text fallback is deliberately not duplicated in the metadata;
 /// callers put [`ClipboardSlice::plain_text`] in the platform text flavor.
-/// Only slices carrying a table payload encode as v5; everything else stays
+/// Only slices carrying a table payload encode as v6; everything else stays
 /// at v4 so older readers keep accepting non-table fragments.
 pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetadataError> {
     let version = if slice.roots().iter().any(WireNode::carries_table) {
@@ -100,30 +102,43 @@ pub fn encode_metadata(slice: &ClipboardSlice) -> Result<String, ClipboardMetada
 /// Unknown versions, malformed/foreign metadata, unsupported canonical
 /// values, invalid fragment trees, and stale metadata whose computed fallback
 /// differs from the platform text all return `None`. The caller should then
-/// paste the supplied plain text normally. A v4 envelope cannot carry a
-/// table payload: the unknown wire tag fails deserialization outright.
+/// paste the supplied plain text normally. Legacy v5 table envelopes remain
+/// readable; v4 envelopes cannot carry tables.
 #[must_use]
 pub fn decode_metadata(plain_text: &str, metadata: &str) -> Option<ClipboardSlice> {
     let envelope: WireEnvelope = serde_json::from_str(metadata).ok()?;
     if envelope.format != FORMAT
-        || (envelope.version != VERSION && envelope.version != VERSION_TABLE)
+        || (envelope.version != VERSION
+            && envelope.version != VERSION_TABLE
+            && envelope.version != VERSION_TABLE_LEGACY)
     {
         return None;
     }
     let roots = envelope
         .roots
         .into_iter()
-        .map(WireNode::into_node)
+        .map(|node| node.into_node(envelope.version))
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
-    if roots.is_empty() || validate_roots(&roots).is_err() {
+    if roots.is_empty()
+        || (envelope.version == VERSION && roots.iter().any(WireNode::carries_table))
+        || validate_roots(&roots).is_err()
+    {
         return None;
     }
+    let legacy_matches = match &roots[..] {
+        [root] if envelope.version == VERSION_TABLE_LEGACY => {
+            legacy_table_plain_text(root).map(|body| body == plain_text)
+        }
+        _ => None,
+    };
     let slice = match &roots[..] {
         [root] if root.content().as_table().is_some() => ClipboardSlice::from_table(root.clone()),
         _ => ClipboardSlice::from_roots(roots),
     };
-    (slice.plain_text() == plain_text).then_some(slice)
+    legacy_matches
+        .unwrap_or_else(|| slice.plain_text() == plain_text)
+        .then_some(slice)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -142,9 +157,9 @@ struct WireNode {
 
 impl WireNode {
     /// Whether this node (or its subtree) carries a table payload, which is
-    /// what bumps the envelope to v5.
+    /// what bumps the envelope to v6.
     fn carries_table(node: &ClipboardNode) -> bool {
-        if node.content().as_table().is_some() {
+        if matches!(node.kind(), NodeKind::Table) || node.content().as_table().is_some() {
             return true;
         }
         match node.content().as_children() {
@@ -173,7 +188,13 @@ impl WireNode {
                     .map(Self::from_node)
                     .collect::<Result<_, _>>()?,
             },
-            ClipboardNodeContent::Table { rows } => WireContent::Table {
+            ClipboardNodeContent::Table { rows, row_attrs } => WireContent::Table {
+                row_attrs: Some(
+                    row_attrs
+                        .iter()
+                        .map(attrs_to_wire)
+                        .collect::<Result<_, _>>()?,
+                ),
                 rows: rows
                     .iter()
                     .map(|cells| {
@@ -197,7 +218,7 @@ impl WireNode {
         })
     }
 
-    fn into_node(self) -> Result<ClipboardNode, ClipboardMetadataError> {
+    fn into_node(self, version: u32) -> Result<ClipboardNode, ClipboardMetadataError> {
         let attrs = self
             .attrs
             .into_iter()
@@ -224,20 +245,32 @@ impl WireNode {
             WireContent::Children { children } => ClipboardNodeContent::Children(
                 children
                     .into_iter()
-                    .map(Self::into_node)
+                    .map(|node| node.into_node(version))
                     .collect::<Result<Vec<_>, _>>()?,
             ),
-            WireContent::Table { rows } => ClipboardNodeContent::Table {
-                rows: rows
-                    .into_iter()
-                    .map(|cells| {
-                        cells
-                            .into_iter()
-                            .map(Self::into_node)
-                            .collect::<Result<Vec<_>, _>>()
-                    })
-                    .collect::<Result<_, _>>()?,
-            },
+            WireContent::Table { rows, row_attrs } => {
+                let row_attrs = match row_attrs {
+                    Some(attrs) if attrs.len() == rows.len() => attrs
+                        .into_iter()
+                        .map(attrs_from_wire)
+                        .collect::<Result<Vec<_>, _>>()?,
+                    Some(_) => return Err(ClipboardMetadataError::invalid()),
+                    None if version == VERSION_TABLE_LEGACY => vec![NodeAttrs::empty(); rows.len()],
+                    None => return Err(ClipboardMetadataError::invalid()),
+                };
+                ClipboardNodeContent::Table {
+                    row_attrs,
+                    rows: rows
+                        .into_iter()
+                        .map(|cells| {
+                            cells
+                                .into_iter()
+                                .map(|node| node.into_node(version))
+                                .collect::<Result<Vec<_>, _>>()
+                        })
+                        .collect::<Result<_, _>>()?,
+                }
+            }
             WireContent::Atomic => ClipboardNodeContent::Atomic,
         };
         Ok(ClipboardNode::new(
@@ -262,8 +295,25 @@ enum WireContent {
     /// Rectangular table payload (v5): rows of cell nodes, reading order.
     Table {
         rows: Vec<Vec<WireNode>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        row_attrs: Option<Vec<BTreeMap<String, WireAttr>>>,
     },
     Atomic,
+}
+
+fn attrs_to_wire(attrs: &NodeAttrs) -> Result<BTreeMap<String, WireAttr>, ClipboardMetadataError> {
+    attrs
+        .iter()
+        .map(|(key, value)| Ok((key.to_owned(), WireAttr::from_attr(value)?)))
+        .collect()
+}
+
+fn attrs_from_wire(attrs: BTreeMap<String, WireAttr>) -> Result<NodeAttrs, ClipboardMetadataError> {
+    let values = attrs
+        .into_iter()
+        .map(|(key, value)| Ok((key, value.into_attr()?)))
+        .collect::<Result<_, ClipboardMetadataError>>()?;
+    NodeAttrs::new(values).map_err(|_| ClipboardMetadataError::invalid())
 }
 
 /// One detached inline-atom payload on the wire: anchor boundary plus the

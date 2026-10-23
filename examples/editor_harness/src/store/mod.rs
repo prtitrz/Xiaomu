@@ -1,7 +1,7 @@
 //! Harness-internal fixture persistence: canonical snapshot <-> text format.
 //!
 //! Format is a harness convention for the P2 host-contract gate, not a
-//! codec commitment. v3 preserves current-stage canonical semantics: node
+//! codec commitment. v5 adds tables; table-free saves remain v4. Both preserve node
 //! kind / tree shape, inline run boundaries, [`MarkSet`] (including Link
 //! attributes), [`NodeAttrs`] actually present on a node, and inline atom
 //! placements with their atom nodes (kind / fallback / attrs).
@@ -17,17 +17,17 @@ use xiaomu_core::text::TextBuffer;
 
 use xiaomu_runtime::persistence::{DocumentPersistence, PersistenceError};
 
+mod demo_table;
 mod format;
 mod marks_text;
 
 pub use format::parse_document;
-use format::write_node;
 
 #[cfg(test)]
 pub use format::{escape_text, unescape_text};
 
 /// File-backed fixture adapter: the on-disk format is harness-internal
-/// (`v2`, one node per line, BEGIN/END nesting) and explicitly not a codec
+/// (`v4/v5`, one node per line with container frames) and explicitly not a codec
 /// commitment.
 pub struct FixtureStore {
     path: PathBuf,
@@ -41,8 +41,20 @@ impl FixtureStore {
 
 impl DocumentPersistence for FixtureStore {
     fn save(&mut self, document: &XiaomuDocument) -> Result<(), PersistenceError> {
-        let mut out = String::from("xiaomu-fixture-doc v4\n");
-        write_node(document, document.root(), &mut out)?;
+        // v5 is only emitted for documents that actually carry a table, so
+        // pre-v5 readers keep accepting table-free saves.
+        let has_table = format::document_contains_table(document, document.root());
+        let mut out = if has_table {
+            String::from("xiaomu-fixture-doc v5\n")
+        } else {
+            String::from("xiaomu-fixture-doc v4\n")
+        };
+        let write = if has_table {
+            format::write_node_v5
+        } else {
+            format::write_node
+        };
+        write(document, document.root(), &mut out)?;
         std::fs::write(&self.path, out)
             .map_err(|error| PersistenceError(format!("{}: {error}", self.path.display())))
     }
@@ -59,8 +71,7 @@ impl DocumentPersistence for FixtureStore {
     }
 }
 
-/// Multi-block demo fixture exercising P2.5 rendering: heading, paragraphs,
-/// a quote, and both list kinds.
+/// Integration fixture with text, atoms, lists, media and a rich 2×2 table.
 pub fn demo_fixture() -> XiaomuDocument {
     let mut builder = NodeStoreBuilder::new();
     let leaf = |kind: NodeKind, text: &str, builder: &mut NodeStoreBuilder| {
@@ -209,12 +220,13 @@ pub fn demo_fixture() -> XiaomuDocument {
         "编辑后按 Ctrl+S（macOS ⌘S）保存到 store 文件；下次启动从这里恢复。",
         &mut builder,
     );
+    let table = demo_table::build(&mut builder);
     let root = builder
         .insert(
             NodeKind::Document,
             NodeAttrs::empty(),
             NodeContent::children([
-                heading, intro, mention, quote, rule, image, todo, steps, outro,
+                heading, intro, mention, quote, rule, image, todo, steps, table, outro,
             ]),
         )
         .unwrap();
@@ -286,110 +298,4 @@ pub fn structurally_equal(a: &XiaomuDocument, b: &XiaomuDocument) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn multiline_fixture() -> XiaomuDocument {
-        let mut builder = NodeStoreBuilder::new();
-        let paragraph = builder
-            .insert(
-                NodeKind::Paragraph,
-                NodeAttrs::empty(),
-                NodeContent::Inline(
-                    InlineContent::new([TextRun::new("alpha\nbeta", MarkSet::empty()).unwrap()])
-                        .unwrap(),
-                ),
-            )
-            .unwrap();
-        let code = builder
-            .insert(
-                NodeKind::CodeBlock,
-                NodeAttrs::empty(),
-                NodeContent::Inline(
-                    InlineContent::new([TextRun::new(
-                        "fn main() {\n    println!(\"ok\");\n}",
-                        MarkSet::empty(),
-                    )
-                    .unwrap()])
-                    .unwrap(),
-                ),
-            )
-            .unwrap();
-        let root = builder
-            .insert(
-                NodeKind::Document,
-                NodeAttrs::empty(),
-                NodeContent::children([paragraph, code]),
-            )
-            .unwrap();
-        XiaomuDocument::new(root, builder.finish()).unwrap()
-    }
-
-    #[test]
-    fn fixture_v2_round_trips_hard_breaks_and_code_newlines() {
-        let document = multiline_fixture();
-        let mut encoded = String::from("xiaomu-fixture-doc v2\n");
-        write_node(&document, document.root(), &mut encoded).unwrap();
-
-        assert!(encoded.contains("alpha\\nbeta"));
-        assert!(encoded.contains("fn main() \\{\\n    println!"));
-        let decoded = parse_document(&encoded).unwrap();
-        assert!(canonical_semantics_equal(&document, &decoded));
-    }
-
-    #[test]
-    fn fixture_text_escape_preserves_lf_round_trip() {
-        let source = "a\nb\n";
-        assert_eq!(unescape_text(&escape_text(source)), source);
-    }
-
-    #[test]
-    fn fixture_v4_round_trips_inline_atom_chips_and_media() {
-        let document = demo_fixture();
-        let mut encoded = String::from("xiaomu-fixture-doc v4\n");
-        write_node(&document, document.root(), &mut encoded).unwrap();
-
-        // The mention chip serializes as an atom token plus its atom line,
-        // and the media blocks encode as atomic lines with preserved attrs
-        // (including the unknown extension tag).
-        assert!(encoded.contains("{a#0}"));
-        assert!(encoded.contains("atom\tmention\t@xiaomu"));
-        assert!(encoded.contains("handle=s:xiaomu"));
-        assert!(encoded.contains("hr\n"));
-        assert!(encoded.contains("img\n"));
-        assert!(encoded.contains("alt=s:晓木封面"));
-        assert!(encoded.contains("data-x-extension-tag=s:v1"));
-
-        let decoded = parse_document(&encoded).unwrap();
-        assert!(canonical_semantics_equal(&document, &decoded));
-    }
-
-    #[test]
-    fn fixture_still_refuses_custom_node_kinds() {
-        let mut builder = NodeStoreBuilder::new();
-        let custom = builder
-            .insert(
-                NodeKind::Custom("x-spoiler".to_owned()),
-                NodeAttrs::empty(),
-                NodeContent::children([]),
-            )
-            .unwrap();
-        let root = builder
-            .insert(
-                NodeKind::Document,
-                NodeAttrs::empty(),
-                NodeContent::children([custom]),
-            )
-            .unwrap();
-        let document = XiaomuDocument::new(root, builder.finish()).unwrap();
-
-        let error = write_node(&document, document.root(), &mut String::new()).unwrap_err();
-        assert!(error.0.contains("x-spoiler"), "{error}");
-    }
-
-    #[test]
-    fn fixture_v3_rejects_references_to_undefined_atoms() {
-        let encoded = "xiaomu-fixture-doc v3\np\t{a#0}\t\n";
-        assert!(parse_document(encoded).is_err());
-    }
-}
+mod tests;

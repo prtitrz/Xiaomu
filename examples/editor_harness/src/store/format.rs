@@ -1,25 +1,59 @@
-//! Harness-internal fixture text format (v4).
+//! Harness-internal fixture text format (v4/v5).
 //!
 //! Not a codec: this encodes current-stage canonical semantics for the
-//! host-contract harness only.
+//! host-contract harness only. v5 adds table blocks (`table`/`trow`/`tcell`
+//! container frames); the v4 write path still refuses tables so no snapshot
+//! silently downgrades.
 
 use std::collections::BTreeMap;
-use std::iter::Peekable;
-use std::str::Lines;
 
 use xiaomu_core::document::{
-    AtomKind, AttrValue, HeadingLevel, InlineAtomContent, InlineAtomPlacement, InlineContent,
-    MarkSet, NodeAttrs, NodeContent, NodeId, NodeKind, NodeStoreBuilder, TextRun, XiaomuDocument,
+    AttrValue, InlineContent, NodeAttrs, NodeContent, NodeId, NodeKind, XiaomuDocument,
 };
-use xiaomu_core::text::TextBuffer;
 use xiaomu_runtime::persistence::PersistenceError;
 
-use super::marks_text::{encode_marks, parse_marks};
+use super::marks_text::encode_marks;
+
+mod parse;
+pub use parse::parse_document;
 
 pub(crate) fn write_node(
     document: &XiaomuDocument,
     id: NodeId,
     out: &mut String,
+) -> Result<(), PersistenceError> {
+    write_node_versioned(document, id, out, false)
+}
+
+/// v5 write path: tables encode as `table`/`trow`/`tcell` container frames.
+pub(crate) fn write_node_v5(
+    document: &XiaomuDocument,
+    id: NodeId,
+    out: &mut String,
+) -> Result<(), PersistenceError> {
+    write_node_versioned(document, id, out, true)
+}
+
+/// Whether any node in `id`'s subtree is a table block.
+pub(crate) fn document_contains_table(document: &XiaomuDocument, id: NodeId) -> bool {
+    let Some(node) = document.node(id) else {
+        return false;
+    };
+    if matches!(node.kind(), NodeKind::Table) {
+        return true;
+    }
+    node.content().as_children().is_some_and(|children| {
+        children
+            .iter()
+            .any(|child| document_contains_table(document, *child))
+    })
+}
+
+fn write_node_versioned(
+    document: &XiaomuDocument,
+    id: NodeId,
+    out: &mut String,
+    v5: bool,
 ) -> Result<(), PersistenceError> {
     let Some(node) = document.node(id) else {
         return Err(PersistenceError(
@@ -47,17 +81,47 @@ pub(crate) fn write_node(
         (NodeKind::Image, NodeContent::Atomic) => {
             out.push_str("img\n");
         }
+        (NodeKind::Table, NodeContent::Children(rows)) => {
+            if !v5 {
+                return Err(unsupported_node_error(node.kind()));
+            }
+            let columns = rows
+                .first()
+                .and_then(|row| {
+                    document
+                        .node(*row)
+                        .and_then(|row| row.content().as_children().map(<[NodeId]>::len))
+                })
+                .unwrap_or(0);
+            out.push_str(&format!("table\t{}\t{columns}\n", rows.len()));
+            for row in rows {
+                write_node_versioned(document, *row, out, v5)?;
+            }
+            out.push_str("end\n");
+        }
         (_, NodeContent::Children(children)) => {
             match node.kind() {
                 NodeKind::Quote => out.push_str("quote\n"),
                 NodeKind::BulletList => out.push_str("ul\n"),
                 NodeKind::OrderedList => out.push_str("ol\n"),
                 NodeKind::ListItem => out.push_str("li\n"),
+                NodeKind::TableRow => {
+                    if !v5 {
+                        return Err(unsupported_node_error(node.kind()));
+                    }
+                    out.push_str("trow\n");
+                }
+                NodeKind::TableCell => {
+                    if !v5 {
+                        return Err(unsupported_node_error(node.kind()));
+                    }
+                    out.push_str("tcell\n");
+                }
                 NodeKind::Document => {}
                 _ => return Err(unsupported_node_error(node.kind())),
             }
             for child in children {
-                write_node(document, *child, out)?;
+                write_node_versioned(document, *child, out, v5)?;
             }
             if !matches!(node.kind(), NodeKind::Document) {
                 out.push_str("end\n");
@@ -291,271 +355,4 @@ pub fn unescape_text(text: &str) -> String {
         }
     }
     out
-}
-
-/// One parsed inline field: text segments in order plus atom placements as
-/// `(token index, raw byte offset)` pairs awaiting atom node resolution.
-struct PendingInline {
-    segments: Vec<(String, MarkSet)>,
-    placements: Vec<(usize, usize)>,
-}
-
-/// Parses an inline field. Text travels as text/marks pair items; `{a#N}`
-/// items are atom placement tokens (v3). Plain v2 fields carry no tokens and
-/// parse identically.
-fn parse_inline_pending(rest: &str) -> Result<PendingInline, String> {
-    let mut pending = PendingInline {
-        segments: Vec::new(),
-        placements: Vec::new(),
-    };
-    if rest.is_empty() {
-        return Ok(pending);
-    }
-    let fields: Vec<&str> = rest.split('\t').collect();
-    let mut index = 0usize;
-    let mut offset = 0usize;
-    while index < fields.len() {
-        if let Some(token) = fields[index]
-            .strip_prefix("{a#")
-            .and_then(|rest| rest.strip_suffix('}'))
-        {
-            let atom_index: usize = token.parse().map_err(|_| "bad atom token".to_owned())?;
-            pending.placements.push((atom_index, offset));
-            index += 1;
-            continue;
-        }
-        let text = unescape_text(fields[index]);
-        let marks = fields
-            .get(index + 1)
-            .ok_or("inline runs must be text/marks pairs")?;
-        let marks = parse_marks(marks)?;
-        offset += text.len();
-        if !(text.is_empty() && marks.is_empty()) {
-            pending.segments.push((text, marks));
-        }
-        index += 2;
-    }
-    Ok(pending)
-}
-
-pub fn parse_document(text: &str) -> Result<XiaomuDocument, String> {
-    let mut lines = text.lines();
-    match lines.next() {
-        Some("xiaomu-fixture-doc v2" | "xiaomu-fixture-doc v3" | "xiaomu-fixture-doc v4") => {}
-        _ => return Err("unknown fixture header".to_owned()),
-    }
-
-    enum Frame {
-        Quote,
-        BulletList,
-        OrderedList,
-        ListItem,
-    }
-
-    struct Builder {
-        store: NodeStoreBuilder,
-        roots: Vec<NodeId>,
-        stack: Vec<(Frame, Vec<NodeId>, NodeAttrs)>,
-        pending_attrs: NodeAttrs,
-    }
-
-    impl Builder {
-        fn take_attrs(&mut self) -> NodeAttrs {
-            std::mem::replace(&mut self.pending_attrs, NodeAttrs::empty())
-        }
-
-        fn push(&mut self, id: NodeId) {
-            match self.stack.last_mut() {
-                Some((_, children, _)) => children.push(id),
-                None => self.roots.push(id),
-            }
-        }
-
-        fn leaf(
-            &mut self,
-            kind: NodeKind,
-            rest: &str,
-            lines: &mut Peekable<Lines<'_>>,
-        ) -> Result<(), String> {
-            let pending = parse_inline_pending(rest)?;
-            let attrs = self.take_attrs();
-            // Atom node lines follow the leaf line they are placed in; each
-            // may carry its own attrs line. Token indices map by order.
-            let mut atom_ids: Vec<NodeId> = Vec::new();
-            while let Some(peeked) = lines.peek() {
-                let line = (*peeked).to_owned();
-                if let Some(spec) = line.strip_prefix("@\t") {
-                    lines.next();
-                    self.pending_attrs = parse_attrs(spec)?;
-                    continue;
-                }
-                if line == "@" {
-                    return Err("empty attrs line".to_owned());
-                }
-                let Some(atom_rest) = line.strip_prefix("atom\t") else {
-                    break;
-                };
-                lines.next();
-                let mut fields = atom_rest.splitn(2, '\t');
-                let kind = fields
-                    .next()
-                    .ok_or_else(|| "atom line missing kind".to_owned())
-                    .and_then(|key| AtomKind::new(key).map_err(|error| error.to_string()))?;
-                let fallback = fields
-                    .next()
-                    .ok_or("atom line missing fallback text")?
-                    .to_owned();
-                let fallback = unescape_text(&fallback);
-                let content =
-                    InlineAtomContent::new(fallback).map_err(|error| error.to_string())?;
-                let atom_attrs = self.take_attrs();
-                let id = self
-                    .store
-                    .insert(
-                        NodeKind::InlineAtom(kind),
-                        atom_attrs,
-                        NodeContent::InlineAtom(content),
-                    )
-                    .map_err(|error| error.to_string())?;
-                atom_ids.push(id);
-            }
-
-            let text: String = pending
-                .segments
-                .iter()
-                .map(|(segment, _)| segment.as_str())
-                .collect();
-            let buffer = TextBuffer::from_string(text);
-            let placements = pending
-                .placements
-                .iter()
-                .map(|(index, raw)| -> Result<InlineAtomPlacement, String> {
-                    let id = atom_ids
-                        .get(*index)
-                        .copied()
-                        .ok_or_else(|| format!("inline references undefined atom {index}"))?;
-                    let offset = buffer.offset_at(*raw).map_err(|error| error.to_string())?;
-                    Ok(InlineAtomPlacement::new(id, offset))
-                })
-                .collect::<Result<Vec<_>, String>>()?;
-            let runs = pending
-                .segments
-                .into_iter()
-                .map(|(text, marks)| TextRun::new(text, marks))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| error.to_string())?;
-            let inline =
-                InlineContent::with_atoms(runs, placements).map_err(|error| error.to_string())?;
-            let id = self
-                .store
-                .insert(kind, attrs, NodeContent::Inline(inline))
-                .map_err(|error| error.to_string())?;
-            self.push(id);
-            Ok(())
-        }
-
-        fn finish(mut self) -> Result<XiaomuDocument, String> {
-            if !self.stack.is_empty() {
-                return Err("unclosed container".to_owned());
-            }
-            if !self.pending_attrs.is_empty() {
-                return Err("attrs without a following node".to_owned());
-            }
-            let root = self
-                .store
-                .insert(
-                    NodeKind::Document,
-                    NodeAttrs::empty(),
-                    NodeContent::children(self.roots),
-                )
-                .map_err(|error| error.to_string())?;
-            XiaomuDocument::new(root, self.store.finish()).map_err(|error| error.to_string())
-        }
-    }
-
-    let mut builder = Builder {
-        store: NodeStoreBuilder::new(),
-        roots: Vec::new(),
-        stack: Vec::new(),
-        pending_attrs: NodeAttrs::empty(),
-    };
-
-    let mut lines = lines.peekable();
-    while let Some(line) = lines.next() {
-        if let Some(spec) = line.strip_prefix("@\t") {
-            builder.pending_attrs = parse_attrs(spec)?;
-            continue;
-        }
-        if line == "@" {
-            return Err("empty attrs line".to_owned());
-        }
-        let (tag, rest) = match line.split_once('\t') {
-            Some((tag, rest)) => (tag, rest),
-            None => (line, ""),
-        };
-        match tag {
-            "p" => builder.leaf(NodeKind::Paragraph, rest, &mut lines)?,
-            "hr" => {
-                let attrs = builder.take_attrs();
-                let id = builder
-                    .store
-                    .insert(NodeKind::HorizontalRule, attrs, NodeContent::Atomic)
-                    .map_err(|error| error.to_string())?;
-                builder.push(id);
-            }
-            "img" => {
-                let attrs = builder.take_attrs();
-                let id = builder
-                    .store
-                    .insert(NodeKind::Image, attrs, NodeContent::Atomic)
-                    .map_err(|error| error.to_string())?;
-                builder.push(id);
-            }
-            "code" => builder.leaf(NodeKind::CodeBlock, rest, &mut lines)?,
-            "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-                let level = tag[1..]
-                    .parse::<u8>()
-                    .map_err(|_| format!("bad heading level: {tag}"))?;
-                let kind =
-                    NodeKind::Heading(HeadingLevel::new(level).map_err(|error| error.to_string())?);
-                builder.leaf(kind, rest, &mut lines)?;
-            }
-            "quote" => {
-                let attrs = builder.take_attrs();
-                builder.stack.push((Frame::Quote, Vec::new(), attrs));
-            }
-            "ul" => {
-                let attrs = builder.take_attrs();
-                builder.stack.push((Frame::BulletList, Vec::new(), attrs));
-            }
-            "ol" => {
-                let attrs = builder.take_attrs();
-                builder.stack.push((Frame::OrderedList, Vec::new(), attrs));
-            }
-            "li" => {
-                let attrs = builder.take_attrs();
-                builder.stack.push((Frame::ListItem, Vec::new(), attrs));
-            }
-            "end" => {
-                let (frame, children, attrs) = builder
-                    .stack
-                    .pop()
-                    .ok_or_else(|| "unbalanced end".to_owned())?;
-                let kind = match frame {
-                    Frame::Quote => NodeKind::Quote,
-                    Frame::BulletList => NodeKind::BulletList,
-                    Frame::OrderedList => NodeKind::OrderedList,
-                    Frame::ListItem => NodeKind::ListItem,
-                };
-                let id = builder
-                    .store
-                    .insert(kind, attrs, NodeContent::children(children))
-                    .map_err(|error| error.to_string())?;
-                builder.push(id);
-            }
-            other => return Err(format!("unknown line tag: {other}")),
-        }
-    }
-
-    builder.finish()
 }

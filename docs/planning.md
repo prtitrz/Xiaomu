@@ -2,9 +2,9 @@
 
 > Status: **EARLY / INDEPENDENT PROJECT**
 >
-> Date: 2026-09-01
+> Date: 2026-10-23
 >
-> 当前里程碑：**P0 / P1 / P2 / P3 CLOSED；P4 — Inline Atom / Extension Seam IN PROGRESS，P4.1 mixed-inline coordinate contract 与 P4.2 canonical inline atom Core 层已完成。**
+> 当前里程碑：**P0–P3 CLOSED；P4 功能已交付，Windows 人工验收证据待补；P5.1–P5.5 已实现，P5.6 集成收尾 IN PROGRESS；P6 / P7 PLANNED。** 当前验收以 [P5 progress](phases/p5-table/progress.md) 与 [P5.6 Gate](phases/p5-table/p5.6-integration-gate.md) 为准。
 >
 > 定位：独立演进、可嵌入宿主应用的 **Rust Native Structured Rich-Text / Block Editor Engine**。首个原生前端基于 GPUI，但核心架构不绑定 GPUI。
 
@@ -305,7 +305,7 @@ Image
 CustomBlock
 ```
 
-Table 结构在核心模型中预留，但完整交互延后到独立阶段。
+Table 结构及基础交互在 P5.1–P5.5 实现，P5.6 负责正确性修复与集成验收。
 
 ### 4.1 Inline model
 
@@ -748,11 +748,11 @@ TextOffset = text bytes only
 InlinePoint = text boundary + atom ordinal + visual affinity
 ```
 
-第一阶段保留两个 registry：
+扩展边界的交付分期：
 
 ```text
-InlineAtomRendererRegistry
-BlockRendererRegistry
+InlineAtomRendererRegistry   已交付（P4）
+BlockRendererRegistry        延期至 P7；当前没有通用 block renderer registry
 ```
 
 extension 可以提供：
@@ -775,25 +775,15 @@ extension 不拥有宿主业务数据库。
 Table 采用结构化模型，不退化为字符串。
 
 ```text
-TableNode
-├─ rows
-│  └─ cells
-│     └─ CellContent
-├─ column metadata
-└─ attrs
+Table（attrs）
+└─ TableRow（attrs）
+   └─ TableCell（attrs）
+      └─ 一个或多个合法 block
 ```
 
-第一阶段 Cell 仅允许 paragraph-like inline fragment，后续再开放 richer fragment。
+P5 baseline 的 Cell 复用既有 block：paragraph、heading、quote、list、CodeBlock、inline atom、Image/HR 与嵌套 Table。新建表格默认每格一个空段落；Core 保证非空 cell、非空行和同表列数一致。列宽/header/alignment、合并单元格、独立整行/整列选择手柄不在 P5 baseline。
 
-Selection：
-
-```text
-caret in cell
-cell range
-row / column axis selection
-```
-
-Tab / Shift+Tab 属于 table command。
+已实现 caret、矩形 cell range、Tab / Shift+Tab 和行列操作。P5.6 提供 Alt+单击单格、跨格拖选、Shift+单击与 Alt+Shift+方向键扩选。矩形 Delete/Backspace/剪切清空格内容并保留结构；新表粘贴保留所有属性，范围覆盖保留目标结构属性。详见 [P5 design](phases/p5-table/design.md) 与 [ADR 0006](adr/0006-table-clipboard-contract.md)。
 
 ---
 
@@ -822,6 +812,8 @@ ExtensionRegistry
 Theme / Typography input
 PlatformCapabilities
 ```
+
+当前 `DocumentPersistence`、`AssetService`、`InlineAtomRendererRegistry` 与 `InlineAtomHostCapability` 已落地；`LinkOpenService` / 链接点击激活、通用 `BlockRendererRegistry` 明确归入 P7，不能把 Link mark / Markdown 编解码视为激活服务已完成。
 
 晓木不感知具体数据库、工作区模型、业务实体和同步协议。
 
@@ -1059,74 +1051,31 @@ Gate：固定 Unicode cross-block + visual-line matrix、exact undo/redo 与 ran
 
 ### P4 — Inline Atom / Extension Seam
 
-状态：**IN PROGRESS**
+状态：**功能交付完成；历史 CLOSED 记录的 Windows 人工验收证据待补。**
 
-P4.1 与 P4.2 Core 层已完成：
+P4.1–P4.9 已实现 mixed-inline coordinate、atom transaction / editing、renderer / capability、atomic block / Image / AssetService、clipboard 与 Markdown baseline codec。历史 Windows CI 不能替代真实 Microsoft Pinyin 验收；补验收归入当前 P5.6 的平台矩阵。
 
-```text
-ADR 0005 mixed-inline coordinate contract
-InlinePoint(node_id, text_offset, atom_index, affinity)
-TextPoint ↔ InlinePoint ordinal-0 compatibility
-StepMap / ChangeMap mixed-inline mapping seam
-Runtime DocumentPosition / DocumentSelection compatibility seam
-GPUI DocumentView mixed-inline focus / selection projection
-P0-P3 zero-semantic-regression gate
-InlineAtom canonical model（AtomKind / InlineAtomContent / placement / validation）
-InsertInlineAtom / RemoveInlineAtom / RestoreInlineAtom
-atom-aware ReplaceInlineText contract + InlineTextReplaced mapping + exact inverse
-```
-
-继续完成：
-
-```text
-atom navigation/delete/copy（Runtime / GPUI）
-renderer registry
-block renderer registry
-host capability callbacks
-extension accessibility fallback
-extension + capability-service integration fixture
-```
-
-Gate：一个 demo atom 作为 one-caret-unit 完整操作，文本/atom seam 不污染 UTF-8 `TextOffset` contract，undo/redo 与 mapping 精确，且 Core 无宿主业务类型。
+明确延期：通用 `BlockRendererRegistry`、`LinkOpenService` 与链接激活闭环 → P7。详见 [P4 progress](phases/p4-structured-content-extension/progress.md)。
 
 ### P5 — Table
 
-完成：
+状态：**IN PROGRESS — P5.6 集成收尾。**
 
-```text
-structured table model
-cell editing
-Tab / Shift+Tab
-row / column operations
-cell selection
-```
+P5.1–P5.5 已实现结构化表格、cell 编辑、Tab / Shift+Tab、行列操作、矩形选区及 clipboard。P5.6 修复 2026-10-23 审计问题，补原生矩形操作、表格 accessibility role、fixture v5、Unicode/atom/富内容矩阵、多 editor 隔离和文档。
 
-Gate：表格中英文连续编辑 + undo/redo。
+关闭条件：上述本地自动化全绿，最终修订的三平台 `CI Success` 全绿，并完成独立 Windows 实机 IME Gate；详见 [P5.6 Gate](phases/p5-table/p5.6-integration-gate.md)。在证据补齐前保留 IN PROGRESS。
 
 ### P6 — Performance / Long Document
 
-完成：
+状态：**PLANNED**；在 P5 Gate 完成后启动。
 
-```text
-layout cache
-virtualization/windowing
-large-document benchmark
-memory/profile
-multi-editor stress
-```
+目标：先建立 1k/10k block、大表格、长 CodeBlock、多 editor 基准及目标硬件预算，测量输入/粘贴/撤销、滚动、内存和历史增长。再依测量推进 layout cache 的局部失效、父节点索引、批量事务更新、virtualization/windowing 与 stress tests。
 
 ### P7 — Library Stabilization
 
-完成：
+状态：**PLANNED**。
 
-```text
-public API reduction
-semantic versioning
-frontend compatibility policy
-examples
-docs
-license / release automation
-```
+目标：收紧公开 API、SemVer 与前端兼容策略、真实宿主接入示例、错误处理与文档、发布自动化。补交 P4 延期的通用 `BlockRendererRegistry`、`LinkOpenService` / 链接激活闭环，以及 GPUI 能力允许时的平台 accessibility adapter / screen-reader smoke test。harness-private fixture 不作为生产持久化格式承诺。
 
 ---
 

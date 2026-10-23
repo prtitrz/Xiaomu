@@ -13,11 +13,11 @@ NodeKind::TableCell    NodeContent::Children([block…])
 ```text
 Table/TableRow/TableCell 都是普通树节点（NodeId、attrs、Children content）
   → parent / validate_tree / ChangeMap / clipboard projection 全部免费复用
-cell 内放 block（至少一个 Paragraph），不放裸 inline
+cell 内放一个或多个合法 block，不放裸 inline（默认新 cell 为一个空 Paragraph）
   → cell 内复用既有 caret / gap / SplitBlock / marks / atom 全套语义
 表格不变量属于 canonical validation：
   → 每个 TableRow 的 cell 数一致（列数由行推导，不另设 attrs 冗余）
-  → 每个 TableCell 至少一个 child block（caret 必须有落点）
+  → 每个 TableCell 至少一个 child block（纯 atomic 内容也合法）
   → allows_child：Table↔TableRow、TableRow↔TableCell；
     Document/Quote/ListItem/TableCell 可包含 Table（嵌套表允许，结构 op 只作用于最内层所属表）
 baseline 不设 header row / column alignment / 列宽 attrs
@@ -33,7 +33,7 @@ TableRow 的 children 全是 TableCell 且 ≥1 cell
 TableCell 的 children ≥1 且不含 Table 之外的容器约束沿用 allows_child
 ```
 
-表格构造是 Core 语义步骤 `TransactionStep::InsertTable { parent, index, rows, columns }`（P5.1 实施修订）：每个 stage 事务都会独立通过 `validate_tree`，而表格中间态（有行无 cell、有 cell 无段落、空表）必然非法，因此 `InsertNode` 分层 staging 无法表达嵌套构造。`InsertTable` 与 `InsertInlineAtom` 同一哲学——Core 分配 table/row/cell/cell 内空 Paragraph 的全部 fresh identity，产出的 snapshot 直接满足表格不变量，inverse 为 `RemoveNode`（子树随删）。行/列级别操作（P5.3）仍然用既有 `InsertNode / RemoveNode` 组合：它们在已有合法表格上插入/删除合法行或列，每个中间态都合法。
+表格构造是 Core 语义步骤 `TransactionStep::InsertTable { parent, index, rows, columns }`（P5.1 实施修订）：每个 stage 事务都会独立通过 `validate_tree`，而表格中间态（有行无 cell、有 cell 无段落、空表）必然非法，因此 `InsertNode` 分层 staging 无法表达嵌套构造。`InsertTable` 与 `InsertInlineAtom` 同一哲学——Core 分配 table/row/cell/cell 内空 Paragraph 的全部 fresh identity，产出的 snapshot 直接满足表格不变量，inverse 为 `RemoveNode`（子树随删）。P5.3 插入行/列同样使用 Core 语义步骤；删除由单事务 `RemoveNode` 组合承载，只校验最终快照，见 §3。
 
 ## 2. 位置与选区
 
@@ -56,8 +56,10 @@ validate：两端为同表 TableCell
 map_through：矩形随 cell 身份走——插入不动矩形；端点子树被删才收缩为存活端点；
   两端皆亡（或 parked caret 被删）→ 收敛到删除缝（NodeRemoved 的 parent+index gap）
 矩形选区不与 text selection 混存：range 激活时 text 端点停靠在 anchor cell 行缝；
-  内容 intent 先收敛到 anchor cell 首块起点（collapse_cell_range），表结构 op 与
-  structured paste 保留矩形（前者映射、后者替换）
+  Delete/Backspace/Cut 清空整个矩形并保留 cell 身份/attrs 和选区；
+  typing 等其他内容 intent 先收敛到 anchor cell 首个可编辑块起点；
+  表结构 op 与 structured paste 保留矩形（前者映射、后者替换）
+```
 
 ## 3. 编辑语义
 
@@ -65,7 +67,7 @@ map_through：矩形随 cell 身份走——插入不动矩形；端点子树被
 
 ```text
 caret 在 cell 内 → MoveToNextCell：caret 移到下一 cell 首段的 (0, ordinal 0)
-最后一个 cell → Core 语义步骤 TransactionStep::InsertTableRow { table }（与
+最后一个 cell → Core 语义步骤 TransactionStep::InsertTableRow { table, index }（与
   InsertTable 同理：整行构造一次成型，列数取自表首行；step map 报告新行首
   cell 的 paragraph 作为 caret 目标），单 isolated history entry，redo 恢复
   同一批 node id
@@ -81,7 +83,7 @@ Enter 在 cell 内段落 → 既有 SplitBlock（新段落留在同 cell）
 Backspace 在 cell 首段 (0,0) → baseline no-op（不 join 前 cell；cell join 的
   atom/嵌套迁移语义明确后另立切片，本切片记录为已知边界）
 Delete 在 cell 末尾 → 同理 no-op
-cell 内文本/选区/IME/undo 全部走既有 intent，无表格特例
+普通 cell 内文本/IME 复用既有 intent；矩形清空为单独 Runtime planner，保留结构与精确 undo
 ```
 
 ### 行列操作（P5.3，实施修订）
@@ -90,7 +92,7 @@ cell 内文本/选区/IME/undo 全部走既有 intent，无表格特例
 InsertTableRow { table, index }      Core 语义步骤（修订：单一新行使表在命令中途
                                      非法，validated staging 无法表达，与 P5.1 同理）
 InsertTableColumn { table, index }   Core 语义步骤：每行 index 处插一个空 cell（空
-                                     Paragraph），step map 报告首行新 cell 作 caret 目标
+                                     Paragraph），每行分别产生 NodeInserted 映射，覆盖所有 row-local gaps
 DeleteTableRow { table, index }      单步 RemoveNode(row)；表只剩一行时 planner fail
                                      closed（Core 侧最终快照验证同样拦截）
 DeleteTableColumn { table, index }   单事务内每行一个 RemoveNode(cell)；中间态 ragged
@@ -112,16 +114,20 @@ undo / redo：整命令一个 isolated history entry；删除的 inverse 恢复�
 ## 4. Clipboard（P5.5）
 
 ```text
-wire v5：
-  ClipboardNodeContent::Table { rows: Vec<Vec<ClipboardTableNode>> } 或等价形状
-  cell 载荷沿用 ClipboardNodeContent::Children / Inline / Atomic
-旧版本 fail-soft：v4 及以下 reader 遇 table 载荷退化为 plain text（不静默重组结构）
-plain-text fallback：TSV——cell 内文本以 \t 分列、\n 分行；cell 内已有换行按 block 边界扁平化
-paste（P5.5 实施事实，`session/paste_table.rs`）：
-  表载荷 + 匹配尺寸的 cell-range → 逐 cell staged 替换（先插后删，单 history entry）
-  1×1 表载荷 + caret 在 cell 内 → payload 块插入 focused block 之后
-  表载荷 + caret 在普通文本 → InsertTable 语义步骤建空表 + 逐 cell 填充 + seed 段删除
-  mixed / 尺寸不符 / 其余落点 fail closed（新错误变体 ClipboardTableUnsupported）
+wire v6：
+  ClipboardNodeContent::Table { rows: Vec<Vec<ClipboardNode>>, row_attrs: Vec<NodeAttrs> }
+  table/cell attrs 原位保存，row_attrs 与 rows 一一对应；块内容递归捕获
+兼容：v5 无 row_attrs 读作每行空属性；非表片段继续写 v4；v4 不携带 table
+未知版本、非法结构、fallback 不匹配 → metadata fail soft，回退系统 plain text
+plain-text fallback：TSV——cell 以 \t 分列、table row 以 \n 分行；cell 内所有 CRLF/CR/LF/tab
+  与 block 边界扁平化为空格；结构化 payload 不改文本、marks、atoms 或属性
+paste（P5.6 修订，见 ADR 0006）：
+  表载荷 + 同尺寸 cell-range → 逐 cell 替换内容，保留目标 table/row/cell attrs
+  1×1 表载荷 + caret 在 cell 内 → payload 块插在 caret 所在直属 cell block 后
+  cell 外 → 新建兄弟表，完整保留源 table/row/cell attrs 与递归子内容
+  nested table / quote / list / code / image / HR / atoms 均经 validated stages 重建 fresh IDs
+  mixed roots / 尺寸不符 / 其余落点 fail closed（ClipboardTableUnsupported）
+  整命令一个 history entry；undo 恢复原内容、原身份与选区，redo 恢复重建身份
 markdown：GFM table 不入 P4.9 baseline codec；Table 节点导出走既有 UnsupportedNodeKind
 ```
 
@@ -129,11 +135,13 @@ markdown：GFM table 不入 P4.9 baseline codec；Table 节点导出走既有 Un
 
 ```text
 TableBlockPresentation：
-  grid 布局（gpui div + 固定列计数），cell 边框 / hover / focus affordance
+  grid 布局（gpui div + 等宽列），cell 边框 / focus affordance
   cell 内块渲染递归复用既有 block element（不做表格专用第二套段落渲染）
-  caret / selection / IME / hit-test：cell 内就是普通块，投影零改动
-  表格级 hit-test：点击 cell 空白 → caret 到该 cell 首段；点击既有块 → 既有路径
-keyboard：Tab / Shift+Tab action 在 cell 上下文注册；上下文判定依据 focus 所在块的祖先链
+  caret / selection / IME：复用 cell 内普通块的投影
+  hit-test：先定位最内层包含点击的 cell bounds，再按二维距离选其子树内文本块
+keyboard：Tab / Shift+Tab 在 cell 上下文优先；矩形扩选用 Alt+Shift+方向键
+mouse：Alt+单击单格；跨格拖选/Shift+单击矩形扩选；composition 期间不移动选区
+history：undo/redo 同步新 child view 并恢复 native focus
 accessibility：Table/TableRow/TableCell 投影为对应 role，cell 内容递归投影
 ```
 
@@ -142,8 +150,9 @@ accessibility：Table/TableRow/TableCell 投影为对应 role，cell 内容递�
 ```text
 harness fixture v5：table 块行编码
   table\t<rows>\t<cols> 行 + end 包裹 row/cell 容器（复用 quote/ul 的 end 栈模型）
-  cell 作为容器帧（新 Frame::Cell），cell 内沿用 p/code/atom/img 行
-  v4 及以下读兼容；Table 在 v4 写路径仍 fail closed
+  cell 作为容器帧（Frame::TableCell），cell 内沿用 p/code/atom/img 行
+  v2/v3/v4 读兼容；旧 header 下 table 帧拒绝，Table 在 v4 写路径仍 fail closed
+  save 自动选择 v4/v5；维度、非空 cell、嵌套/end 栈均校验
 markdown codec：不变（Table 导出 fail closed，见 §4）
 ```
 
@@ -157,3 +166,5 @@ P5.4  GPUI e2e：text ↔ table ↔ text 键盘鼠标、cell 内编辑、Tab 行
 P5.5  矩形选区 copy/paste/undo、TSV fallback、wire 往返、mixed fail closed
 P5.6  realistic fixture + Unicode 矩阵 + 多 editor 隔离 + Windows/CI
 ```
+
+语义决策见 [ADR 0006](../../adr/0006-table-clipboard-contract.md)，本阶段最终证据见 [P5.6 Gate](p5.6-integration-gate.md)。

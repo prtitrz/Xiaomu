@@ -33,6 +33,12 @@ pub enum AccessibilityRole {
     Separator,
     /// Image block.
     Image,
+    /// A structured table.
+    Table,
+    /// A row of table cells.
+    TableRow,
+    /// A table cell containing ordinary blocks.
+    TableCell,
     /// Extension-defined or otherwise unclassified block.
     Generic,
     /// Atomic inline extension node, read through its `fallback_text`.
@@ -205,6 +211,9 @@ fn role_for_kind(kind: &NodeKind) -> AccessibilityRole {
         NodeKind::CodeBlock => AccessibilityRole::CodeBlock,
         NodeKind::HorizontalRule => AccessibilityRole::Separator,
         NodeKind::Image => AccessibilityRole::Image,
+        NodeKind::Table => AccessibilityRole::Table,
+        NodeKind::TableRow => AccessibilityRole::TableRow,
+        NodeKind::TableCell => AccessibilityRole::TableCell,
         NodeKind::Custom(_) => AccessibilityRole::Generic,
         NodeKind::InlineAtom(_) => AccessibilityRole::InlineAtom,
         _ => AccessibilityRole::Generic,

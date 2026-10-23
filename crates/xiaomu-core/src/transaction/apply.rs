@@ -77,8 +77,8 @@ impl ApplyContext {
     fn apply_step(
         &mut self,
         step: &TransactionStep,
-    ) -> Result<(Option<StepMap>, Vec<TransactionStep>)> {
-        match step {
+    ) -> Result<(Vec<StepMap>, Vec<TransactionStep>)> {
+        let (mapping, inverse) = match step {
             TransactionStep::ReplaceText {
                 node,
                 range,
@@ -116,7 +116,7 @@ impl ApplyContext {
                 self.apply_insert_table_row(*table, *index)
             }
             TransactionStep::InsertTableColumn { table, index } => {
-                self.apply_insert_table_column(*table, *index)
+                return self.apply_insert_table_column(*table, *index);
             }
             TransactionStep::RestoreSubtree {
                 parent,
@@ -139,7 +139,8 @@ impl ApplyContext {
             } => self.apply_mark_change(*node, *range, MarkChange::Remove(*mark_kind)),
             TransactionStep::SplitNode { node, at } => self.apply_split_node(*node, *at),
             TransactionStep::JoinNodes { first, second } => self.apply_join_nodes(*first, *second),
-        }
+        }?;
+        Ok((mapping.into_iter().collect(), inverse))
     }
 
     fn content_of(&self, id: NodeId) -> Result<NodeContent> {
@@ -604,10 +605,8 @@ pub(super) fn apply_steps(
     let mut step_maps = Vec::new();
     let mut inverse_groups: Vec<Vec<TransactionStep>> = Vec::new();
     for step in steps {
-        let (step_map, inverse_steps) = context.apply_step(step)?;
-        if let Some(step_map) = step_map {
-            step_maps.push(step_map);
-        }
+        let (mappings, inverse_steps) = context.apply_step(step)?;
+        step_maps.extend(mappings);
         inverse_groups.push(inverse_steps);
     }
 

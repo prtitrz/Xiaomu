@@ -5,10 +5,10 @@
 //! renderer, so every block kind inside a cell keeps its existing
 //! presentation, caret, IME, and hit-test seams. The grid and the cell
 //! holding the selection gain a focus affordance; clicking a cell's padding
-//! resolves through the shared paint registry to that row's nearest text
-//! block, so no table-specific pointer path exists.
+//! resolves through cell bounds to that cell's nearest text block. The same
+//! bounds drive native rectangular selection gestures.
 
-use gpui::{Context, IntoElement, ParentElement, Styled, div, px};
+use gpui::{Context, IntoElement, ParentElement, Styled, canvas, div, px};
 use xiaomu_core::document::NodeId;
 use xiaomu_runtime::session::DocumentPosition;
 
@@ -80,13 +80,28 @@ impl DocumentView {
             let mut row_element = div().flex().flex_row();
             let last_cell = cells.len().saturating_sub(1);
             for (cell_index, cell) in cells.into_iter().enumerate() {
+                let cell_bounds = self.cell_bounds.clone();
                 let mut cell_element = div()
+                    .relative()
                     .flex()
                     .flex_col()
                     .flex_1()
+                    .min_w(px(0.0))
                     .min_h(px(28.0))
                     .px_2()
-                    .py_1();
+                    .py_1()
+                    .child(
+                        canvas(
+                            move |bounds, _, _| {
+                                cell_bounds.borrow_mut().push((cell, bounds));
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    );
                 if highlight.contains(&cell) {
                     cell_element = cell_element.bg(gpui::rgba(0xeef4fbff));
                 }

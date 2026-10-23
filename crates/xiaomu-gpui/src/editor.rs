@@ -123,7 +123,14 @@ impl EditorInstance {
 /// Hosts that own their application lifecycle can call this once before
 /// mounting one or more editor instances.
 pub fn bind_default_editor_keys(cx: &mut App) {
+    use crate::document_view::table_selection::{
+        ExtendCellDown, ExtendCellLeft, ExtendCellRight, ExtendCellUp,
+    };
     cx.bind_keys([
+        KeyBinding::new("alt-shift-left", ExtendCellLeft, Some("XiaomuDocument")),
+        KeyBinding::new("alt-shift-right", ExtendCellRight, Some("XiaomuDocument")),
+        KeyBinding::new("alt-shift-up", ExtendCellUp, Some("XiaomuDocument")),
+        KeyBinding::new("alt-shift-down", ExtendCellDown, Some("XiaomuDocument")),
         KeyBinding::new("backspace", Backspace, None),
         KeyBinding::new("delete", Delete, None),
         KeyBinding::new("enter", Enter, None),

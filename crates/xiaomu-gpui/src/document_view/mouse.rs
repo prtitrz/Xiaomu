@@ -34,7 +34,24 @@ impl DocumentView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.focused_child_composing(window, cx) {
+            return;
+        }
         self.is_dragging = true;
+        self.cell_drag_anchor = self.cell_at(event.position);
+        if let Some(cell) = self.cell_drag_anchor {
+            let anchor = if event.modifiers.shift {
+                self.selection_anchor_cell().unwrap_or(cell)
+            } else {
+                cell
+            };
+            if (event.modifiers.alt || (event.modifiers.shift && anchor != cell))
+                && self.select_cells(anchor, cell, window, cx)
+            {
+                self.cell_drag_anchor = Some(anchor);
+                return;
+            }
+        }
         if let Some(hit) = self.hit_test(event.position, cx) {
             #[cfg(debug_assertions)]
             {
@@ -104,6 +121,23 @@ impl DocumentView {
         if !self.is_dragging {
             return;
         }
+        if let Some(anchor) = self.cell_drag_anchor {
+            let active_range = self
+                .session
+                .borrow()
+                .selection()
+                .active_cell_range()
+                .is_some();
+            if let Some(cell) = self.cell_at(event.position)
+                && (cell != anchor || active_range)
+                && self.select_cells(anchor, cell, window, cx)
+            {
+                return;
+            }
+            if active_range {
+                return;
+            }
+        }
         if let Some(hit) = self.hit_test(event.position, cx) {
             self.move_focus_to(hit.point, true, window, cx);
         }
@@ -111,10 +145,11 @@ impl DocumentView {
 
     pub(crate) fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.is_dragging = false;
+        self.cell_drag_anchor = None;
     }
 
     /// Maps a window-space point to a validated caret point via the paint
-    /// registry: nearest block by vertical position, then two-dimensional
+    /// registry: containing cell and nearest two-dimensional block, then
     /// hit-testing inside that block's wrapped text layout.
     ///
     /// Blocks carrying inline atoms shape their layout on renderer display
@@ -125,19 +160,39 @@ impl DocumentView {
     /// inside a renderer span also reports the chip for host activation.
     fn hit_test(&self, position: Point<Pixels>, cx: &App) -> Option<MouseHit> {
         let registry = self.registry.borrow();
-        let mut nearest: Option<(NodeId, Pixels)> = None;
+        let cell = self.cell_at(position);
+        let session = self.session.borrow();
+        let mut nearest: Option<(NodeId, f32)> = None;
         for (node, bounds) in registry.iter() {
-            let distance = if position.y < bounds.top() {
-                bounds.top() - position.y
-            } else if position.y > bounds.bottom() {
-                position.y - bounds.bottom()
-            } else {
-                Pixels::ZERO
-            };
+            // Cell padding belongs to its own cell even if a neighboring
+            // cell has a closer line (different wrap heights).
+            if let Some(cell) = cell
+                && !navigation::selection_is_within(
+                    session.document(),
+                    xiaomu_runtime::session::DocumentPosition::Inline(InlinePoint::at_start_of(
+                        *node,
+                    )),
+                    cell,
+                )
+            {
+                continue;
+            }
+            let dx = f32::from(
+                (bounds.left() - position.x)
+                    .max(position.x - bounds.right())
+                    .max(Pixels::ZERO),
+            );
+            let dy = f32::from(
+                (bounds.top() - position.y)
+                    .max(position.y - bounds.bottom())
+                    .max(Pixels::ZERO),
+            );
+            let distance = dx * dx + dy * dy;
             if nearest.is_none_or(|(_, best)| distance < best) {
                 nearest = Some((*node, distance));
             }
         }
+        drop(session);
         let (node, _) = nearest?;
 
         let child = self

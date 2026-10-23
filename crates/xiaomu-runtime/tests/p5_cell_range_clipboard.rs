@@ -214,7 +214,7 @@ fn a_content_intent_collapses_the_range_back_to_the_parked_caret() {
 }
 
 #[test]
-fn copy_round_trips_wire_v5_with_tsv_fallback() {
+fn copy_round_trips_wire_v6_with_tsv_fallback() {
     let fixture = fixture();
     let mut session = session_at(&fixture.document, fixture.intro, 0);
     session
@@ -227,8 +227,8 @@ fn copy_round_trips_wire_v5_with_tsv_fallback() {
 
     let metadata = encode_metadata(&slice).unwrap();
     assert!(
-        metadata.contains("\"version\":5"),
-        "table payloads bump to v5"
+        metadata.contains("\"version\":6"),
+        "table payloads bump to v6"
     );
     let decoded = decode_metadata(slice.plain_text(), &metadata).unwrap();
     assert_eq!(decoded.plain_text(), slice.plain_text());

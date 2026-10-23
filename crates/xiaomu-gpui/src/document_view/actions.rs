@@ -367,14 +367,14 @@ impl DocumentView {
         }
     }
 
-    pub(crate) fn undo_entry(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn undo_entry(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
         let outcome = self.session.borrow_mut().undo();
-        self.after_history(outcome, cx);
+        self.after_history(outcome, window, cx);
     }
 
-    pub(crate) fn redo_entry(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn redo_entry(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
         let outcome = self.session.borrow_mut().redo();
-        self.after_history(outcome, cx);
+        self.after_history(outcome, window, cx);
     }
 
     fn after_history(
@@ -383,12 +383,15 @@ impl DocumentView {
             xiaomu_runtime::session::SessionOutcome,
             xiaomu_runtime::session::SessionError,
         >,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match outcome {
             Ok(outcome) => {
                 if outcome != xiaomu_runtime::session::SessionOutcome::NoChange {
                     self.epoch.set(self.epoch.get() + 1);
+                    self.sync_children(cx);
+                    self.route_focus(window, cx);
                 }
                 cx.notify();
             }
@@ -405,6 +408,9 @@ impl DocumentView {
     }
 
     pub(crate) fn cut(&mut self, _: &ClipboardCut, window: &mut Window, cx: &mut Context<Self>) {
+        if self.focused_child_composing(window, cx) {
+            return;
+        }
         let slice = match self.session.borrow().clipboard_slice() {
             Ok(Some(slice)) => slice,
             Ok(None) => return,
@@ -535,9 +541,29 @@ impl DocumentView {
 
     /// Moves platform focus to the block holding the selection focus.
     pub(crate) fn route_focus(&self, window: &mut Window, cx: &App) {
-        let node = match self.session.borrow().selection().focus() {
-            DocumentPosition::Inline(point) => point.node_id(),
-            DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => return,
+        let session = self.session.borrow();
+        let selection = session.selection();
+        let node = if let Some(range) = selection.active_cell_range() {
+            let Some(block) = navigation::text_blocks(session.document())
+                .into_iter()
+                .find(|block| {
+                    navigation::selection_is_within(
+                        session.document(),
+                        DocumentPosition::Inline(xiaomu_core::selection::InlinePoint::at_start_of(
+                            block.node,
+                        )),
+                        range.anchor(),
+                    )
+                })
+            else {
+                return;
+            };
+            block.node
+        } else {
+            match selection.focus() {
+                DocumentPosition::Inline(point) => point.node_id(),
+                DocumentPosition::Gap(_) | DocumentPosition::Atomic(_) => return,
+            }
         };
         if let Some((_, view)) = self.children.iter().find(|(id, _)| *id == node) {
             let handle = view.read(cx).focus_handle(cx);

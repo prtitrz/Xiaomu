@@ -182,50 +182,82 @@ fn slice_cell_range(
     };
     let table_rows = children(table)?;
     let mut rows = Vec::new();
+    let mut row_attrs = Vec::new();
     for row in &table_rows[row_min..=row_max] {
+        row_attrs.push(
+            document
+                .node(*row)
+                .ok_or(SessionError::SelectionInvalid)?
+                .attrs()
+                .clone(),
+        );
         let row_cells = children(*row)?;
         let mut rect_row = Vec::new();
         for cell in &row_cells[col_min..=col_max] {
-            rect_row.push(cell_fragment(document, *cell)?);
+            rect_row.push(whole_node_fragment(document, *cell)?);
         }
         rows.push(rect_row);
     }
     let table_node = ClipboardNode::new(
         NodeKind::Table,
-        NodeAttrs::empty(),
-        ClipboardNodeContent::Table { rows },
+        document
+            .node(table)
+            .ok_or(SessionError::SelectionInvalid)?
+            .attrs()
+            .clone(),
+        ClipboardNodeContent::Table { rows, row_attrs },
     );
     Ok(Some(ClipboardSlice::from_table(table_node)))
 }
 
-/// Captures one whole cell as a fragment node: every child block with its
-/// full inline content, marks and atoms included.
-fn cell_fragment(document: &XiaomuDocument, cell: NodeId) -> Result<ClipboardNode, SessionError> {
-    let node = document.node(cell).ok_or(SessionError::SelectionInvalid)?;
-    let blocks = node
-        .content()
-        .as_children()
-        .ok_or(SessionError::SelectionInvalid)?;
-    let mut children = Vec::new();
-    for block in blocks {
-        let block_node = document
-            .node(*block)
-            .ok_or(SessionError::SelectionInvalid)?;
-        let inline = block_node
-            .content()
-            .as_inline()
-            .ok_or(SessionError::SelectionInvalid)?;
-        let length = inline.len_bytes();
-        children.push(ClipboardNode::new(
-            block_node.kind().clone(),
-            block_node.attrs().clone(),
-            ClipboardNodeContent::Inline(slice_inline(document, inline, 0, 0, length, 0, true)?),
-        ));
-    }
+/// Captures a whole subtree, including container, media and nested table
+/// semantics. Inline atom identities are detached by the same slice helper
+/// used for ordinary text selections.
+fn whole_node_fragment(
+    document: &XiaomuDocument,
+    id: NodeId,
+) -> Result<ClipboardNode, SessionError> {
+    let node = document.node(id).ok_or(SessionError::SelectionInvalid)?;
+    let content = match node.content() {
+        NodeContent::Inline(inline) => ClipboardNodeContent::Inline(slice_inline(
+            document,
+            inline,
+            0,
+            0,
+            inline.len_bytes(),
+            0,
+            true,
+        )?),
+        NodeContent::Children(children) if matches!(node.kind(), NodeKind::Table) => {
+            let mut rows = Vec::new();
+            let mut row_attrs = Vec::new();
+            for row in children {
+                let row = document.node(*row).ok_or(SessionError::SelectionInvalid)?;
+                row_attrs.push(row.attrs().clone());
+                rows.push(
+                    row.content()
+                        .as_children()
+                        .ok_or(SessionError::SelectionInvalid)?
+                        .iter()
+                        .map(|cell| whole_node_fragment(document, *cell))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+            }
+            ClipboardNodeContent::Table { rows, row_attrs }
+        }
+        NodeContent::Children(children) => ClipboardNodeContent::Children(
+            children
+                .iter()
+                .map(|child| whole_node_fragment(document, *child))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        NodeContent::Atomic => ClipboardNodeContent::Atomic,
+        _ => return Err(SessionError::SelectionInvalid),
+    };
     Ok(ClipboardNode::new(
-        NodeKind::TableCell,
+        node.kind().clone(),
         node.attrs().clone(),
-        ClipboardNodeContent::Children(children),
+        content,
     ))
 }
 

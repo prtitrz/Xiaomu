@@ -19,6 +19,7 @@ pub(crate) mod markers;
 pub(crate) mod mouse;
 pub(crate) mod navigation;
 mod table_block;
+pub(crate) mod table_selection;
 mod visual_navigation;
 
 use std::cell::{Cell, RefCell};
@@ -53,6 +54,8 @@ pub struct DocumentView {
     /// invalidate.
     epoch: Rc<Cell<u64>>,
     registry: BlockBoundsRegistry,
+    cell_bounds: BlockBoundsRegistry,
+    cell_drag_anchor: Option<NodeId>,
     /// Shared viewport scroll state. Focused blocks use it to keep the caret
     /// visible without leaking viewport geometry into Core or runtime.
     scroll_handle: ScrollHandle,
@@ -86,6 +89,8 @@ impl DocumentView {
             session,
             epoch: Rc::new(Cell::new(0)),
             registry: Rc::new(RefCell::new(Vec::new())),
+            cell_bounds: Rc::new(RefCell::new(Vec::new())),
+            cell_drag_anchor: None,
             scroll_handle: ScrollHandle::new(),
             children: Vec::new(),
             is_dragging: false,
@@ -570,6 +575,7 @@ impl Render for DocumentView {
 
         // Each paint pass repopulates the registry; stale entries must go.
         self.registry.borrow_mut().clear();
+        self.cell_bounds.borrow_mut().clear();
 
         let tree = self.render_block_tree(root, false, 0, 0, cx);
 
@@ -600,6 +606,10 @@ impl Render for DocumentView {
             .on_action(cx.listener(Self::select_home))
             .on_action(cx.listener(Self::select_end))
             .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::extend_cell_left))
+            .on_action(cx.listener(Self::extend_cell_right))
+            .on_action(cx.listener(Self::extend_cell_up))
+            .on_action(cx.listener(Self::extend_cell_down))
             .on_action(cx.listener(Self::enter))
             .on_action(cx.listener(Self::hard_break))
             .on_action(cx.listener(Self::tab_indent))
