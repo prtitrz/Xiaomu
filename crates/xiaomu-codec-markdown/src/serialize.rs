@@ -19,6 +19,8 @@ use crate::error::{MarkdownCodecError, Result};
 use crate::escape::{
     code_block_fence, code_span_fence, escape_destination, escape_text, escape_title,
 };
+use crate::inline::scan_inline;
+use crate::limits::{Budget, check_document};
 
 /// Serializes a canonical document into baseline Markdown.
 ///
@@ -26,6 +28,7 @@ use crate::escape::{
 /// bullet lists use `- `, ordered lists renumber from 1, and hard breaks use
 /// the backslash form. The canonical document is never modified.
 pub fn to_markdown(document: &XiaomuDocument) -> Result<String> {
+    check_document(document)?;
     let root = document
         .node(document.root())
         .ok_or(MarkdownCodecError::InvalidDocument(Error::UnknownNode))?;
@@ -87,7 +90,8 @@ fn write_block(
             out.push_str(&pad);
             out.push_str(&"#".repeat(level.as_u8().into()));
             out.push(' ');
-            out.push_str(&escape_text(&text));
+            let lines = rendered_lines(document, node, "Heading")?;
+            out.push_str(&lines.join(""));
             out.push('\n');
         }
         NodeKind::HorizontalRule => {
@@ -276,7 +280,8 @@ fn write_list(
             match child_node.kind() {
                 NodeKind::Paragraph if position == 0 => {
                     let lines = paragraph_lines(document, child_node)?;
-                    for line in lines {
+                    let count = lines.len();
+                    for (index, line) in lines.into_iter().enumerate() {
                         if first_line {
                             out.push_str(&" ".repeat(indent));
                             out.push_str(&marker);
@@ -285,6 +290,9 @@ fn write_list(
                             out.push_str(&item_pad);
                         }
                         out.push_str(&line);
+                        if index + 1 < count {
+                            out.push('\\');
+                        }
                         out.push('\n');
                     }
                 }
@@ -317,6 +325,17 @@ fn write_list(
 
 fn paragraph_lines(document: &XiaomuDocument, node: &Node) -> Result<Vec<String>> {
     require_known_attrs(node, "Paragraph", &[])?;
+    let lines = rendered_lines(document, node, "Paragraph")?;
+    // A line-leading fence is a block, even if it was intended as inline code.
+    if lines.iter().any(|line| line.starts_with("```")) {
+        return Err(MarkdownCodecError::UnsupportedMark {
+            mark: "Code fence at paragraph line start".to_owned(),
+        });
+    }
+    Ok(lines)
+}
+
+fn rendered_lines(document: &XiaomuDocument, node: &Node, kind: &str) -> Result<Vec<String>> {
     let inline = inline_content(node)?;
     if !inline.atoms().is_empty() {
         let atom = document.node(inline.atoms()[0].atom());
@@ -329,6 +348,15 @@ fn paragraph_lines(document: &XiaomuDocument, node: &Node) -> Result<Vec<String>
         return Err(MarkdownCodecError::EmptyParagraph);
     }
 
+    if inline
+        .runs()
+        .last()
+        .is_some_and(|run| run.text().as_str().ends_with('\n'))
+    {
+        return Err(MarkdownCodecError::HardBreakNotRepresentable {
+            kind: kind.to_owned(),
+        });
+    }
     let mut lines: Vec<String> = vec![String::new()];
     for run in inline.runs() {
         for (index, piece) in render_run(run)?.into_iter().enumerate() {
@@ -346,14 +374,34 @@ fn paragraph_lines(document: &XiaomuDocument, node: &Node) -> Result<Vec<String>
                 || line.ends_with('\t'))
         {
             return Err(MarkdownCodecError::LossyWhitespace {
-                kind: "Paragraph".to_owned(),
+                kind: kind.to_owned(),
             });
         }
         if line.is_empty() && index + 1 < lines.len() {
             return Err(MarkdownCodecError::LossyWhitespace {
-                kind: "Paragraph".to_owned(),
+                kind: kind.to_owned(),
             });
         }
+    }
+    // Delimiters at adjacent run boundaries can interact. Check the inline
+    // semantics, including every mark and its attributes, before returning success.
+    let segments =
+        scan_inline(&lines.join("\n"), 1, &mut Budget::default()).map_err(|error| match error {
+            MarkdownCodecError::ResourceLimit { .. } => error,
+            _ => MarkdownCodecError::InlineNotRepresentable {
+                kind: kind.to_owned(),
+            },
+        })?;
+    let runs = segments
+        .into_iter()
+        .map(|(text, marks)| TextRun::new(text, marks))
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(MarkdownCodecError::InvalidDocument)?;
+    let parsed = InlineContent::new(runs).map_err(MarkdownCodecError::InvalidDocument)?;
+    if &parsed != inline {
+        return Err(MarkdownCodecError::InlineNotRepresentable {
+            kind: kind.to_owned(),
+        });
     }
     Ok(lines)
 }
@@ -381,7 +429,15 @@ fn render_run(run: &TextRun) -> Result<Vec<String>> {
             });
         }
         let fence = code_span_fence(text);
-        let mut piece = format!("{fence}{text}{fence}");
+        let padding = if text.starts_with('`')
+            || text.ends_with('`')
+            || (text.starts_with(' ') && text.ends_with(' ') && text.chars().any(|c| c != ' '))
+        {
+            " "
+        } else {
+            ""
+        };
+        let mut piece = format!("{fence}{padding}{text}{padding}{fence}");
         if let Some(link) = link_mark(marks) {
             piece = wrap_link(&piece, &link)?;
         }
@@ -456,8 +512,7 @@ fn inline_text(document: &XiaomuDocument, node: &Node) -> Result<String> {
             .unwrap_or_else(|| "InlineAtom".to_owned());
         return Err(MarkdownCodecError::UnsupportedNodeKind { kind });
     }
-    // Heading export currently writes plain text. Never let that path strip
-    // a link or bypass the attribute-preservation checks in `wrap_link`.
+    // Keep the existing bounded heading contract: links remain unsupported.
     if inline
         .runs()
         .iter()
@@ -467,8 +522,7 @@ fn inline_text(document: &XiaomuDocument, node: &Node) -> Result<String> {
             mark: "Heading + Link".to_owned(),
         });
     }
-    // Even an all-missing text-style mark has semantic presence. Plain-text
-    // heading export must reject it rather than strip the mark or its fields.
+    // Even an all-missing text-style mark has semantic presence.
     if inline
         .runs()
         .iter()

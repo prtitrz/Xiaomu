@@ -15,36 +15,28 @@ impl DocumentView {
                 .collect()
         };
 
-        let mut pool = std::mem::take(&mut self.children);
+        let previous = std::mem::take(&mut self.children);
         let session = self.session.clone();
         let epoch = self.epoch.clone();
         let registry = self.registry.clone();
-        self.children = nodes
-            .into_iter()
-            .map(|node| {
-                if let Some(position) = pool.iter().position(|(id, _)| *id == node) {
-                    pool.remove(position)
-                } else {
-                    let view = cx.new(|cx| {
-                        ParagraphView::new_with_optional_history_clock(
-                            session.clone(),
-                            epoch.clone(),
-                            registry.clone(),
-                            node,
-                            self.history_clock.clone(),
-                            cx,
-                        )
-                        .with_read_only_input(self.read_only_input)
-                    });
-                    let feedback =
-                        cx.subscribe(&view, |this, input, event: &EditorRejection, cx| {
-                            this.forward_input_rejection(&input, event, cx);
-                        });
-                    view.update(cx, |view, _| view.rejection_feedback = Some(feedback));
-                    (node, view)
-                }
-            })
-            .collect();
+        self.children = super::child_pool::reconcile(previous, nodes, |node| {
+            let view = cx.new(|cx| {
+                ParagraphView::new_with_optional_history_clock(
+                    session.clone(),
+                    epoch.clone(),
+                    registry.clone(),
+                    node,
+                    self.history_clock.clone(),
+                    cx,
+                )
+                .with_read_only_input(self.read_only_input)
+            });
+            let feedback = cx.subscribe(&view, |this, input, event: &EditorRejection, cx| {
+                this.forward_input_rejection(&input, event, cx);
+            });
+            view.update(cx, |view, _| view.rejection_feedback = Some(feedback));
+            view
+        });
 
         let scroll_handle = self.scroll_handle.clone();
         let atom_renderers = self.atom_renderers.clone();
@@ -71,6 +63,5 @@ impl DocumentView {
                 Self::attach_text_size_style(view, *node, &text_sizes);
             });
         }
-        // Stale entries dropped with `pool`.
     }
 }

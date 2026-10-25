@@ -1,5 +1,7 @@
 # 晓木 Xiaomu 顶层规划
 
+2026-10-25 main 审计修复已接受并在维护分支实施：优先关闭 Markdown A1–A3/A5 的保真与资源限制缺陷，升级兼容安全依赖，消除 A6 子视图复用的二次搬移成本，并更正 A7 当前事实。具体测试和剩余依赖约束见[维护进度](maintenance/2026-10-main-audit.md)。P0–P5 历史 Gate 不变；P6 从“未启动”推进到**基线起步，未验收**。原生能力矩阵中的 pending 仍需目标平台实测，P7 未启动。
+
 2026-10-17 bounded keyboard extension: default-off inline-atom focus uses real
 window Tab/Shift-Tab traversal and Enter/Space activation with current modifiers,
 independently of canonical selection. Only visible measured chips participate;
@@ -162,7 +164,7 @@ composition静默与排队metadata拒绝stamp回归；不是丢失本地提交
 >
 > Updated: 2026-10-01
 >
-> 当前里程碑（2026-10-01 收口）：**P0–P5 CLOSED；P4 原生 Windows Gate 缺口已随 P5.6 补齐；P6 未启动。** 最终代码 `6d09167` 的三平台 CI 与分版本原生验收见 [P5 progress](phases/p5-table/progress.md)，二者分别记录，前者不能替代后者。
+> 历史里程碑（2026-10-01 收口）：**P0–P5 CLOSED；P4 原生 Windows Gate 缺口已随 P5.6 补齐；P6 未启动。** 最终代码 `6d09167` 的三平台 CI 与分版本原生验收见 [P5 progress](phases/p5-table/progress.md)，二者分别记录，前者不能替代后者。
 >
 > 定位：独立演进、可嵌入宿主应用的 **Rust Native Structured Rich-Text / Block Editor Engine**。首个原生前端基于 GPUI，但核心架构不绑定 GPUI。
 
@@ -1148,28 +1150,31 @@ Core 尽早加入随机 transaction sequence + inverse replay + mapping invarian
 
 <a id="delivery-boundaries"></a>
 
-### 交付边界与待排期编辑功能（2026-10-01）
+### 交付边界与待排期编辑功能（2026-10-25 核对）
 
 阶段 **CLOSED** 表示对应 contract / Gate 已闭合，不等价于完整写作产品的全部交互已交付。尤其要区分 canonical/API、frontend 接入和宿主资源管理。
 
 | 能力 | 当前已交付 | 尚未交付 / 排期 |
 | --- | --- | --- |
 | 文本、格式与结构编辑 | 原生输入/IME、基础格式快捷键、跨块选区与 history、列表、代码块、HardBreak | 完整工具栏、菜单等产品 UI 不由阶段 CLOSED 自动承诺 |
-| 图片节点与显示 | `InsertImage`、typed image attrs、atomic selection/delete/undo、注入 `AssetService` 后的图片渲染 | harness 尚未注入真实资产服务，示例图片仍为占位；宿主资产导入/存储示例待排期 |
-| 图片复制粘贴 | 已有 Image 节点通过 Xiaomu structured clipboard 保留图片语义和引用；资产仍由宿主管理 | 实验分支已接 PNG/JPEG Ctrl+V 与可选 host import；harness 持久化真实字节，原生验收另记；跨宿主 structured copy 不会自动复制资产字节 |
+| 图片节点与显示 | `InsertImage`、typed attrs、atomic selection/delete/undo、AssetService 渲染；harness 已注入 FixtureAssets，支持 PNG/JPEG sidecar 保存与解析 | 生产存储、跨宿主资产迁移与 GC 仍归宿主 |
+| 图片复制粘贴 | structured clipboard 保留语义和引用；当前主线有 PNG/JPEG Ctrl+V、可选 host import 与 harness 字节持久化；Linux/X11 PNG 有原生记录 | Windows/macOS/JPEG 原生待验收；跨宿主 copy 不自动携带资产字节 |
 | 图片文件与后续操作 | 复用 image / asset contract 的基础具备 | 文件选择、文件拖入、交互式缩放/裁剪均未交付；不与第一版截图粘贴捆绑 |
 | 链接 | canonical Link mark、structured clipboard 与 baseline Markdown 保留链接语义 | 链接添加/编辑 UI 待排期；宿主打开回调 `LinkOpenService` 已列入 P7 |
 | 表格 | P5 范围内的 cell 编辑、导航、行列操作、矩形选区与 clipboard | 长文档/复杂表格性能基线由 P6 建立，不据正确性 Gate 宣称性能已达标 |
+| Task checkbox | typed TaskList/TaskItem、SetTaskChecked、checkbox 回调和竞态回归 | 不是完整 task 产品；宿主持久化与原生验收仍须接入 |
+| 混合字号 / 首行缩进 | opt-in capability + 同源 final-candidate policy；虚拟平台几何回归 | 默认不开启；真实字体/fallback/DPI/IME 见原生矩阵 |
+| 逻辑表格 / 列宽拖动 | header/span、逻辑操作；measured resize 为 opt-in | 原生拖动/取消/多 editor 验收仍独立 |
+| framed clipboard / prepared Cut / 只读输入 | 严格 native envelope 判别；可选原子 Cut 和输入守卫 | 默认与 opt-in 契约分别保留；只读输入不替代宿主授权策略 |
 
-**当前正式顺序仍是 P5 → P6 → P7。** 新发现的外部图片粘贴缺口不算作 P4 已交付，也不自动推迟到 P7；需单独确认优先级。建议在大规模性能优化前安排一个窄的“图片导入可用闭环”切片，2026-10-03 已授权在独立实验分支先实施此切片，再评估宿主接入；不改变 P0–P5 历史 Gate 或宣称 P6 已启动。实验范围与证据见 [图片实验验收](image-import-experiment.md)。
+**当前正式顺序仍是 P5 → P6 → P7。** 图片导入切片已合入主线，不再标为仅在实验分支。历史范围与 Linux/X11 PNG 证据见[图片实验验收](image-import-experiment.md)；默认导入仍为非 CodeBlock 的 collapsed inline caret，扩展原选区准入须显式注入 host capability。所有增量能力按[原生验收矩阵](maintenance/native-acceptance.md)区分自动化、历史原生证据和 pending，不能用三平台 CI 补写实际操作结论。
 
-该切片至少需要在启动时明确并验收：
+当前优先级和后续顺序：
 
-- 平台读取截图/图片载荷，定义与 Xiaomu structured metadata / 普通文本的粘贴优先级，以及格式、尺寸与失败行为。
-- 宿主导入并保存资产，产生稳定 `AssetRef`，通过 `AssetService` 解析；文件/网络/权限策略不进入 Core。
-- 粘贴落点与选区策略明确，一次粘贴对应一个 undo/redo 步骤；异步导入期间的编辑、取消及 editor 生命周期不能导致插错位置或跨 editor 写入。
-- harness 能粘贴真实图片并显示；保存、关闭、重开后资产仍能解析；错误有反馈，既有文本/表格 clipboard 和 IME 不回归。
-- 先通过 Windows 原生截图粘贴 Gate；macOS/Linux 分别记录实际支持与验收情况，不能用三平台编译通过代替剪贴板实机验收。
+1. **P1 / P2 维护**：Markdown 保真/资源限制回归、rustls/webpki/tokio 更新、git2 测试专用通告范围守卫和事实文档，记录于[维护进度](maintenance/2026-10-main-audit.md)。git2 上游跨版本约束单独跟进，按[复查条件](dependency-advisories.md)执行。
+2. **P2 原生补验**：依矩阵验证图片、字体、首行、列宽和新增输入/clipboard 能力；在补验前保持既有默认开关与保守范围。
+3. **P6 基线**：已交付子视图复用 CPU 基线；补编辑/粘贴/撤销、真实布局绘制、RSS/history 和多 editor，再决定缓存/virtualization 顺序。
+4. **P7 稳定化**：公开 API/兼容/发布、通用 BlockRendererRegistry、LinkOpenService 和平台 screen-reader smoke，仍不计入本次修复交付。
 
 文件选择/拖入、链接编辑 UI、图片尺寸控制分别作为后续待排期项，不把裁剪、图库或图文环绕混入最小闭环。
 
@@ -1308,7 +1313,7 @@ Gate：表格中英文连续编辑 + undo/redo、所有行列位置映射、富 
 
 ### P6 — Performance / Long Document
 
-状态：**未启动**。先建立长文档、复杂表格与多 editor 的可重复 benchmark/profile 基线，测量编辑延迟、布局/绘制耗时及内存；依据瓶颈决定缓存和 virtualization 的实施顺序，不能以缓存命中率替代 selection/IME/undo 正确性。
+状态：**进行中（2026-10-25 基线起步，未验收）**。已修复子视图复用二次复杂度，加入 1k/10k 稳定/逆序 CPU benchmark 和身份/焦点回归，结果见 [P6 progress](phases/p6-performance/progress.md)。长文档、复杂表格、多 editor 的编辑延迟、真实布局/绘制与 RSS/history 基线仍待完成；依据 profile 决定缓存和 virtualization 顺序，不能以单算法耗时替代 selection/IME/undo 正确性。
 
 阶段目标：
 

@@ -22,10 +22,20 @@
 //! a [`MarkdownCodecError`], and the canonical document is never modified.
 //! Hosts that need Markdown export for extension content write an adapter or
 //! extension codec; the baseline invents no policy.
+//!
+//! Import is bounded to 1 MiB source, 20,000 nodes (including the root),
+//! 64 levels below the root, and a shared 16 Mi conservative work units.
+//! Export checks node/depth limits iteratively before recursive writing and
+//! bounds a conservative output estimate to 1 MiB. Resource refusals use
+//! [`MarkdownCodecError::ResourceLimit`]. Paragraph terminal LF is refused;
+//! supported internal LF remains representable. Heading links remain unsupported.
+//! Inline export validates exact text/marks; ambiguous delimiter combinations
+//! fail rather than silently changing canonical content.
 
 mod error;
 mod escape;
 mod inline;
+mod limits;
 mod parse;
 mod serialize;
 mod syntax;

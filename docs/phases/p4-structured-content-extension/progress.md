@@ -311,3 +311,7 @@ P4.6 遗留复核结论（随 closeout 固定）：
 - [x] final three-platform `CI Success`（本切片 PR CI run）
 
 收口结论：**P4 CLOSED**。P5.6 补验未把历史 CI 当作原生证据，而是实际复现并修复了 atom IME 与 Esc 残留问题；最终代码 `6d09167` 的 [三平台 CI](https://github.com/prtitrz/Xiaomu/actions/runs/36838449485) 和原生验收分别通过。`BlockRendererRegistry` / `LinkOpenService` 明确归属 P7，未冒充 P4 已实现能力。
+
+## 2026-10-25 后续维护引用
+
+基于 main `7015166` 的审计修复见[维护进度](../../maintenance/2026-10-main-audit.md)。Markdown 新增保真/资源限制回归、依赖维护和子视图同步优化是后续维护；P4/P5 历史 CLOSED 与 P5.6 原生范围不变。新增能力的原生 pending 项已集中到[验收矩阵](../../maintenance/native-acceptance.md)，不以自动化补写实机通过。

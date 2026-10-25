@@ -56,7 +56,7 @@ host application
 
 `xiaomu-codec-markdown` 只依赖 canonical Core model。`xiaomu-testkit` 用于测试和辅助能力，不允许成为 production dependency。
 
-当前阶段事实（2026-10-01 收口）：P0–P5 已完成；P4 inline atom / atomic block / image / baseline Markdown 的原生 Windows Gate 缺口已随 P5.6 补齐，P5 correctness、集成矩阵与 IME 阻塞已闭合。三平台 CI 与原生验收独立记录于 P5 progress；P6 未启动。Core 继续持有 canonical tree、UTF-8 `TextOffset`、mixed-inline `InlinePoint`、transaction/inverse/ChangeMap；Runtime 持有 session、结构命令、selection、clipboard 与 history；GPUI（精确 pin `gpui = "=0.2.2"`）持有 native input/focus、布局、paint、hit-test 与平台剪贴板。`InlineAtomRendererRegistry` / `InlineAtomHostCapability` 已交付，不等同于尚未实现、已归属 P7 的通用 `BlockRendererRegistry` / `LinkOpenService`。`EditorInstance` 保持 per-editor session/history/StoredMarks/listener/persistence 隔离。宿主 persistence 经 `DocumentPersistence` 进出 canonical snapshot；fixture 未支持的 node kind 继续 fail closed。各阶段已实现契约与验收范围见文末和对应 progress。
+历史阶段事实（2026-10-01 收口）：P0–P5 已完成；P4 inline atom / atomic block / image / baseline Markdown 的原生 Windows Gate 缺口已随 P5.6 补齐，P5 correctness、集成矩阵与 IME 阻塞已闭合。三平台 CI 与原生验收独立记录于 P5 progress；P6 未启动。Core 继续持有 canonical tree、UTF-8 `TextOffset`、mixed-inline `InlinePoint`、transaction/inverse/ChangeMap；Runtime 持有 session、结构命令、selection、clipboard 与 history；GPUI（精确 pin `gpui = "=0.2.2"`）持有 native input/focus、布局、paint、hit-test 与平台剪贴板。`InlineAtomRendererRegistry` / `InlineAtomHostCapability` 已交付，不等同于尚未实现、已归属 P7 的通用 `BlockRendererRegistry` / `LinkOpenService`。`EditorInstance` 保持 per-editor session/history/StoredMarks/listener/persistence 隔离。宿主 persistence 经 `DocumentPersistence` 进出 canonical snapshot；fixture 未支持的 node kind 继续 fail closed。各阶段已实现契约与验收范围见文末和对应 progress。
 
 ## Core 边界
 
@@ -130,7 +130,7 @@ XiaomuDocument
 
 `HeadingLevel` 校验 built-in heading 范围 `1..=6`。`NodeKind` 提供 built-in structural semantics，并支持 extension-defined custom key。
 
-`NodeKind::TaskList` / `TaskItem` 是独立 builtin 容器，不转换成普通列表。TaskList 只接 TaskItem；TaskItem 接普通 block（可嵌套 task/ordinary list、Code、Image、Quote、Table）。Core 允许空容器与任意合法首 block；宿主持久化的 paragraph-first/nonempty 规则归 codec / final SessionPolicy 校验。`checked` 仅存在 NodeAttrs，missing / null / false / true 原样保存，错误类型由 `InvalidTaskItemChecked` 拒绝；读取不补默认值，未知 Core attrs 仍保留。Task clipboard 条件写 v12，显式保存 open/closed，遍历包括 table-cell payload；旧非 Task wire 不变，旧版本拒绝新 kind。默认 PasteSlice 在 policy 之后、任何 fitting/state 改动之前返回 `UnsupportedEdit`，防止 task wrapper 被单段 paste 静默丢失；generic Markdown 明确拒绝 Task。此为 canonical/clipboard 基础，未包含 task 命令、checkbox UI 或原生验收。见 [ADR 0011](adr/0011-typed-task-lists.md)。
+`NodeKind::TaskList` / `TaskItem` 是独立 builtin 容器，不转换成普通列表。TaskList 只接 TaskItem；TaskItem 接普通 block（可嵌套 task/ordinary list、Code、Image、Quote、Table）。Core 允许空容器与任意合法首 block；宿主持久化的 paragraph-first/nonempty 规则归 codec / final SessionPolicy 校验。`checked` 仅存在 NodeAttrs，missing / null / false / true 原样保存，错误类型由 `InvalidTaskItemChecked` 拒绝；读取不补默认值，未知 Core attrs 仍保留。Task clipboard 条件写 v12，显式保存 open/closed，遍历包括 table-cell payload；旧非 Task wire 不变，旧版本拒绝新 kind。默认 PasteSlice 在 policy 之后、任何 fitting/state 改动之前返回 `UnsupportedEdit`，防止 task wrapper 被单段 paste 静默丢失；generic Markdown 明确拒绝 Task。在此 canonical/clipboard 基础上，Runtime 已交付 `EditIntent::SetTaskChecked`，GPUI 已有 checkbox 交互、原生回调路径和竞态自动化测试；完整 task 产品、宿主持久化及目标平台原生验收仍须独立完成。见 [ADR 0011](adr/0011-typed-task-lists.md)。
 
 `MarkSet` 使用确定性顺序，完全相同的重复 mark 自动规范化，同一 semantic kind 的冲突值被拒绝。`TextRun` 将非空 `TextBuffer` 与 normalized `MarkSet` 绑定。Run segmentation 不属于 document coordinate。
 
@@ -565,7 +565,7 @@ DocumentSelection
 
 `ClipboardSlice` 是 detached value，不携带 canonical `NodeId`。单一 inline leaf 只保留所选 inline fragment；跨多个 inline leaf 时，projection 从 canonical tree 剪出覆盖 selection 的最小 fragment tree，因此 list / quote 等 container 可以保留，同时不会携带未选择的 sibling。
 
-`plain_text` 始终存在，普通片段用 `\n` 表达 inline block boundary；表格矩形使用 TSV，cell 内 block 边界与 tab/CR/LF 扁平化为空格。Runtime metadata 使用私有 serde wire DTO，不给 Core 增加 serde 依赖；不含 Null 时，非表片段写 `xiaomu.clipboard` v4，普通表写 v5，含非空 row attrs 的表写 v6。任一 node、atom、row attrs（包括嵌套 list/object）含 Null 时写 v7，使用 `{"type":"null"}`。decode 保持 v4–v6 兼容，拒绝旧信封中的 Null 和未知 attr variant，重建临时 document 校验 fragment tree；foreign、malformed、unknown-version、旧信封带新特性或与系统文本不一致的 stale metadata 均由 frontend 回退到 plain text。
+`plain_text` 始终存在，普通片段用 `\n` 表达 inline block boundary；表格矩形使用 TSV，cell 内 block 边界与 tab/CR/LF 扁平化为空格。Runtime metadata 使用私有 serde wire DTO，不给 Core 增加 serde 依赖；不含 Null 时，非表片段写 `xiaomu.clipboard` v4，普通表写 v5，含非空 row attrs 的表写 v6。任一 node、atom、row attrs（包括嵌套 list/object）含 Null 时写 v7，使用 `{"type":"null"}`。decode 保持 v4–v6 兼容，拒绝旧信封中的 Null 和未知 attr variant，重建临时 document 校验 fragment tree；上述旧 unframed 路由的 foreign、malformed、unknown-version、旧信封带新特性或 stale metadata 可走 plain-text fallback；不能将该规则扩展到 framed v14/v15。已识别 native frame 的损坏/不支持 payload 返回 `RejectedNative`，禁止 Text/Image fallback，详见当前 clipboard transport 契约。
 
 完整 link attrs 在无法由经典 href/title 保真时按需写 clipboard v8 的 `link_attributes` variant；五字段显式 tagged missing/null/string，保留缺失、null、空串和 Unicode。普通 links 继续使用旧 variant 与 v4–v7 feature 选择；v8 可混合经典 links、node Null、table/row attrs。递归检查覆盖 container 与 table 内所有 runs，pre-v8 信封携带新 variant 拒绝；未知字段、缺少必要状态字段、重复键和错误类型同样 fail closed。历史 v1–v3 仍不支持，v4–v7 旧 Link 的 title null/missing 含义不变。
 
@@ -785,7 +785,7 @@ GPUI 已绑定 Left / Right / visual Home / End / Up / Down、Shift visual selec
 
 普通 rich-text `Enter` 继续结构 `SplitBlock`，`Shift+Enter` 插入 canonical LF HardBreak。CodeBlock 的 Enter / Shift+Enter 都插入 LF；Tab 插入四个可见空格，并绕开 list conversion / list indent，Shift-Tab 当前只保证不触发 list structural command。
 
-Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 versioned Xiaomu structured metadata：含 Null attrs 的片段使用 v7；否则普通片段使用 v4，含 table 使用 v5，含 table row attrs 使用 v6。外部应用按普通文本消费；晓木 Paste 优先验证 structured metadata，metadata 缺失、过期或非法时自动走 `PasteText` plain-text fallback。普通 rich-text plain paste 当前把 line break 折叠为空格；CodeBlock plain paste 保留多行并规范化为 LF。若剪贴板带有效 Xiaomu structured metadata 但目标是 CodeBlock，frontend 主动使用 `ClipboardSlice::plain_text` 而不重建 rich structure，使代码块保持 plain-code destination semantics。structured paste 与 plain-text paste 都是显式 history boundary；平台 adapter 只负责 transport，不进入 Core 类型系统。
+Copy / Cut 将 Runtime `ClipboardSlice::plain_text` 写入系统文本，同时在 GPUI `ClipboardItem` metadata 槽写入 versioned Xiaomu structured metadata：含 Null attrs 的片段使用 v7；否则普通片段使用 v4，含 table 使用 v5，含 table row attrs 使用 v6。外部应用按普通文本消费；晓木 Paste 优先验证 structured metadata，旧 unframed metadata 缺失、过期或非法时可走 `PasteText` fallback；framed v14/v15 已识别 native metadata 拒绝时不走文本/图片 fallback。普通 rich-text plain paste 当前把 line break 折叠为空格；CodeBlock plain paste 保留多行并规范化为 LF。若剪贴板带有效 Xiaomu structured metadata 但目标是 CodeBlock，frontend 主动使用 `ClipboardSlice::plain_text` 而不重建 rich structure，使代码块保持 plain-code destination semantics。structured paste 与 plain-text paste 都是显式 history boundary；平台 adapter 只负责 transport，不进入 Core 类型系统。
 
 ### Host hooks / reusable editor instance
 
@@ -973,13 +973,15 @@ asset→external→同 asset 或 asset A→B→A 后的旧成功/失败回调均
 
 Clipboard wire v4 携带 atomic 载荷（`ClipboardNodeContent::Atomic`、`WireContent::Atomic`、`WireKind::HorizontalRule/Image`）；collapsed atomic selection 投影为单 atomic root 的 ClipboardSlice，粘贴为聚焦块后的兄弟块；mixed inline/atomic 层级粘贴 fail closed（`SessionError::ClipboardAtomicUnsupported`）。plain-text fallback 语义化：image copy 在 plain text 中携带 ExternalUrl。
 
-**外部图片导入边界（2026-10-03 实验分支）：** 平台剪贴板现在优先有效 Xiaomu structured metadata，然后 PNG/JPEG encoded pixels，最后普通文本。图片只在非 CodeBlock 的 collapsed inline caret 导入；非空选区、atomic/cell range 和 composition 期间拒绝，保持原文档与历史。`AssetService::import_image` 为默认拒绝的可选同步能力；宿主验证和持久化后返回 `ImageAttrs(AssetRef)`，再发出单一 `InsertImage` history entry。宿主实现应限制尺寸/耗时；没有异步导入或外部文件读取。图片节点仍仅携带引用，不能假设跨宿主复制引用等于复制字节。
+**外部图片导入默认边界（2026-10-25 主线核对，始于 2026-10-03 实验）：** 平台剪贴板现在优先有效 Xiaomu structured metadata，然后 PNG/JPEG encoded pixels，最后普通文本。默认图片路径只在非 CodeBlock 的 collapsed inline caret 导入；默认非空选区、atomic/cell range 和 composition 期间拒绝。显式 `admit_image_paste = Allow` 扩展原选区准入仍须通过 InsertImage policy、final validation 与 stale stamp，见 image-paste-admission 契约。`AssetService::import_image` 为默认拒绝的可选同步能力；宿主验证和持久化后返回 `ImageAttrs(AssetRef)`，再发出单一 `InsertImage` history entry。宿主实现应限制尺寸/耗时；没有异步导入或外部文件读取。图片节点仍仅携带引用，不能假设跨宿主复制引用等于复制字节。
 
 官方 harness 使用 `<store-path>.assets/` append-only sidecar，先 decode 验证 PNG/JPEG（≤16 MiB、各维≤4096、decoder allocation≤128 MiB），再同目录临时文件完整写入/sync/rename，最后插入节点。fixture snapshot 同样使用临时文件替换；这不是生产格式、通用 GC 或跨文件事务承诺。Undo 不删资产，Redo 可继续 resolve；保存撤销后的快照不会从 sidecar 扫描复活节点；重开用新 service 从相同 sidecar 读取实际 bytes。移走资产仅产生失败占位，不修改节点。`image_block` 丢弃不同旧 source resolve 并检查返回 asset identity，避免晚到回调污染当前纹理。
 
 自动化覆盖见 `tests/image_paste.rs`、harness `assets/tests.rs` 和 `image_block/tests.rs`。真实 Linux/Windows/macOS 剪贴板与纹理显示需分别原生验收，不从自动化通过推断。详见 [图片实验验收](image-import-experiment.md)。
 
 ## P4.9 Markdown Baseline Codec 事实
+
+2026-10-25 维护修复：标题支持的 marks 保真输出，代码 span 补 padding，段尾 LF 明确拒绝；列表内部 hard break 保留。inline writer 对生成形式作精确文本/marks 校验。reader 有共享源字节/节点/深度/work budget，writer 在递归前做迭代预检，超限返回 typed ResourceLimit。详细范围见 [Markdown codec 契约](markdown-codec.md)。
 
 `xiaomu-codec-markdown` 在 P4.9 建立真实 baseline codec（此前为 bootstrap 桩），只依赖 canonical Core model。覆盖：ATX heading、paragraph、quote、tight bullet/ordered list（含嵌套）、bold/italic/inline code/strikethrough/link、fenced code block（`language` attr）、hard break（backslash 形态导出，backslash 与两空格形态导入）、horizontal rule、ExternalUrl image。
 
@@ -1095,3 +1097,7 @@ they do not claim a reproduced visible line-partition defect. The request key is
 now retained for alignment/text-size/inset opt-ins; prepaint still recomputes
 alignment against final allocated bounds. Intrinsic probes and composition remain
 uncacheable; the legacy neither-capability-nor-alignment path is unchanged.
+
+## 2026-10-25 子视图复用维护
+
+DocumentView 每次同步仍遍历全部可构建文本块；旧 children 通过 NodeId HashMap 复用，按当前文档顺序输出，预计线性时间和线性临时空间。未删除节点保留 Entity / focus handle；新节点才创建和订阅反馈，旧节点随池释放。这是局部复杂度修复，不是 virtualization。P6 已开始该 CPU 基线切片，原生布局/内存 Gate 仍未完成，见 [P6 progress](phases/p6-performance/progress.md)。GPUI 仍固定 0.2.2；传递安全依赖及未关闭通告见[依赖处置](dependency-advisories.md)。

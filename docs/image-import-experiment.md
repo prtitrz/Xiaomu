@@ -1,6 +1,8 @@
 # Image import experiment (2026-10-03)
 
-Independent branch based on `8ed83c4` (code baseline `a28003f`). No GPUI dependency or DirectIBus patch changes. This is a bounded host-contract slice, not a production persistence format or a P6 milestone.
+**Historical starting point:** independent branch based on `8ed83c4` (code baseline `a28003f`). No GPUI dependency or DirectIBus patch changes. This is a bounded host-contract slice, not a production persistence format or a P6 milestone.
+
+2026-10-25 status: this slice is present on main, and the harness injects FixtureAssets. The historical platform evidence below remains limited to Linux/X11 PNG; current opt-in selection admission is documented in [image-paste-admission](image-paste-admission.md).
 
 ## Contract
 
@@ -23,7 +25,7 @@ Independent branch based on `8ed83c4` (code baseline `a28003f`). No GPUI depende
 - Stale different-source callback and wrong returned AssetRef cannot overwrite current render source
 - Two nodes sharing one AssetRef retain their bytes when one insertion is undone, saved/reopened and redone
 
-Cache limitation: mutable/asynchronous hosts still need request-generation and same-source revision coordination; A→B→A late replies are not fully ordered by this slice. The fixture host uses immutable references and synchronous resolve.
+Historical limitation at the original experiment snapshot: A→B→A late replies were not fully ordered. Superseded on current main: ImageLoadCache / NodeImageSink use per-request Arc identity; A→B→A, deleted nodes and session/service replacement reject old callbacks, with permanent regressions. Automatic refresh of changed bytes behind the same immutable-looking reference remains a separate host contract; the fixture host uses immutable references and synchronous resolve.
 
 ## Native operator gate (pending)
 

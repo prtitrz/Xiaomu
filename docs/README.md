@@ -23,7 +23,8 @@
 | P3 Visual Lines / Cross-block / History | [design](phases/p3-cross-block-history/design.md) | [progress](phases/p3-cross-block-history/progress.md) |
 | P4 Structured Content / Extension | [overview](phases/p4-structured-content-extension/overview.md)、[inline atom](phases/p4-structured-content-extension/inline-atom.md)、[atomic media](phases/p4-structured-content-extension/atomic-media.md) | [progress](phases/p4-structured-content-extension/progress.md) |
 | P5 Table | [overview](phases/p5-table/overview.md)、[design](phases/p5-table/design.md) | [progress](phases/p5-table/progress.md) |
-| P6 Performance / P7 Stabilization | [planning](planning.md) | 尚未建立阶段执行文档；启动时再拆分 |
+| P6 Performance | [planning](planning.md#p6--performance--long-document) | [progress](phases/p6-performance/progress.md)：基线起步，未验收 |
+| P7 Stabilization | [planning](planning.md) | 未启动 |
 
 CI 与原生交互验收是两类证据，不可互相替代。P4 后补的 Windows 原生验收记录位于 [P5 progress](phases/p5-table/progress.md)，P4 文档保留引用。
 
@@ -46,3 +47,5 @@ CI 与原生交互验收是两类证据，不可互相替代。P4 后补的 Wind
 显式有限 atom-kind LF 导出：[clipboard leaf projection 与 v15 协议](clipboard-leaf-projection.md)。
 
 可选图片来源准入：[原选区、同步 import 与 stale cancellation](image-paste-admission.md)。
+
+当前维护：[2026-10 main 审计处置](maintenance/2026-10-main-audit.md)、[依赖通告](dependency-advisories.md)、[Markdown 边界](markdown-codec.md)、[增量原生验收矩阵](maintenance/native-acceptance.md)。

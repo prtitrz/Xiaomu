@@ -20,7 +20,10 @@ mod first_line_inset_tests;
 mod layout_cache_provenance_tests;
 
 mod block_tree;
+mod child_pool;
 mod child_sync;
+#[cfg(test)]
+mod child_sync_tests;
 mod read_only_input;
 pub(crate) mod reading;
 mod reading_geometry;

@@ -67,6 +67,9 @@ jobs:
       - run: cargo test --workspace --all-targets
       - name: Test lazy min-content regression explicitly
         run: cargo test --locked -p xiaomu-gpui --test taffy_min_content
+      - name: Check reviewed dependency advisory scope
+        if: matrix.os == 'ubuntu-latest'
+        run: python tools/check_dependency_advisory_scope.py
       - name: Test original decoder suite
         if: matrix.os == 'ubuntu-latest'
         run: cargo test --locked --manifest-path vendor/xim-ctext/Cargo.toml
