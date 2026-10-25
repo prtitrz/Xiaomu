@@ -113,8 +113,7 @@ profiling the remaining full-tree work. No outlier was silently removed.
 
 ## Validation and acceptance record
 
-Local validation completed on 2026-10-25; the three-platform PR CI record is
-added after the submitted revision completes. Native performance evidence here is
+Local validation and three-platform PR CI completed on 2026-10-25. Native performance evidence here is
 macOS only. The existing reviewed git2 test-dependency advisories remain tracked
 in [dependency disposition](../../dependency-advisories.md), independently of P6.
 
@@ -127,8 +126,17 @@ in [dependency disposition](../../dependency-advisories.md), independently of P6
   **8 passed**; published Taffy suite: **89 tests + 5 doctests passed**.
 - `cargo deny check bans licenses sources`: passed. Existing advisory findings
   are recorded separately and are not represented as resolved by this batch.
-- Three-platform PR CI: pending submission. Interactive Linux/Windows native
-  performance acceptance remains open regardless of automated CI status.
+- [PR #123](https://github.com/prtitrz/Xiaomu/pull/123), implementation commit
+  `e7053ffe7b46ccac3b5e13cc204df48c3ba9ccfd`:
+  [CI run 40171729276](https://github.com/prtitrz/Xiaomu/actions/runs/40171729276)
+  passed policy, Linux, macOS, Windows and the aggregate **CI Success** check.
+  Native-host compilation and runner checks passed on all three platforms
+  (the POSIX process-tree test is explicitly skipped on Windows).
+  This record is a documentation-only follow-up to that verified implementation;
+  PR status remains the source of truth for checks on the latest branch tip.
+- Interactive Linux/Windows native performance acceptance remains open regardless
+  of automated CI status. This batch is submitted for review; it does not mark
+  P6 accepted or claim that PR #123 is already merged into main.
 
 ## Remaining work, in priority order
 
