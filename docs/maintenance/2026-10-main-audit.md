@@ -41,7 +41,23 @@ python3 tools/check_dependency_advisory_scope.py
 cargo deny check advisories
 ```
 
-三平台 CI：提交后另记准确 head 和 run；当前本地证据不替代 CI 或原生验收。
+## 三平台 CI 验收
+
+[PR #122](https://github.com/prtitrz/Xiaomu/pull/122) 的生产代码与测试提交
+[`0ebb17733a1ac8a1c72f40ecdf7652890384c580`](https://github.com/prtitrz/Xiaomu/commit/0ebb17733a1ac8a1c72f40ecdf7652890384c580)
+通过 [CI 40166314837](https://github.com/prtitrz/Xiaomu/actions/runs/40166314837)：
+
+| 检查 | 结果 |
+| --- | --- |
+| Windows / macOS / Ubuntu | 全部 SUCCESS |
+| policy / CI Success | SUCCESS |
+| Ubuntu 新增 git2 生产依赖图守卫 | PASS |
+| advisory 扫描 | 仍输出 0183 / 0184 两项 git2 通告；既有非阻塞策略不变 |
+
+本段为后续文档提交，只追加验收证据；最终文档提交的重跑状态见 PR checks。
+不将 CI SUCCESS 写成 advisory 无通告，也不替代原生平台操作验收。
+原始审计的 4 个独立失败复现现已全部通过；resource_limits 的 5 个测试也在
+release profile 通过（含 8192 层子进程防崩溃），补充 debug 证据。
 
 ## 保留的后续验收
 
