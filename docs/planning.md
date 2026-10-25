@@ -1,6 +1,6 @@
 # 晓木 Xiaomu 顶层规划
 
-2026-10-25 main 审计修复已接受并在维护分支实施：优先关闭 Markdown A1–A3/A5 的保真与资源限制缺陷，升级兼容安全依赖，消除 A6 子视图复用的二次搬移成本，并更正 A7 当前事实。具体测试和剩余依赖约束见[维护进度](maintenance/2026-10-main-audit.md)。P0–P5 历史 Gate 不变；P6 从“未启动”推进到**基线起步，未验收**。原生能力矩阵中的 pending 仍需目标平台实测，P7 未启动。
+2026-10-25 审计修复已通过 PR #122 合入 main：关闭 Markdown A1–A3/A5 的保真与资源限制缺陷，升级兼容安全依赖，消除 A6 子视图复用的二次搬移成本，并更正 A7 当前事实。具体测试和剩余依赖约束见[维护进度](maintenance/2026-10-main-audit.md)。P0–P5 历史 Gate 不变；本批基于最新 main `67d1f15` 推进 P6，补齐可复现的长文档 / 复杂表格 / 多 editor 运行时、macOS 原生 CPU 与 RSS/history 基线，并修复采样发现的字体枚举、选区绘制和长 CodeBlock 临时分配热点；**P6 仍未验收**。原生能力矩阵中的 pending 仍需目标平台实测，P7 未启动。
 
 2026-10-17 bounded keyboard extension: default-off inline-atom focus uses real
 window Tab/Shift-Tab traversal and Enter/Space activation with current modifiers,
@@ -1173,7 +1173,7 @@ Core 尽早加入随机 transaction sequence + inverse replay + mapping invarian
 
 1. **P1 / P2 维护**：Markdown 保真/资源限制回归、rustls/webpki/tokio 更新、git2 测试专用通告范围守卫和事实文档，记录于[维护进度](maintenance/2026-10-main-audit.md)。git2 上游跨版本约束单独跟进，按[复查条件](dependency-advisories.md)执行。
 2. **P2 原生补验**：依矩阵验证图片、字体、首行、列宽和新增输入/clipboard 能力；在补验前保持既有默认开关与保守范围。
-3. **P6 基线**：已交付子视图复用 CPU 基线；补编辑/粘贴/撤销、真实布局绘制、RSS/history 和多 editor，再决定缓存/virtualization 顺序。
+3. **P6**：运行时与 macOS 原生 CPU/RSS/history 基线已覆盖长文档、复杂表格和多 editor；优先推进长文档窗口化及剩余整树遍历，再扩展跨块选区 / 字体样式压力场景和 Linux/Windows 原生测量。详见 [P6 progress](phases/p6-performance/progress.md)。
 4. **P7 稳定化**：公开 API/兼容/发布、通用 BlockRendererRegistry、LinkOpenService 和平台 screen-reader smoke，仍不计入本次修复交付。
 
 文件选择/拖入、链接编辑 UI、图片尺寸控制分别作为后续待排期项，不把裁剪、图库或图文环绕混入最小闭环。
@@ -1313,7 +1313,9 @@ Gate：表格中英文连续编辑 + undo/redo、所有行列位置映射、富 
 
 ### P6 — Performance / Long Document
 
-状态：**进行中（2026-10-25 基线起步，未验收）**。已修复子视图复用二次复杂度，加入 1k/10k 稳定/逆序 CPU benchmark 和身份/焦点回归，结果见 [P6 progress](phases/p6-performance/progress.md)。长文档、复杂表格、多 editor 的编辑延迟、真实布局/绘制与 RSS/history 基线仍待完成；依据 profile 决定缓存和 virtualization 顺序，不能以单算法耗时替代 selection/IME/undo 正确性。
+状态：**进行中（2026-10-25 基线扩展与热点修复，未验收）**。保留既有子视图复用 benchmark；新增七类固定 workload、独立进程重复采样、输入/粘贴/撤销/重做、复杂表格逻辑列编辑、分组与独立 history、RSS/峰值内存，以及 macOS 真实窗口的初次与稳定布局/绘制 CPU 数据。采样确认并修复无条件枚举系统字体、单段选区逐段重建整篇顺序，以及长 CodeBlock 大型排版数组的反复分配；新增确定性回归。测量协议、原始记录和剩余缺口见 [P6 progress](phases/p6-performance/progress.md)。
+
+本切片完成基线与局部修复，不关闭 P6：10k 文档及四 editor 的全量绘制仍超出交互预算；下一步按证据推进窗口化、跨块选区共享投影、剩余父节点/视图查找与布局缓存。新增缓存或窗口化须保留 selection/IME/undo、焦点、滚动/命中和 accessibility 正确性。Linux/Windows 原生性能、长时间内存稳定性及宿主事件到屏幕延迟独立验收，三平台 CI 不替代它们。
 
 阶段目标：
 

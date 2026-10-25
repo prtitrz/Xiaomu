@@ -1100,4 +1100,6 @@ uncacheable; the legacy neither-capability-nor-alignment path is unchanged.
 
 ## 2026-10-25 子视图复用维护
 
-DocumentView 每次同步仍遍历全部可构建文本块；旧 children 通过 NodeId HashMap 复用，按当前文档顺序输出，预计线性时间和线性临时空间。未删除节点保留 Entity / focus handle；新节点才创建和订阅反馈，旧节点随池释放。这是局部复杂度修复，不是 virtualization。P6 已开始该 CPU 基线切片，原生布局/内存 Gate 仍未完成，见 [P6 progress](phases/p6-performance/progress.md)。GPUI 仍固定 0.2.2；传递安全依赖及未关闭通告见[依赖处置](dependency-advisories.md)。
+DocumentView 每次同步仍遍历全部可构建文本块；旧 children 通过 NodeId HashMap 复用，按当前文档顺序输出，预计线性时间和线性临时空间。未删除节点保留 Entity / focus handle；新节点才创建和订阅反馈，旧节点随池释放。这是局部复杂度修复，不是 virtualization。P6 已扩展运行时与 macOS 原生 CPU/RSS/history 基线，整阶段 Gate 仍未完成，见 [P6 progress](phases/p6-performance/progress.md)。
+
+原生采样确认的热点已逐项处理：`FontCatalog` 现在只在解析实际字体候选时惰性枚举字体，缓存局限于一次投影，下一次投影仍能观察宿主新加载的字体。普通继承字体不会触发枚举。单段 inline 选区直接通过该块的 atom display projection 映射端点，保留 atom ordinal、反向选区和 UTF-8 语义；仅跨块/结构选区与虚拟范围输入继续构建整篇顺序。统一单 TextRun 的多行内容按 GPUI 原有 LF 边界逐行排版，预分配准确行数，避免 stock `SmallVec<WrappedLine>` 几何扩容产生的巨大临时数组；多 run 路径保持 stock 行为。只读行与装饰 carrier 用 `Rc<Vec<WrappedLine>>` 共享，行位置/对齐几何仍归各布局值所有；回归对照空行、末尾 LF、CRLF、中文/组合字符/emoji、软换行、颜色和装饰，以及共享释放与对齐隔离。没有新增跨修订缓存或改变 canonical / Runtime 契约。上述修复没有窗口化，所有可构建段落仍保留实体并参与布局；剩余规模开销须继续按 P6 数据处理。GPUI 仍固定 0.2.2；传递安全依赖及未关闭通告见[依赖处置](dependency-advisories.md)。

@@ -8,6 +8,8 @@
 //! selection; its system glyph fallback remains active (macOS/Windows consume
 //! the supplied chain). Do not promise identical fallback order across systems.
 
+use std::cell::OnceCell;
+
 use cssparser::{ParseError, Parser, ParserInput, Token};
 use gpui::{Font, FontFallbacks, TextSystem};
 
@@ -101,14 +103,14 @@ fn parse_families(value: &str) -> Option<Vec<Family>> {
 
 /// One render-pass catalog, so newly added fonts are not hidden by stale state.
 pub(crate) struct FontCatalog<'a> {
-    names: Vec<String>,
+    names: OnceCell<Vec<String>>,
     system: Option<&'a TextSystem>,
 }
 
 impl<'a> FontCatalog<'a> {
     pub(crate) fn from_system(system: &'a TextSystem) -> Self {
         Self {
-            names: system.all_font_names(),
+            names: OnceCell::new(),
             system: Some(system),
         }
     }
@@ -116,7 +118,12 @@ impl<'a> FontCatalog<'a> {
     #[cfg(test)]
     pub(crate) fn from_names(names: &[&str]) -> Self {
         Self {
-            names: names.iter().map(|name| (*name).to_owned()).collect(),
+            names: OnceCell::from(
+                names
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect::<Vec<_>>(),
+            ),
             system: None,
         }
     }
@@ -124,6 +131,13 @@ impl<'a> FontCatalog<'a> {
     fn available(&self, name: &str) -> Option<String> {
         let name = self
             .names
+            // Ordinary text inherits the host font and never needs enumeration.
+            // Keep this cache local to one projection: a later pass must see
+            // fonts added by the host, without a global invalidation contract.
+            .get_or_init(|| {
+                self.system
+                    .map_or_else(Vec::new, TextSystem::all_font_names)
+            })
             .iter()
             .find(|candidate| candidate.eq_ignore_ascii_case(name))?;
         if let Some(system) = self.system {

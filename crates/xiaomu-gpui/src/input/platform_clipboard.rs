@@ -60,9 +60,9 @@ impl<'a> PlatformClipboard<'a> {
         let text = slice.plain_text().to_owned();
         let item = match encode_metadata(slice) {
             Ok(metadata) => gpui::ClipboardItem::new_string_with_metadata(text, metadata),
-            Err(error) => {
+            Err(_error) => {
                 #[cfg(debug_assertions)]
-                eprintln!("xiaomu: structured clipboard encoding failed: {error}");
+                eprintln!("xiaomu: structured clipboard encoding failed: {_error}");
                 gpui::ClipboardItem::new_string(text)
             }
         };

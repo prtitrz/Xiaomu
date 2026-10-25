@@ -6942,6 +6942,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xiaomu-perf-harness"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "serde_json",
+ "xiaomu-core",
+ "xiaomu-gpui",
+ "xiaomu-runtime",
+]
+
+[[package]]
 name = "xiaomu-runtime"
 version = "0.1.0"
 dependencies = [

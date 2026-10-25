@@ -82,3 +82,28 @@ fn missing_invalid_and_css_wide_families_leave_the_entire_host_font_unchanged() 
         assert_eq!(fonts.apply(value, &base), base, "{value}");
     }
 }
+
+#[gpui::test]
+fn font_catalog_is_lazy_and_scoped_to_one_projection(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        let fonts = FontCatalog::from_system(cx.text_system());
+        let base = gpui::font(".SystemUIFont");
+        assert!(fonts.names.get().is_none());
+        // Invalid/empty CSS cannot require native font enumeration.
+        assert_eq!(fonts.apply("", &base), base);
+        assert_eq!(fonts.apply("inherit", &base), base);
+        assert!(fonts.names.get().is_none());
+        let _ = fonts.apply("P6 Missing Family", &base);
+        assert!(fonts.names.get().is_some());
+        let cached = fonts.names.get().unwrap() as *const Vec<String>;
+        let _ = fonts.apply("P6 Missing Family Again", &base);
+        assert_eq!(cached, fonts.names.get().unwrap() as *const Vec<String>);
+        // A newly constructed pass must not inherit a stale system catalog.
+        assert!(
+            FontCatalog::from_system(cx.text_system())
+                .names
+                .get()
+                .is_none()
+        );
+    });
+}

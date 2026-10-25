@@ -5,6 +5,7 @@
 //! offsets into visual rows and pixels.
 
 use std::ops::Range;
+use std::rc::Rc;
 
 use crate::block_alignment::BlockAlignment;
 #[cfg(test)]
@@ -34,7 +35,8 @@ type SelectionPositionIndex = std::rc::Rc<std::cell::OnceCell<Vec<Vec<(usize, Pi
 /// semantics later in P3.
 #[derive(Clone, Debug)]
 pub(crate) struct BlockTextLayout {
-    lines: Vec<WrappedLine>,
+    // Native line payloads are immutable and expensive to copy in bulk.
+    lines: Rc<Vec<WrappedLine>>,
     selection_positions: SelectionPositionIndex,
     mixed: Option<std::rc::Rc<crate::mixed_size::MixedLayout>>,
     line_height: Pixels,
@@ -47,7 +49,7 @@ pub(crate) struct BlockTextLayout {
     alignment_width: Pixels,
     first_line_inset: Pixels,
     shaping_width: Option<Pixels>,
-    paint_lines: Option<Vec<WrappedLine>>,
+    paint_lines: Option<Rc<Vec<WrappedLine>>>,
     decoration_runs: Vec<gpui::TextRun>,
     decorations: Vec<aligned_decorations::Stroke>,
 }
@@ -62,7 +64,7 @@ impl BlockTextLayout {
         }
         measured.height = measured.height.max(line_height);
         let mut layout = Self {
-            lines,
+            lines: Rc::new(lines),
             selection_positions: Default::default(),
             mixed: None,
             line_height,
@@ -152,13 +154,13 @@ impl BlockTextLayout {
         runs: Vec<gpui::TextRun>,
     ) -> Self {
         assert_eq!(carrier.len(), self.lines.len());
-        for (paint, original) in carrier.iter_mut().zip(&self.lines) {
+        for (paint, original) in carrier.iter_mut().zip(self.lines.iter()) {
             // Only decoration metadata comes from the stripped shape. Keep
             // the original glyph/cluster/wrap layout byte-for-byte identical.
             assert_eq!(paint.text, original.text);
             **paint = std::sync::Arc::clone(&**original);
         }
-        self.paint_lines = Some(carrier);
+        self.paint_lines = Some(Rc::new(carrier));
         self.decoration_runs = runs;
         self.decorations = self.decoration_strokes();
         self
@@ -185,7 +187,7 @@ impl BlockTextLayout {
         let mut logical_start = 0usize;
         let mut y = Pixels::ZERO;
 
-        for line in &self.lines {
+        for line in self.lines.iter() {
             let logical_end = logical_start + line.len();
             if index <= logical_end {
                 let local = index - logical_start;
@@ -326,7 +328,7 @@ impl BlockTextLayout {
 
         let mut logical_start = 0usize;
         let mut y = Pixels::ZERO;
-        for line in &self.lines {
+        for line in self.lines.iter() {
             let line_size = line.size(self.line_height);
             let bottom = y + line_size.height;
             if position.y <= bottom {
