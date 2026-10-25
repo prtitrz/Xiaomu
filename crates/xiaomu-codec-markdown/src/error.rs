@@ -45,10 +45,23 @@ pub enum MarkdownCodecError {
         /// Stable description of the offending node kind.
         kind: String,
     },
-    /// A node kind whose Markdown form is a single line carries a hard break.
+    /// A hard break cannot survive at this position (single-line blocks or
+    /// a terminal LF in a paragraph).
     HardBreakNotRepresentable {
         /// Stable description of the offending node kind.
         kind: String,
+    },
+    /// Inline delimiters cannot preserve the exact text and marks in this block.
+    InlineNotRepresentable {
+        /// Stable description of the offending block kind.
+        kind: String,
+    },
+    /// A fixed codec resource budget was exceeded before further processing.
+    ResourceLimit {
+        /// Budget name: source bytes, nodes, nesting, work, or output estimate.
+        resource: &'static str,
+        /// Maximum allowed units for this budget (bytes, nodes, or levels).
+        limit: usize,
     },
     /// Markdown source violates the baseline grammar.
     InvalidMarkdown {
@@ -88,6 +101,12 @@ impl fmt::Display for MarkdownCodecError {
             }
             Self::HardBreakNotRepresentable { kind } => {
                 write!(f, "hard break has no {kind} Markdown form")
+            }
+            Self::InlineNotRepresentable { kind } => {
+                write!(f, "inline content in {kind} cannot round-trip")
+            }
+            Self::ResourceLimit { resource, limit } => {
+                write!(f, "Markdown {resource} limit exceeded ({limit})")
             }
             Self::InvalidMarkdown { line, reason } => {
                 write!(f, "invalid Markdown at line {line}: {reason}")

@@ -8,3 +8,7 @@ repository.workspace = true
 
 [dependencies]
 xiaomu-core.workspace = true
+
+[[bench]]
+name = "child_reconcile"
+harness = false

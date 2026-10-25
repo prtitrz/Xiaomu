@@ -17,18 +17,22 @@ use xiaomu_core::document::{
 use crate::CODE_BLOCK_ATTR_LANGUAGE;
 use crate::error::{MarkdownCodecError, Result};
 use crate::inline::scan_inline;
+use crate::limits::{Budget, MAX_DEPTH, MAX_SOURCE_BYTES, check};
 use crate::syntax::parse_image_syntax;
 
 /// Parses baseline Markdown into a canonical document snapshot.
 pub fn from_markdown(source: &str) -> Result<XiaomuDocument> {
+    check(source.len(), "source bytes", MAX_SOURCE_BYTES)?;
     let lines = normalize_source(source);
     let mut parser = BlockParser {
         lines: &lines,
         pos: 0,
         line_base: 1,
         builder: NodeStoreBuilder::new(),
+        budget: Budget::default(),
     };
-    let children = parser.parse_blocks(0)?;
+    let children = parser.parse_blocks(0, 0)?;
+    parser.budget.node()?;
     let root = parser
         .builder
         .insert(
@@ -56,6 +60,7 @@ struct BlockParser<'a> {
     pos: usize,
     line_base: usize,
     builder: NodeStoreBuilder,
+    budget: Budget,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,19 +99,22 @@ impl<'a> BlockParser<'a> {
     }
 
     fn insert(&mut self, kind: NodeKind, attrs: NodeAttrs, content: NodeContent) -> Result<NodeId> {
+        self.budget.node()?;
         self.builder
             .insert(kind, attrs, content)
             .map_err(MarkdownCodecError::InvalidDocument)
     }
 
-    fn parse_blocks(&mut self, base: usize) -> Result<Vec<NodeId>> {
+    fn parse_blocks(&mut self, base: usize, depth: usize) -> Result<Vec<NodeId>> {
         let mut children = Vec::new();
         loop {
             self.skip_blank();
             if self.done() {
                 break;
             }
+            check(depth + 1, "nesting", MAX_DEPTH)?;
             let line: &'a String = self.peek().expect("not done");
+            self.budget.work(line.len())?;
             let (indent, text) = split_indent(line);
             if indent < base {
                 break;
@@ -131,11 +139,11 @@ impl<'a> BlockParser<'a> {
                 continue;
             }
             if text.starts_with('>') {
-                children.push(self.parse_quote(indent)?);
+                children.push(self.parse_quote(indent, depth + 1)?);
                 continue;
             }
             if let Some(marker) = list_marker(text) {
-                children.push(self.parse_list(indent, marker)?);
+                children.push(self.parse_list(indent, marker, depth + 1)?);
                 continue;
             }
             if indent >= base + 4 {
@@ -183,8 +191,8 @@ impl<'a> BlockParser<'a> {
             }
             let line: &'a String = self.peek().expect("not done");
             let (line_indent, _) = split_indent(line);
-            let strip = line_indent.min(indent);
-            let content = &line[strip..];
+            self.budget.work(line.len())?;
+            let content = strip_indent(line, line_indent.min(indent));
             if is_closing_fence(content, fence_len) {
                 self.advance();
                 break;
@@ -215,7 +223,8 @@ impl<'a> BlockParser<'a> {
         )
     }
 
-    fn parse_quote(&mut self, indent: usize) -> Result<NodeId> {
+    fn parse_quote(&mut self, indent: usize, depth: usize) -> Result<NodeId> {
+        check(depth, "nesting", MAX_DEPTH)?;
         let start_line = self.line_base + self.pos;
         let mut inner: Vec<String> = Vec::new();
         while let Some(line) = self.peek() {
@@ -227,6 +236,7 @@ impl<'a> BlockParser<'a> {
                 return Err(self.err("lazy quote continuation is not supported"));
             }
             let stripped = text[1..].strip_prefix(' ').unwrap_or(&text[1..]);
+            self.budget.work(stripped.len())?;
             inner.push(stripped.to_owned());
             self.advance();
         }
@@ -244,9 +254,11 @@ impl<'a> BlockParser<'a> {
             pos: 0,
             line_base: start_line,
             builder,
+            budget: std::mem::take(&mut self.budget),
         };
-        let children = nested.parse_blocks(0)?;
+        let children = nested.parse_blocks(0, depth)?;
         self.builder = nested.builder;
+        self.budget = nested.budget;
         self.insert(
             NodeKind::Quote,
             NodeAttrs::empty(),
@@ -254,10 +266,16 @@ impl<'a> BlockParser<'a> {
         )
     }
 
-    fn parse_list(&mut self, indent: usize, marker: ListMarker) -> Result<NodeId> {
+    fn parse_list(
+        &mut self,
+        indent: usize,
+        mut marker: ListMarker,
+        depth: usize,
+    ) -> Result<NodeId> {
+        check(depth + 1, "nesting", MAX_DEPTH)?;
         let mut items = Vec::new();
         loop {
-            items.push(self.parse_list_item(indent, marker)?);
+            items.push(self.parse_list_item(indent, marker, depth + 1)?);
             self.skip_blank();
             if self.done() {
                 break;
@@ -268,7 +286,7 @@ impl<'a> BlockParser<'a> {
                 break;
             }
             match list_marker(text) {
-                Some(next) if next.ordered == marker.ordered => continue,
+                Some(next) if next.ordered == marker.ordered => marker = next,
                 _ => break,
             }
         }
@@ -280,10 +298,17 @@ impl<'a> BlockParser<'a> {
         self.insert(kind, NodeAttrs::empty(), NodeContent::children(items))
     }
 
-    fn parse_list_item(&mut self, indent: usize, marker: ListMarker) -> Result<NodeId> {
+    fn parse_list_item(
+        &mut self,
+        indent: usize,
+        marker: ListMarker,
+        depth: usize,
+    ) -> Result<NodeId> {
         let line: &'a String = self.peek().expect("marker line");
         let (_, text) = split_indent(line);
-        let rest = text[marker.width..].to_owned();
+        check(depth + 1, "nesting", MAX_DEPTH)?;
+        self.budget.work(text.len())?;
+        let rest = text.get(marker.width..).unwrap_or("").to_owned();
         let content_indent = indent + marker.width;
         self.advance();
 
@@ -299,9 +324,9 @@ impl<'a> BlockParser<'a> {
 
         let mut lines: Vec<String> = Vec::new();
         let mut breaks: Vec<bool> = Vec::new();
-        let mut pending_hard = false;
+        let (mut pending_hard, first) = strip_hard_break(&rest);
         let mut nested: Vec<NodeId> = Vec::new();
-        lines.push(rest.trim_start().to_owned());
+        lines.push(first.trim_start().to_owned());
         while let Some(line) = self.peek() {
             if line.chars().all(char::is_whitespace) {
                 break;
@@ -311,7 +336,7 @@ impl<'a> BlockParser<'a> {
                 break;
             }
             if let Some(nested_marker) = list_marker(text) {
-                nested.push(self.parse_list(line_indent, nested_marker)?);
+                nested.push(self.parse_list(line_indent, nested_marker, depth + 1)?);
                 continue;
             }
             if !nested.is_empty()
@@ -413,7 +438,7 @@ impl<'a> BlockParser<'a> {
     }
 
     fn build_inline(&mut self, text: &str) -> Result<InlineContent> {
-        let segments = scan_inline(text).map_err(|reason| self.err(reason))?;
+        let segments = scan_inline(text, self.line_base + self.pos, &mut self.budget)?;
         if segments.is_empty() {
             return Err(self.err("inline content has no text"));
         }
@@ -544,4 +569,23 @@ fn strip_closing_sequence(text: &str) -> String {
         return trimmed.trim_end().to_owned();
     }
     text.to_owned()
+}
+
+// Indentation columns are not byte offsets: a tab occupies one UTF-8 byte.
+fn strip_indent(line: &str, columns: usize) -> &str {
+    let mut consumed = 0;
+    let mut bytes = 0;
+    for ch in line.chars() {
+        if consumed >= columns {
+            break;
+        }
+        let width = match ch {
+            ' ' => 1,
+            '\t' => 4,
+            _ => break,
+        };
+        consumed += width;
+        bytes += ch.len_utf8();
+    }
+    &line[bytes..]
 }

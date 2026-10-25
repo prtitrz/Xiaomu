@@ -27,10 +27,14 @@ python tools/check_source_size.py
 python tools/check_dependency_boundaries.py
 python tools/check_xim_decoder_source.py
 python tools/check_taffy_source.py
+python tools/check_dependency_advisory_scope.py
 cargo deny check bans licenses sources
 ```
 
-Dependency policy is checked in CI with `cargo-deny`.
+Dependency policy is checked in CI with `cargo-deny`. Known advisory scope,
+review triggers and unresolved upstream constraints are recorded in
+[`docs/dependency-advisories.md`](docs/dependency-advisories.md); a green CI summary
+does not establish a clean advisory scan.
 
 The Taffy standalone command runs only the inline tests and doctests included in
 the published 0.9.0 crate, which omits the full upstream conformance suite. Its

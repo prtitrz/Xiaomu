@@ -55,7 +55,12 @@ pub(crate) fn parse_destination(text: &str) -> Option<(String, Option<String>, u
         let start = index;
         while index < bytes.len() && bytes[index] != b')' {
             match bytes[index] {
-                b'\\' => index += 1,
+                b'\\' => {
+                    if index + 1 >= bytes.len() {
+                        return None;
+                    }
+                    index += 1;
+                }
                 b' ' | b'\t' | b'\n' => break,
                 b'(' => return None,
                 _ => {}

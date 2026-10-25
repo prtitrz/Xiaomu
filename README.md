@@ -4,7 +4,7 @@
 
 晓木是一个面向 Rust 原生应用的结构化富文本 / Block Editor engine。项目将文档语义、编辑事务、运行时编排与具体 UI 框架分层，首个原生前端基于 GPUI。
 
-> Status (2026-10-01): P0–P5 closed; P6 performance work has not started. Xiaomu remains an early-stage library, not a finished writing application. See the [documentation index](docs/README.md) and [delivery boundaries](docs/planning.md#delivery-boundaries).
+> Status (2026-10-25): P0–P5 closed; P6 has started a child-reuse baseline slice, with native performance and memory gates still pending. Xiaomu remains an early-stage library, not a finished writing application. See the [documentation index](docs/README.md) and [delivery boundaries](docs/planning.md#delivery-boundaries).
 
 ## Goals
 
@@ -80,7 +80,7 @@ docs/
 
 P0–P5 have delivered the core editing model, native input, structured content and tables within their recorded acceptance scope. The current next phase is P6: establish reproducible long-document, table and multi-editor performance baselines before choosing optimizations.
 
-The [top-level plan](docs/planning.md) is the single execution roadmap. Historical gap reviews are audit records, not a second work queue. The experimental image-import slice adds PNG/JPEG clipboard pixels through a host import service, with durable sidecar assets in the harness and Undo/Redo/save/reopen tests. Native platform acceptance remains separate; see [delivery boundaries and unscheduled editing work](docs/planning.md#delivery-boundaries).
+The [top-level plan](docs/planning.md) is the single execution roadmap. Historical gap reviews are audit records, not a second work queue. The image-import slice on main adds PNG/JPEG clipboard pixels through a host import service, with durable sidecar assets in the harness and Undo/Redo/save/reopen tests. Native platform acceptance remains separate; see [delivery boundaries and unscheduled editing work](docs/planning.md#delivery-boundaries).
 
 ## Linux embedding note
 
