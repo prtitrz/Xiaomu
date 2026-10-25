@@ -25,12 +25,14 @@ mod ime_coordinates;
 mod ime_geometry;
 mod input_handler;
 mod layout;
+mod local_selection;
 mod passive;
 #[cfg(test)]
 mod policy_input_tests;
 mod projection;
 mod reading;
 mod scroll;
+mod shaping;
 #[cfg(test)]
 mod tests;
 mod text_size;

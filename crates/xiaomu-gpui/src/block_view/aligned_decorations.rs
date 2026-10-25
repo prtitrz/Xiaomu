@@ -61,7 +61,7 @@ impl BlockTextLayout {
         let mut underlines = Vec::new();
         let mut strikes = Vec::new();
         let mut row_ix = 0;
-        for line in &self.lines {
+        for line in self.lines.iter() {
             let glyphs = line.runs().iter().enumerate().flat_map(|(run_ix, run)| {
                 run.glyphs
                     .iter()

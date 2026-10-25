@@ -5,3 +5,4 @@
 *.swp
 *.swo
 xiaomu-harness-store.txt
+/tools/__pycache__/

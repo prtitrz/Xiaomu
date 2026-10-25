@@ -100,7 +100,11 @@ fn cluster_interior_marks_do_not_create_fake_one_pixel_decoration(cx: &mut TestA
         let mut layout = unequal_rows(window);
         let mut glyph_runs = layout.lines[0].runs().to_vec();
         glyph_runs[0].glyphs.remove(1); // one ligature covers bytes 0..2
-        super::super::alignment_tests::replace_runs(&mut layout.lines[0], glyph_runs, 1);
+        super::super::alignment_tests::replace_runs(
+            &mut std::rc::Rc::make_mut(&mut layout.lines)[0],
+            glyph_runs,
+            1,
+        );
         layout.rows = layout.measure_rows();
         let mut styles = runs("a");
         let mut interior = runs("b").remove(0);
@@ -148,7 +152,11 @@ fn positioned_glyphs_inside_one_cluster_do_not_expand_or_overlap_strokes(cx: &mu
         let mut glyph_runs = layout.lines[0].runs().to_vec();
         glyph_runs[0].glyphs[1].index = 0;
         glyph_runs[0].glyphs[1].position.x = px(-2.);
-        super::super::alignment_tests::replace_runs(&mut layout.lines[0], glyph_runs, 2);
+        super::super::alignment_tests::replace_runs(
+            &mut std::rc::Rc::make_mut(&mut layout.lines)[0],
+            glyph_runs,
+            2,
+        );
         layout.rows = layout.measure_rows();
         let layout = layout
             .with_decoration_carrier(carrier(window), decorated())
@@ -185,5 +193,29 @@ fn decoration_state_resets_on_lf_and_keeps_each_nonempty_lines_marked_run(cx: &m
         assert_eq!(layout.decorations[1].width, layout.lines[1].unwrapped_layout.width);
         assert!(matches!(&layout.decorations[0].decoration, Decoration::Underline(style) if style.color == Some(gpui::red())));
         assert!(matches!(&layout.decorations[1].decoration, Decoration::Strike(style) if style.color == Some(gpui::blue())));
+    });
+}
+
+#[gpui::test]
+fn layout_clone_shares_immutable_decoration_carrier(cx: &mut TestAppContext) {
+    cx.add_empty_window().update(|window, _| {
+        let layout = unequal_rows(window).with_decoration_carrier(carrier(window), decorated());
+        let clone = layout.clone();
+        assert!(std::rc::Rc::ptr_eq(
+            layout.paint_lines.as_ref().unwrap(),
+            clone.paint_lines.as_ref().unwrap()
+        ));
+        assert_eq!(layout.decorations.len(), clone.decorations.len());
+        for (original, copied) in layout.decorations.iter().zip(&clone.decorations) {
+            assert_eq!(
+                (
+                    original.row,
+                    original.origin,
+                    original.width,
+                    &original.decoration
+                ),
+                (copied.row, copied.origin, copied.width, &copied.decoration)
+            );
+        }
     });
 }

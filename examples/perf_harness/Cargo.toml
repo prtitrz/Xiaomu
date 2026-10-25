@@ -1,0 +1,26 @@
+[package]
+name = "xiaomu-perf-harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+native = ["dep:gpui", "dep:xiaomu-gpui"]
+
+[dependencies]
+xiaomu-core.workspace = true
+xiaomu-runtime.workspace = true
+serde_json.workspace = true
+gpui = { workspace = true, optional = true }
+xiaomu-gpui = { workspace = true, optional = true }
+
+[[bin]]
+name = "xiaomu-perf-baseline"
+path = "src/main.rs"
+
+[[bin]]
+name = "xiaomu-native-perf"
+path = "src/native/main.rs"
+required-features = ["native"]

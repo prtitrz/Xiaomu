@@ -63,8 +63,12 @@ jobs:
       # including the platform-scoped native-unmark behavior.
       - name: Clippy
         if: matrix.os == 'ubuntu-latest'
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --features xiaomu-perf-harness/native -- -D warnings
       - run: cargo test --workspace --all-targets
+      - name: Compile native performance host
+        run: cargo check --locked -p xiaomu-perf-harness --features native --all-targets
+      - name: Test performance measurement runner
+        run: python -m unittest discover -s tools -p test_p6_baselines.py
       - name: Test lazy min-content regression explicitly
         run: cargo test --locked -p xiaomu-gpui --test taffy_min_content
       - name: Check reviewed dependency advisory scope

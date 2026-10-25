@@ -179,16 +179,14 @@ impl Element for ParagraphElement {
                         BlockTextLayout::unavailable(line_height)
                     }
                     Ok(None) => {
-                        match window.text_system().shape_text(
+                        match super::shaping::shape_text(
+                            window,
                             text.clone(),
                             font_size,
                             &runs,
                             wrap_width,
-                            None,
                         ) {
-                            Ok(lines) => {
-                                BlockTextLayout::new(lines.into_iter().collect(), line_height)
-                            }
+                            Ok(lines) => BlockTextLayout::new(lines, line_height),
                             Err(error) => {
                                 eprintln!("xiaomu: wrapped text layout failed: {error}");
                                 BlockTextLayout::new(Vec::new(), line_height)
@@ -206,18 +204,15 @@ impl Element for ParagraphElement {
                         run.underline = None;
                         run.strikethrough = None;
                     }
-                    match window.text_system().shape_text(
+                    match super::shaping::shape_text(
+                        window,
                         text.clone(),
                         layout.sized_font_size().unwrap_or(font_size),
                         &plain,
                         wrap_width,
-                        None,
                     ) {
                         Ok(carrier) => {
-                            layout = layout.with_decoration_carrier(
-                                carrier.into_iter().collect(),
-                                runs.clone(),
-                            )
+                            layout = layout.with_decoration_carrier(carrier, runs.clone())
                         }
                         Err(error) => {
                             eprintln!("xiaomu: aligned decoration layout failed: {error}");
@@ -283,14 +278,13 @@ impl Element for ParagraphElement {
             SelectionProjection::None
         } else {
             use crate::document_view::navigation;
-            let order: Vec<_> = {
+            view.projected_selection_with_order(|| {
                 let session = view.session().borrow();
                 navigation::text_blocks(session.document())
                     .into_iter()
                     .map(|block| block.node)
                     .collect()
-            };
-            view.projected_display_selection(&order)
+            })
         };
 
         let focused = view.focus_handle.is_focused(window);

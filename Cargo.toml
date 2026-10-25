@@ -8,6 +8,7 @@ members = [
   "crates/xiaomu-codec-markdown",
   "crates/xiaomu-testkit",
   "examples/editor_harness",
+  "examples/perf_harness",
 ]
 
 [workspace.package]

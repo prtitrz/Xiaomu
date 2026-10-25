@@ -29,7 +29,7 @@ fn shape(window: &gpui::Window, text: &str, width: f32) -> BlockTextLayout {
 }
 
 pub(super) fn unequal_rows(window: &gpui::Window) -> BlockTextLayout {
-    let mut lines = shape(window, "abcd", 100.0).lines;
+    let mut lines = shape(window, "abcd", 100.0).lines.as_ref().clone();
     let line = &mut lines[0];
     let mut glyph_runs = line.runs().to_vec();
     for (glyph, x) in glyph_runs
@@ -198,7 +198,7 @@ fn nonzero_first_glyph_origin_and_exact_lf_top_use_the_painted_row(cx: &mut Test
         let mut original = unequal_rows(window);
         let mut glyph_runs = original.lines[0].runs().to_vec();
         glyph_runs[0].glyphs[0].position.x = px(1.);
-        replace_runs(&mut original.lines[0], glyph_runs, 2);
+        replace_runs(&mut Rc::make_mut(&mut original.lines)[0], glyph_runs, 2);
         original.rows = original.measure_rows();
         assert_eq!(
             original.position_for_index(0).unwrap().x,
@@ -270,5 +270,25 @@ fn actual_box_width_repositions_cached_rows_including_fractional_and_overwide_ro
                 .x,
             px(40.)
         );
+    });
+}
+
+#[gpui::test]
+fn layout_clones_share_multiline_payload_and_release_it_without_sharing_alignment(
+    cx: &mut TestAppContext,
+) {
+    cx.add_empty_window().update(|window, _| {
+        let original = shape(window, &"中文 e\u{301} 🌲\n".repeat(128), 160.0);
+        let old_position = original.position_for_index(0);
+        let shared = Rc::downgrade(&original.lines);
+        let aligned = original.clone().aligned(BlockAlignment::Right, px(320.0));
+        assert!(Rc::ptr_eq(&original.lines, &aligned.lines));
+        assert_eq!(original.position_for_index(0), old_position);
+        assert_ne!(aligned.position_for_index(0), old_position);
+        assert_eq!(original.rows.len(), aligned.rows.len());
+        drop(original);
+        assert!(shared.upgrade().is_some());
+        drop(aligned);
+        assert!(shared.upgrade().is_none());
     });
 }
